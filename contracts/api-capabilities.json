@@ -1,0 +1,16 @@
+{
+  "mode": "mock",
+  "capabilities": {
+    "catalog": "mock",
+    "search": "mock",
+    "playback": "mock",
+    "account_login": "not_authorized",
+    "comments_read": "mock",
+    "comments_write": "mock",
+    "danmaku_read": "mock",
+    "danmaku_write": "mock",
+    "favorites_sync": "not_authorized",
+    "history_sync": "not_authorized"
+  },
+  "message": "仅 UI 及 Mock 模式；红果官方账号/API 未获授权、未接入。"
+}
