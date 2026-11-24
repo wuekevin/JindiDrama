@@ -37,10 +37,17 @@ jobs:
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
       - name: install NSIS (windows)
         if: runner.os == 'Windows'
-        run: choco install nsis -y --no-progress
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
       - name: build (windows, NSIS installer)
         if: runner.os == 'Windows'
-        run: wails build -clean -nsis -skipbindings -ldflags "$env:LDFLAGS"
+        shell: pwsh
+        run: |
+          Get-Command makensis
+          wails build -clean -nsis -skipbindings -ldflags "$env:LDFLAGS"
+          if (-not (Get-ChildItem build/bin/*installer*.exe)) { Write-Error "NSIS 安装包未生成"; exit 1 }
       - name: build (macos)
         if: runner.os == 'macOS'
         run: |
