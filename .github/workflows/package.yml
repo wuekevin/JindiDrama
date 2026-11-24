@@ -82,7 +82,7 @@ jobs:
           $st = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
           Get-ChildItem build/bin/*.exe | ForEach-Object { & $st sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName; if ($LASTEXITCODE -ne 0) { exit 1 } }
           Remove-Item cert.pfx
-      - name: verify installer (windows: silent install, check paths, uninstall)
+      - name: verify installer (windows - silent install, check paths, uninstall)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
