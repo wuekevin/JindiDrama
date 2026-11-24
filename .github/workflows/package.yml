@@ -82,6 +82,19 @@ jobs:
           $st = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
           Get-ChildItem build/bin/*.exe | ForEach-Object { & $st sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName; if ($LASTEXITCODE -ne 0) { exit 1 } }
           Remove-Item cert.pfx
+      - name: verify installer (windows: silent install, check paths, uninstall)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $inst = (Get-ChildItem build/bin/*installer*.exe | Select-Object -First 1).FullName
+          Start-Process -FilePath $inst -ArgumentList "/S" -Wait
+          $exe = "C:\Program Files\JindiDrama\JindiDrama.exe"
+          if (-not (Test-Path $exe)) { Get-ChildItem "C:\Program Files" | Select-Object Name; Write-Error "安装目录不符：$exe 不存在"; exit 1 }
+          if (Test-Path "C:\Program Files\JindiDrama\JindiDrama\JindiDrama.exe") { Write-Error "安装目录多了一层 JindiDrama"; exit 1 }
+          $desk = @("C:\Users\Public\Desktop", [Environment]::GetFolderPath("Desktop")) | ForEach-Object { Join-Path $_ "金帝短剧.lnk" }
+          if (-not ($desk | Where-Object { Test-Path $_ })) { Get-ChildItem "C:\Users\Public\Desktop" | Select-Object Name; Write-Error "桌面快捷方式「金帝短剧」不存在"; exit 1 }
+          Write-Host "安装目录与中文桌面快捷方式验证通过"
+          Start-Process -FilePath "C:\Program Files\JindiDrama\uninstall.exe" -ArgumentList "/S" -Wait
       - name: list output
         shell: bash
         run: ls -la build/bin
