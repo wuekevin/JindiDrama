@@ -95,6 +95,8 @@ jobs:
           if (-not ($desk | Where-Object { Test-Path $_ })) { Get-ChildItem "C:\Users\Public\Desktop" | Select-Object Name; Write-Error "桌面快捷方式「金帝短剧」不存在"; exit 1 }
           Write-Host "安装目录与中文桌面快捷方式验证通过"
           Start-Process -FilePath "C:\Program Files\JindiDrama\uninstall.exe" -ArgumentList "/S" -Wait
+      - name: generate SHA-256 checksums
+        run: node scripts/package-checksums.mjs build/bin
       - name: list output
         shell: bash
         run: ls -la build/bin
@@ -104,3 +106,4 @@ jobs:
           path: |
             build/bin/*.exe
             build/bin/*.zip
+            build/bin/SHA256SUMS.txt

@@ -65,3 +65,10 @@
 - Verified（桌面 GUI + Go 单测）：开机启动——Windows 写 `HKCU\...\Run`（仅命令构造单测，**未在 Windows 实机验证**），macOS 写 LaunchAgent（GUI 实测：开→文件创建、重启后开关读真实状态、关→文件删除）。
 - 变更：删除没有对应实现的「最小化时：最小化到托盘」；「关闭窗口时」改为「最小化到任务栏 / 退出程序」（默认退出程序，旧值“最小化到托盘”自动迁移），关闭按钮按该设置执行。托盘本身仍未实现。
 - 签名/公证：上线时配置证书后启用（`package.yml` 步骤已就绪，缺证书时自动跳过）。
+
+## Codex 接续与 E13-S01 打包校验（2026-11-25）
+
+- Verified（本机）：完成项目级 BMad Core Tools / Method 初始化，`bmad status` 检查通过，两个模块均为 `6.13.0-next`。
+- Verified（本机）：`go vet ./...`、`go test ./...`、前端类型检查与构建通过，Vitest 48 项和 Playwright 136 项全部通过。
+- E13-S01 校验和子项 Verified（本机夹具）：Windows EXE 与 macOS ZIP 的模拟文件通过 `shasum -a 256 -c SHA256SUMS.txt`，重复生成一致，空目录报错，修改文件后校验能检出。确认工作流在打包和平台检查之后生成清单，并将清单加入上传路径。
+- Written，未运行：包含上述 SHA-256 清单的双平台 GitHub Actions 打包流程。Windows 实机、签名与公证仍待验证。实施与评审记录见 `_bmad-output/plan-e13-s01-package-checksums.md`。
