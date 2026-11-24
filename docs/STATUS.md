@@ -40,3 +40,8 @@
 - Blocked：签名/公证需要 Apple Developer 账号与 Windows 代码签名证书。
 - Not started：系统托盘（Wails v2 无内置支持，需引入第三方托盘库并与 Wails 事件循环共存，风险高）；自动静默更新（签名前不做，只引导用户到 Release 页下载）。
 - Blocked：桌面 GUI 持久化冒烟——AppleScript 无辅助功能权限，无法自动点击；需用户授权或手动验证。
+
+## 桌面 GUI 持久化冒烟（2026-11-24，macOS arm64）
+- Verified：在运行的 `.app` 中点击收藏 → `favorites` 表写入 1 行；退出重开后「我的收藏」页显示该剧（数据来自 SQLite）；点「取消收藏」后表回到 0 行。
+- 方法：Swift/Quartz 取窗口位置并发送鼠标事件（AppleScript/System Events 会超时，原因未查明）。
+- 未验证：历史记录、设置项的 GUI 重启保留；Windows 实机。
