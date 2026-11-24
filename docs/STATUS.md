@@ -33,3 +33,10 @@
 - Verified：windows-latest 与 macos-latest 均通过 typecheck、Vitest、build、Playwright e2e、go vet/test、wails build（产物存在）。
 - 过程中修了两处：workflow YAML 语法错误；CI 的 wails CLI 由 2.10.2 升至 2.17.1（Info.plist 模板需要）。
 - 仍未验证：Windows 桌面窗口实机运行、签名/公证、托盘/通知/自动更新。
+
+## E11-S04 后续（2026-11-24）
+- Verified（单测 + CI）：检查更新（`internal/update`，GitHub Releases，semver 比较、404=暂无发布、坏响应/网络错误、链接白名单）；设置页接入真实检查（浏览器预览如实提示不支持）；系统通知（beeep）仅在发现新版本时触发；版本号经 ldflags 注入。仓库尚无 Release，因此「发现新版本」路径只有单测，没有真实端到端。
+- Written, 未运行：`package.yml` 的 macOS 签名/公证与 Windows signtool 步骤——仅在配置了对应 secrets 时执行，目前没有证书，均被跳过；产物仍为未签名。Windows 签名只签安装器 exe，不含安装器内部的主程序 exe。
+- Blocked：签名/公证需要 Apple Developer 账号与 Windows 代码签名证书。
+- Not started：系统托盘（Wails v2 无内置支持，需引入第三方托盘库并与 Wails 事件循环共存，风险高）；自动静默更新（签名前不做，只引导用户到 Release 页下载）。
+- Blocked：桌面 GUI 持久化冒烟——AppleScript 无辅助功能权限，无法自动点击；需用户授权或手动验证。
