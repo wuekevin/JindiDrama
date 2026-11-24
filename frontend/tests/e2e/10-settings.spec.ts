@@ -19,7 +19,7 @@ test.describe('10 应用设置', () => {
     await page.reload(); await expect(page.getByTestId('key-danmaku')).toHaveText('B'); await page.getByTestId('reset-keys').click(); await expect(page.getByTestId('key-danmaku')).toHaveText('D')
   })
   test('Esc cancels key recording', async ({ page }) => { await page.getByTestId('key-danmaku').click(); await expect(page.getByTestId('key-danmaku')).toContainText('按下'); await page.keyboard.press('Escape'); await expect(page.getByTestId('key-danmaku')).toHaveText('D') })
-  test('check update shows latest and updates time', async ({ page }) => { await page.getByTestId('check-update').click(); await expect(page.getByTestId('check-update')).toContainText('检查中'); await expect(page.getByTestId('toast')).toContainText('最新'); await expect(page.getByTestId('version')).toContainText('v0.1.0') })
+  test('check update in browser preview reports unsupported (no fake result)', async ({ page }) => { await page.getByTestId('check-update').click(); await expect(page.getByTestId('toast')).toContainText('检查更新'); await expect(page.getByTestId('version')).toContainText('v0.1.0') })
   test('cache limit selectable, persists; diagnostics copy handled', async ({ page }) => {
     await page.getByTestId('cache-limit').selectOption('10'); await expect(page.getByTestId('toast').last()).toContainText('10 GB'); await page.reload(); await expect(page.getByTestId('cache-limit')).toHaveValue('10')
     await page.getByTestId('copy-diag').click(); await expect(page.getByTestId('toast').last()).toContainText(/诊断信息已复制|无法写入/)

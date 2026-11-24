@@ -1,6 +1,11 @@
 name: package
 # 手动触发：生成未签名安装包，仅作为 artifact 上传（不发布 Release）。
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（如 v0.1.0）
+        default: v0.1.0
 jobs:
   package:
     strategy:
@@ -8,6 +13,17 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      # 签名密钥缺省为空：为空时对应签名步骤自动跳过，产物保持未签名。
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+      MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+      MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+      WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      LDFLAGS: -X jindi-drama/internal/app.Version=${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -24,12 +40,41 @@ jobs:
         run: choco install nsis -y --no-progress
       - name: build (windows, NSIS installer)
         if: runner.os == 'Windows'
-        run: wails build -clean -nsis -skipbindings
+        run: wails build -clean -nsis -skipbindings -ldflags "$env:LDFLAGS"
       - name: build (macos)
         if: runner.os == 'macOS'
         run: |
-          wails build -clean -platform darwin/universal -skipbindings
-          cd build/bin && ditto -c -k --keepParent JindiDrama.app JindiDrama-macos-universal-unsigned.zip
+          wails build -clean -platform darwin/universal -skipbindings -ldflags "$LDFLAGS"
+      - name: sign + notarize (macos, only when secrets present)
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != '' && env.MACOS_SIGN_IDENTITY != ''
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci ci.keychain
+          security default-keychain -s ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security import cert.p12 -k ci.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain
+          codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" build/bin/JindiDrama.app
+          codesign --verify --deep --strict build/bin/JindiDrama.app
+          rm -f cert.p12
+      - name: notarize (macos, only when Apple credentials present)
+        if: runner.os == 'macOS' && env.MACOS_CERT_P12 != '' && env.APPLE_ID != '' && env.APPLE_APP_PASSWORD != ''
+        run: |
+          ditto -c -k --keepParent build/bin/JindiDrama.app notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple build/bin/JindiDrama.app
+          rm -f notarize.zip
+      - name: zip (macos)
+        if: runner.os == 'macOS'
+        run: cd build/bin && ditto -c -k --keepParent JindiDrama.app JindiDrama-macos-universal.zip
+      - name: sign (windows, only when certificate present)
+        if: runner.os == 'Windows' && env.WINDOWS_CERT_PFX != ''
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          $st = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          Get-ChildItem build/bin/*.exe | ForEach-Object { & $st sign /f cert.pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $_.FullName; if ($LASTEXITCODE -ne 0) { exit 1 } }
+          Remove-Item cert.pfx
       - name: list output
         shell: bash
         run: ls -la build/bin

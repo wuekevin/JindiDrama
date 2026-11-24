@@ -4,7 +4,7 @@ import { Settings, CirclePlay, MessageSquareText, Download, Keyboard, Palette, I
 import { useAppSettings, SHORTCUT_LABELS, normalizeKey, DEFAULT_SHORTCUTS } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
 import { useToastStore } from '@/stores/toast'
-import { cacheStats, cacheClear, cacheSetLimit, diagnostics, hasBridge } from '@/bindings'
+import { cacheStats, cacheClear, cacheSetLimit, diagnostics, hasBridge, checkUpdate, openReleasePage, appVersion, type UpdateResult } from '@/bindings'
 import { Modal } from '@/components/ui'
 import BrandLogo from '@/components/BrandLogo.vue'
 
@@ -22,7 +22,19 @@ const pickDir = () => { const dirs = ['JindiDrama/Cache/Downloads', 'D:/JindiDra
 const rec = ref(''); function startRec(action: string) { rec.value = action }
 function onKey(e: KeyboardEvent) { if (!rec.value) return; e.preventDefault(); if (e.key === 'Escape') { rec.value = ''; return } const c = normalizeKey(e); if (!c) return; const conflict = a.rebind(rec.value, c); if (conflict) toast.push(`与“${conflict}”冲突`, 'error'); else toast.push('快捷键已更新', 'success'); rec.value = '' }
 const checking = ref(false); const lastCheck = ref(new Date())
-async function check() { checking.value = true; await new Promise((r) => setTimeout(r, 700)); checking.value = false; lastCheck.value = new Date(); toast.push('当前已是最新版本', 'success') }
+const version = ref('v0.1.0'); appVersion().then((v) => { version.value = v }).catch(() => {})
+const upd = ref<UpdateResult | null>(null)
+async function check() {
+  checking.value = true
+  try {
+    const r = await checkUpdate()
+    lastCheck.value = new Date()
+    if (r === null) toast.push('浏览器预览模式不支持检查更新，请在桌面端使用')
+    else if (r.hasUpdate) { upd.value = r; toast.push(`发现新版本 ${r.latest}`, 'success') }
+    else if (r.noRelease) toast.push('暂无已发布版本，当前已是最新', 'success')
+    else toast.push('当前已是最新版本', 'success')
+  } catch (e) { toast.push(e instanceof Error ? e.message : '检查更新失败', 'error') } finally { checking.value = false }
+}
 const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 const QUALS = ['标清 480P', '高清 720P', '高清 1080P', '蓝光 4K']
 onMounted(() => { a.applyTheme(); refreshCache() })
@@ -64,9 +76,10 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
           <label class="r">界面缩放（DPI）<input v-model.number="st.dpi" class="rg" type="range" min="80" max="150" step="10" aria-label="界面缩放" data-testid="dpi" :style="{ '--p': pct(st.dpi, 80, 150) }" /><em>{{ st.dpi }}%</em></label>
           <label class="r">字体大小<span class="sel wide"><select v-model="st.fontSize" data-testid="font-size"><option>小</option><option>标准</option><option>大</option></select><ChevronDown :size="14" /></span></label></section>
         <section id="sec-about" class="pn about"><h2><Info :size="22" />关于与更新</h2>
-          <div class="ab"><div class="lg"><BrandLogo /></div><div class="ver"><small>当前版本</small><b data-testid="version">v0.1.0<em>演示版</em></b><small data-testid="last-check">上次检查：今天 {{ hhmm(lastCheck) }}</small></div>
+          <div class="ab"><div class="lg"><BrandLogo /></div><div class="ver"><small>当前版本</small><b data-testid="version">{{ version }}<em>演示版</em></b><small data-testid="last-check">上次检查：今天 {{ hhmm(lastCheck) }}</small></div>
+            <button v-if="upd" class="chk" data-testid="open-release" @click="openReleasePage(upd.url)"><FileText :size="18" />前往下载 {{ upd.latest }}</button>
             <button class="chk" :disabled="checking" data-testid="check-update" @click="check"><RefreshCw :size="18" :class="{ spin: checking }" />{{ checking ? '检查中…' : '检查更新' }}</button>
-            <div class="links"><button @click="toast.push('版本更新日志将在发布流程接入后提供')"><FileText :size="16" />版本更新日志<ChevronRight :size="14" /></button><button data-testid="copy-diag" @click="copyDiag"><FileText :size="16" />复制诊断信息<ChevronRight :size="14" /></button><button @click="toast.push('帮助与反馈入口待配置')"><CircleHelp :size="16" />帮助与反馈<ChevronRight :size="14" /></button></div></div></section>
+            <div class="links"><button @click="upd ? toast.push(upd.notes.slice(0, 120) || '该版本未提供更新说明') : toast.push('暂无新版本更新日志')"><FileText :size="16" />版本更新日志<ChevronRight :size="14" /></button><button data-testid="copy-diag" @click="copyDiag"><FileText :size="16" />复制诊断信息<ChevronRight :size="14" /></button><button @click="toast.push('帮助与反馈入口待配置')"><CircleHelp :size="16" />帮助与反馈<ChevronRight :size="14" /></button></div></div></section>
       </div>
     </div>
     <Modal :open="confirmClear" title="清理缓存" confirm-text="确认清理" @cancel="confirmClear = false" @confirm="clearCache">将删除全部已缓存的下载文件，不影响收藏和观看历史。</Modal>
