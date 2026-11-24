@@ -12,7 +12,9 @@ cmd/desktop/main.go
 internal/app/
 internal/provider/         # Catalog, Search, Playback, Account, Interaction, History 接口
 internal/provider/mock/
-internal/provider/authorized/  # 没有合作凭据和官方规范前只有空适配器/错误门控
+internal/provider/authorized/  # HongguoAppProvider：没有合作凭据和官方规范前只有空适配器/错误门控
+internal/provider/hongguoweb/ # HongguoWebProvider：同上，禁用桩，不发网络请求
+internal/provider/registry/   # Provider 适配层统一入口：mock / licensed / hongguo-web / hongguo-app
 internal/auth/             # AccountSession, AuthState
 internal/catalog/
 internal/playback/         # MediaResolver; playback state; transport; diagnostics

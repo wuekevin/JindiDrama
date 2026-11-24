@@ -6,6 +6,7 @@ interface GoApp {
   RecordHistory(h: unknown): Promise<void>; RemoveHistory(ids: string[]): Promise<void>; ClearHistory(): Promise<void>
   SearchHistory(): Promise<string[]>; SaveSearchHistory(q: string[]): Promise<void>
   CacheStats(): Promise<{ bytes: number; files: number; max: number }>; CacheClear(): Promise<void>; CacheSetLimitMB(mb: number): Promise<void>
+  AutostartEnabled(): Promise<boolean>; SetAutostart(on: boolean): Promise<void>
   AppVersion(): Promise<string>; CheckUpdate(): Promise<UpdateResult>; OpenReleasePage(url: string): Promise<void>
   LogEvent(level: string, component: string, msg: string): Promise<void>; DiagnosticsTail(n: number): Promise<string[]>
   GetSetting(k: string): Promise<string>; SaveSetting(k: string, v: string): Promise<void>; BackupNow(): Promise<string>
@@ -69,3 +70,7 @@ export const appVersion = () => api()?.AppVersion() ?? Promise.resolve('v0.1.0')
 /** 检查更新：仅桌面端可用（浏览器预览返回 null）。 */
 export const checkUpdate = (): Promise<UpdateResult | null> => api()?.CheckUpdate() ?? Promise.resolve(null)
 export const openReleasePage = (url: string) => api()?.OpenReleasePage(url) ?? Promise.resolve()
+
+/** 开机启动：仅桌面端有效；浏览器预览返回 null / 不报错。 */
+export const autostartEnabled = (): Promise<boolean | null> => api()?.AutostartEnabled() ?? Promise.resolve(null)
+export const setAutostart = (on: boolean): Promise<void> => api()?.SetAutostart(on) ?? Promise.resolve()

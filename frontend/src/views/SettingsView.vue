@@ -4,7 +4,7 @@ import { Settings, CirclePlay, MessageSquareText, Download, Keyboard, Palette, I
 import { useAppSettings, SHORTCUT_LABELS, normalizeKey, DEFAULT_SHORTCUTS } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
 import { useToastStore } from '@/stores/toast'
-import { cacheStats, cacheClear, cacheSetLimit, diagnostics, hasBridge, checkUpdate, openReleasePage, appVersion, type UpdateResult } from '@/bindings'
+import { cacheStats, cacheClear, cacheSetLimit, diagnostics, hasBridge, autostartEnabled, setAutostart, checkUpdate, openReleasePage, appVersion, type UpdateResult } from '@/bindings'
 import { Modal } from '@/components/ui'
 import BrandLogo from '@/components/BrandLogo.vue'
 
@@ -22,6 +22,11 @@ const pickDir = () => { const dirs = ['JindiDrama/Cache/Downloads', 'D:/JindiDra
 const rec = ref(''); function startRec(action: string) { rec.value = action }
 function onKey(e: KeyboardEvent) { if (!rec.value) return; e.preventDefault(); if (e.key === 'Escape') { rec.value = ''; return } const c = normalizeKey(e); if (!c) return; const conflict = a.rebind(rec.value, c); if (conflict) toast.push(`与“${conflict}”冲突`, 'error'); else toast.push('快捷键已更新', 'success'); rec.value = '' }
 const checking = ref(false); const lastCheck = ref(new Date())
+async function toggleAutostart() {
+  const want = !st.autostart
+  try { await setAutostart(want); st.autostart = want } catch (e) { toast.push(e instanceof Error ? e.message : '设置开机启动失败', 'error') }
+}
+autostartEnabled().then((v) => { if (v !== null) st.autostart = v }).catch(() => {})
 const version = ref('v0.1.0'); appVersion().then((v) => { version.value = v }).catch(() => {})
 const upd = ref<UpdateResult | null>(null)
 async function check() {
@@ -48,10 +53,9 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
       <nav class="nav" aria-label="设置分类"><button v-for="s in sections" :key="s.k" :class="{ on: active === s.k }" :data-testid="`snav-${s.k}`" @click="go(s.k)"><component :is="s.i" :size="20" />{{ s.l }}<ChevronRight v-if="active === s.k" :size="16" class="ch" /></button></nav>
       <div class="panels">
         <section id="sec-general" class="pn"><h2><Settings :size="22" />通用</h2>
-          <div class="r"><div>开机启动<small>随系统启动金帝短剧</small></div><button class="tg" :class="{ on: st.autostart }" role="switch" :aria-checked="st.autostart" aria-label="开机启动" data-testid="autostart" @click="st.autostart = !st.autostart"><i /></button></div>
+          <div class="r"><div>开机启动<small>随系统启动金帝短剧</small></div><button class="tg" :class="{ on: st.autostart }" role="switch" :aria-checked="st.autostart" aria-label="开机启动" data-testid="autostart" @click="toggleAutostart"><i /></button></div>
           <label class="r">启动时进入<span class="sel"><select v-model="st.startPage" data-testid="start-page"><option>上次观看</option><option>推荐首页</option><option>我的收藏</option></select><ChevronDown :size="14" /></span></label>
-          <label class="r">最小化时<span class="sel"><select v-model="st.minimize"><option>显示在任务栏</option><option>最小化到托盘</option></select><ChevronDown :size="14" /></span></label>
-          <label class="r">关闭窗口时<span class="sel"><select v-model="st.closeAction" data-testid="close-action"><option>最小化到托盘</option><option>退出程序</option></select><ChevronDown :size="14" /></span></label></section>
+          <label class="r">关闭窗口时<span class="sel"><select v-model="st.closeAction" data-testid="close-action"><option>最小化到任务栏</option><option>退出程序</option></select><ChevronDown :size="14" /></span></label></section>
         <section id="sec-playback" class="pn"><h2><CirclePlay :size="22" />播放</h2>
           <label class="r">默认播放清晰度<span class="sel"><select v-model="st.defaultQuality" data-testid="default-quality"><option v-for="q in QUALS" :key="q">{{ q }}</option></select><ChevronDown :size="14" /></span></label>
           <label class="r">播放源<span class="sel"><select v-model="st.mediaSource" data-testid="media-source"><option value="demo">演示媒体（自制片段）</option><option value="sim">模拟画面</option></select><ChevronDown :size="14" /></span></label>

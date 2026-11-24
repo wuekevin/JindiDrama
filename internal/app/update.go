@@ -8,6 +8,7 @@ import (
 	"github.com/gen2brain/beeep"
 	wr "github.com/wailsapp/wails/v2/pkg/runtime"
 
+	"jindi-drama/internal/autostart"
 	"jindi-drama/internal/update"
 )
 
@@ -44,4 +45,21 @@ func (a *App) OpenReleasePage(url string) error {
 	}
 	wr.BrowserOpenURL(a.ctx, url)
 	return nil
+}
+
+// AutostartEnabled / SetAutostart：开机启动（Windows 注册表 Run、macOS LaunchAgent）。
+func (a *App) AutostartEnabled() (bool, error) {
+	m, err := autostart.New()
+	if err != nil {
+		return false, err
+	}
+	return m.Enabled()
+}
+
+func (a *App) SetAutostart(on bool) error {
+	m, err := autostart.New()
+	if err != nil {
+		return err
+	}
+	return m.Set(on)
 }

@@ -7,7 +7,7 @@ import (
 	"jindi-drama/internal/cache"
 	"jindi-drama/internal/observability"
 	"jindi-drama/internal/provider"
-	"jindi-drama/internal/provider/mock"
+	"jindi-drama/internal/provider/registry"
 	"jindi-drama/internal/storage/sqlite"
 )
 
@@ -19,7 +19,7 @@ type App struct {
 	log   *observability.Logger
 }
 
-func New() *App { return &App{p: mock.New()} }
+func New() *App { return &App{p: registry.NewOrDefault(registry.Default, registry.Options{})} }
 
 // NewWith 允许注入其他 Provider（测试或授权后切换）。
 func NewWith(p provider.VideoProvider) *App { return &App{p: p} }

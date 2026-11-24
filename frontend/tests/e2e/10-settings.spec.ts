@@ -32,4 +32,15 @@ test.describe('10 应用设置', () => {
     await page.goto('/#/home'); await page.reload()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
   })
+  test('close-action offers only implemented options; legacy tray value migrates to 退出程序', async ({ page }) => {
+    await expect(page.getByTestId('close-action').locator('option')).toHaveText(['最小化到任务栏', '退出程序'])
+    await expect(page.getByText('最小化到托盘')).toHaveCount(0)
+    await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ closeAction: '最小化到托盘' })))
+    await page.reload()
+    await expect(page.getByTestId('close-action')).toHaveValue('退出程序')
+  })
+  test('autostart toggle works in browser preview (no desktop bridge)', async ({ page }) => {
+    await page.getByTestId('autostart').click()
+    await expect(page.getByTestId('autostart')).toHaveAttribute('aria-checked', 'true')
+  })
 })

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useAppSettings } from '@/stores/appSettings'
 import { Search, Bell, Minus, Square, X, CornerUpLeft } from 'lucide-vue-next'
 
 const route = useRoute(); const router = useRouter()
@@ -12,7 +13,9 @@ const onBlur = () => { window.setTimeout(() => (focused.value = false), 150) }
 function submit(text = q.value) { const t = text.trim(); if (!t) return; q.value = t; focused.value = false; router.push({ name: 'search', query: { q: t } }) }
 const tabs = [{ k: 'discover', label: '发现', to: '/home' }, { k: 'library', label: '片库', to: '/search' }, { k: 'category', label: '分类', to: '/home#categories' }]
 const tabActive = (k: string) => (k === 'discover' ? route.name !== 'search' : k === 'library' && route.name === 'search')
-const win = (op: 'min'|'max'|'close') => { const rt = (window as any).runtime; if (!rt) return; ({ min: rt.WindowMinimise, max: rt.WindowToggleMaximise, close: rt.Quit })[op]?.() }
+const appSettings = useAppSettings()
+const closeToTaskbar = () => appSettings.s.closeAction === '最小化到任务栏'
+const win = (op: 'min'|'max'|'close') => { const rt = (window as any).runtime; if (!rt) return; ({ min: rt.WindowMinimise, max: rt.WindowToggleMaximise, close: () => (closeToTaskbar() ? rt.WindowMinimise() : rt.Quit()) })[op]?.() }
 </script>
 <template>
   <header class="topbar" style="--wails-draggable: drag">
