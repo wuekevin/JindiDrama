@@ -2,6 +2,11 @@
 
 给接手本项目的 AI 编码代理（Codex / Claude Code 等）的说明。先读 `docs/STATUS.md`（唯一的进度与验证记录），再动手。
 
+## Codex 与 BMad
+- 从本仓库根目录打开 Codex。项目级技能位于 `.agents/skills/`，运行时位于 `_bmad/`，开发计划与评审记录位于 `_bmad-output/`。
+- 用 `bmad status` 查看安装状态，用 `bmad setup` 初始化或刷新运行时，用 `bmad-build` 接手路线图里的单个 Story。已有 PRD、架构与验收记录仍在 `docs/`，`bmad/MASTER-PROMPT.md` 保留历史背景。
+- 首次安装使用 BMad 上游提交 `e435a22574fe55722841086e5566420178b98df3` 的 Core Tools 与 Method 模块，版本为 `6.13.0-next`。
+
 ## 项目是什么
 Go + Wails v2 桌面应用，前端 Vue 3 + TypeScript + Vite + Pinia + Vue Router(hash) + SCSS。十个页面（首页、搜索、详情、播放、评论、弹幕设置、收藏、历史、登录、设置）按 `design/reference/` 的 1448×1086 设计稿实现。本地存储 SQLite（modernc，纯 Go）。当前数据来自 MockProvider 与自制演示视频，**没有接入任何真实内容源**。
 
