@@ -71,4 +71,12 @@
 - Verified（本机）：完成项目级 BMad Core Tools / Method 初始化，`bmad status` 检查通过，两个模块均为 `6.13.0-next`。
 - Verified（本机）：`go vet ./...`、`go test ./...`、前端类型检查与构建通过，Vitest 48 项和 Playwright 136 项全部通过。
 - E13-S01 校验和子项 Verified（本机夹具）：Windows EXE 与 macOS ZIP 的模拟文件通过 `shasum -a 256 -c SHA256SUMS.txt`，重复生成一致，空目录报错，修改文件后校验能检出。确认工作流在打包和平台检查之后生成清单，并将清单加入上传路径。
-- Written，未运行：包含上述 SHA-256 清单的双平台 GitHub Actions 打包流程。Windows 实机、签名与公证仍待验证。实施与评审记录见 `_bmad-output/plan-e13-s01-package-checksums.md`。
+- E13-S01 校验和子项 Verified（GitHub Actions + 本机下载复验）：[打包运行 45503796286](https://github.com/wuekevin/JindiDrama/actions/runs/45503796286) 使用 `1694de0d2d19a975284da59fec5a8bcba303bad9` 和版本 `v0.1.0`，Windows 与 macOS 均成功生成并上传产物及清单。Windows runner 的静默安装、路径检查和卸载步骤通过。
+- 下载两个平台的 artifact 后，逐项对照清单与实际文件，`shasum -a 256 -c SHA256SUMS.txt` 三项均为 OK。macOS ZIP 另通过 `unzip -tq`。首次下载超时后经 GitHub Artifact API 分段下载，原打包运行无需重跑。
+- Windows 实机、签名与公证仍待验证。本次运行跳过签名和公证步骤。实施与评审记录见 `_bmad-output/plan-e13-s01-package-checksums.md`。
+
+| 下载产物 | SHA-256 |
+|---|---|
+| `JindiDrama-amd64-installer.exe` | `e1fba83d40cb5a268e0175a84533172030ab8e69c7c6dd7817b9c0dfa2d2b622` |
+| `JindiDrama.exe` | `d2b39499e697976420860881aa204f334f5d6f1ef8c129c66ae442085fb7490c` |
+| `JindiDrama-macos-universal.zip` | `4798fedd5c63ebfe3d92796b81d8bacb10cb7f76730bd813606d04612f66e1a3` |

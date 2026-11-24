@@ -3,7 +3,7 @@ title: '生成安装包 SHA-256 校验清单'
 type: chore
 ticket: ''
 created: '2026-11-25'
-status: built
+status: done
 baseline_revision: 'd5e3579cf214afe69feb884dc7b79f055965ed0b'
 route: oneshot
 route_source: auto
@@ -50,4 +50,6 @@ context: []
 - 在临时目录准备 EXE、ZIP 与其他文件，运行生成命令，再用 `shasum -a 256 -c SHA256SUMS.txt` 交叉验证。覆盖空目录、带空格的文件名和文件篡改检测。
 - 检查 GitHub Actions YAML 解析、步骤顺序和上传清单路径。
 
-本机验证全部通过，包含 GitHub Actions YAML 解析与步骤断言、校验和夹具、Go vet 和单测、前端类型检查与构建、Vitest 48 项、Playwright 136 项。GitHub Actions 打包尚未在双平台运行。
+本机验证全部通过，包含 GitHub Actions YAML 解析与步骤断言、校验和夹具、Go vet 和单测、前端类型检查与构建、Vitest 48 项、Playwright 136 项。
+
+2026-11-25 实跑 [GitHub Actions 打包 45503796286](https://github.com/wuekevin/JindiDrama/actions/runs/45503796286)，Windows 和 macOS 均成功。下载后确认清单与三个文件一一对应，逐项 SHA-256 均通过，macOS ZIP 完整性通过。运行证据与哈希记录在 `docs/STATUS.md`。
