@@ -17,7 +17,7 @@ onMounted(() => { if (props.autoplay !== false) timer = window.setInterval(() =>
 onBeforeUnmount(() => clearInterval(timer))
 </script>
 <template>
-  <section v-if="cur" class="hero" aria-roledescription="carousel" aria-label="今日推荐" data-testid="hero" @mouseenter="paused = true" @mouseleave="paused = false" @keydown.left="go(-1)" @keydown.right="go(1)">
+  <section v-if="cur" class="hero on-dark" aria-roledescription="carousel" aria-label="今日推荐" data-testid="hero" @mouseenter="paused = true" @mouseleave="paused = false" @keydown.left="go(-1)" @keydown.right="go(1)">
     <div class="art" :style="{ backgroundImage: `url('${art}')` }" />
     <div class="veil" />
     <div class="copy">

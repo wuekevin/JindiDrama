@@ -22,7 +22,7 @@ const active = computed(() => String(route.meta.nav ?? ''))
 function go(to: string) { router.push(to) }
 </script>
 <template>
-  <aside class="sidebar" aria-label="主导航">
+  <aside class="sidebar on-dark" aria-label="主导航">
     <div class="logo"><BrandLogo /></div>
     <nav>
       <ul class="group">

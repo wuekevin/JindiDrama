@@ -26,4 +26,10 @@ test.describe('10 应用设置', () => {
   })
   test('left nav scrolls to section', async ({ page }) => { await page.getByTestId('snav-about').click(); await expect(page.getByTestId('snav-about')).toHaveClass(/on/) })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=page-settings]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/10-${w}x${h}.png` }) })
+  test('saved light theme is applied on startup without opening settings', async ({ page }) => {
+    await page.getByTestId('theme-light').click()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    await page.goto('/#/home'); await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+  })
 })

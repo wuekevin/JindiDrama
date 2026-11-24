@@ -4,7 +4,7 @@ defineProps<{ drama: Drama; badge?: string }>()
 defineEmits<{ open: [id: string] }>()
 </script>
 <template>
-  <button class="card" :aria-label="`${drama.title}，${drama.episodeCount}集`" data-testid="drama-card" @click="$emit('open', drama.id)">
+  <button class="card on-dark" :aria-label="`${drama.title}，${drama.episodeCount}集`" data-testid="drama-card" @click="$emit('open', drama.id)">
     <img :src="drama.cover" :alt="drama.title" draggable="false" />
     <span v-if="badge" class="badge">{{ badge }}</span>
     <span class="shade" />

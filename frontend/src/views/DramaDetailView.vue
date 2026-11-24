@@ -76,7 +76,7 @@ const guess = computed(() => { const all = DRAMAS.filter((d) => d.id !== id.valu
       </section>
 
       <section class="guess"><header><h2><Flame :size="24" color="#ff6a3d" fill="#ff6a3d" />猜你喜欢</h2><button data-testid="shuffle" @click="shuffle">换一换<RefreshCw :size="14" /></button></header>
-        <div class="row"><button v-for="d in guess" :key="d.id" class="gc" data-testid="guess-card" @click="router.push(`/drama/${d.id}`)"><img :src="d.cover" :alt="d.title" /><span class="bd">同类型</span><b class="clamp-1">{{ d.title }}</b><em><Flame :size="12" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></button></div></section>
+        <div class="row"><button v-for="d in guess" :key="d.id" class="gc on-dark" data-testid="guess-card" @click="router.push(`/drama/${d.id}`)"><img :src="d.cover" :alt="d.title" /><span class="bd">同类型</span><b class="clamp-1">{{ d.title }}</b><em><Flame :size="12" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></button></div></section>
     </template>
   </div>
 </template>

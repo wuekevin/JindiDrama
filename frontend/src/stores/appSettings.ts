@@ -25,5 +25,6 @@ export const useAppSettings = defineStore('appSettings', () => {
   /** 返回冲突的动作名（若该组合已被占用） */
   function rebind(action: string, combo: string): string | null { const dup = Object.entries(s.value.shortcuts).find(([a, c]) => a !== action && c === combo); if (dup) return SHORTCUT_LABELS[dup[0]]; s.value.shortcuts[action] = combo; return null }
   const reset = () => { s.value = { ...DEFAULTS, shortcuts: { ...DEFAULT_SHORTCUTS } } }
+  applyTheme() // 启动即应用已保存的主题/缩放/字体，而不是等到打开设置页
   return { s, rebind, reset, applyTheme }
 })

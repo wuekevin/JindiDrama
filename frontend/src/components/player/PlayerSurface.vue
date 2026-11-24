@@ -36,7 +36,7 @@ function key(e: KeyboardEvent) {
 const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volume2))
 </script>
 <template>
-  <div ref="root" class="player" :class="variant" tabindex="0" data-testid="player" :data-state="player.state.value" @keydown="key">
+  <div ref="root" class="player on-dark" :class="variant" tabindex="0" data-testid="player" :data-state="player.state.value" @keydown="key">
     <video v-if="p.mode === 'demo'" :ref="(el) => (p.video.value = el as HTMLVideoElement | null)" class="vid" playsinline preload="auto" data-testid="video" @loadedmetadata="p.onMeta" @timeupdate="p.onTime" @ended="p.onEnded" @waiting="p.onWaiting" @playing="p.onPlaying" @error="p.onError" @click="p.toggle()"><source v-for="(s, i) in demoSources(episode)" :key="s.src" :src="s.src" :type="s.type" @error="i === demoSources(episode).length - 1 && p.onError()" /></video>
     <div v-else class="bg" :style="{ backgroundImage: `url('${bg}')` }" @click="p.toggle()" />
     <DanmakuLayer :items="items" :time="player.time.value" />
