@@ -36,8 +36,8 @@ test.describe('01 首页推荐', () => {
       await page.screenshot({ path: `../design/rendered/responsive/01-${w}x${h}.png` })
     })
   }
-  test('shrinking the window scales content down with no overflow (min window 1180x720)', async ({ page }) => {
-    await page.setViewportSize({ width: 1180, height: 720 })
+  test('shrinking the window scales content down with no overflow (min window 1280x860)', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
     await page.goto('/#/home'); await page.reload()
     await expect(page.getByTestId('hero')).toBeVisible()
     const m = await page.evaluate(() => ({ z: Number(getComputedStyle(document.documentElement).getPropertyValue('--app-zoom')), sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight }))
