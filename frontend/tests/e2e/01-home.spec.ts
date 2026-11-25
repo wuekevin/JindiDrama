@@ -43,6 +43,74 @@ test.describe('01 首页推荐', () => {
     const m = await page.evaluate(() => ({ z: Number(getComputedStyle(document.documentElement).getPropertyValue('--app-zoom')), sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight }))
     expect(m.z).toBeLessThan(1); expect(m.sw).toBeLessThanOrEqual(m.cw); expect(m.sh).toBeLessThanOrEqual(m.ch)
   })
+  test('home topics reflow without clipping at 150% zoom', async ({ page }, testInfo) => {
+    const topics = page.getByRole('region', { name: '题材精选' })
+    async function measure() {
+      return topics.evaluate((section) => {
+        const content = section.closest('main')!.getBoundingClientRect()
+        const bounds = section.getBoundingClientRect()
+        const items = [...section.querySelectorAll('h3, button')]
+        const following = section.nextElementSibling!.getBoundingClientRect()
+        const rowCenters: number[] = []
+        const clipped: string[] = []
+        const wrappedText: string[] = []
+        for (const item of items) {
+          const box = item.getBoundingClientRect()
+          const center = box.top + box.height / 2
+          if (!rowCenters.some((row) => Math.abs(row - center) < 1)) rowCenters.push(center)
+          const label = item.textContent?.trim() ?? ''
+          if (box.left < content.left || box.right > content.right + 1 ||
+              box.top < bounds.top - 1 || box.bottom > bounds.bottom + 1) clipped.push(label)
+
+          const textLines = new Set<number>()
+          const range = document.createRange()
+          for (const node of item.childNodes) {
+            if (node.nodeType !== Node.TEXT_NODE || !node.textContent?.trim()) continue
+            range.selectNodeContents(node)
+            for (const rect of range.getClientRects()) {
+              if (rect.width) textLines.add(Math.round(rect.top))
+            }
+          }
+          if (textLines.size > 1) wrappedText.push(label)
+        }
+        return {
+          rows: rowCenters.length, clipped, wrappedText,
+          overlapsNext: bounds.bottom > following.top,
+        }
+      })
+    }
+    await page.evaluate(() => document.fonts.ready)
+    expect(await measure()).toEqual({ rows: 1, clipped: [], wrappedText: [], overlapsNext: false })
+    await page.screenshot({ path: testInfo.outputPath('home-topics-default.png') })
+
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 150, theme: 'light' })))
+    await page.reload()
+    await expect(page.locator('html')).toHaveCSS('--user-zoom', '1.5')
+    await expect(topics).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
+    const compact = await measure()
+    expect(compact.clipped).toEqual([])
+    expect(compact.wrappedText).toEqual([])
+    expect(compact.overlapsNext).toBe(false)
+    expect(compact.rows).toBeGreaterThan(1)
+    await page.screenshot({ path: testInfo.outputPath('home-topics-scaled.png') })
+
+    const luxury = topics.getByRole('button', { name: '豪门', exact: true })
+    await luxury.click()
+    await expect(page.getByRole('heading', { name: /豪门.*搜索结果/ })).toBeVisible()
+    await page.goBack()
+    await luxury.focus()
+    await page.keyboard.press('Tab')
+    await expect(topics.getByRole('button', { name: '更多', exact: true })).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(page.getByRole('heading', { name: '按题材浏览' })).toBeVisible()
+    const filter = page.getByTestId('topic-select')
+    await filter.selectOption('先婚后爱')
+    await expect(filter).toHaveValue('先婚后爱')
+    await expect(page.getByTestId('result-card')).toHaveCount(1)
+    await expect(page.getByTestId('result-card')).toContainText('替嫁成了千亿总裁的心尖宠')
+  })
 })
 
 test('today new shows the full Provider feed while keeping six previews', async ({ page }) => {

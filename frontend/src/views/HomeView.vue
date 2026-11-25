@@ -95,9 +95,10 @@ const autoplay = computed(() => route.query.static === undefined)
 <style scoped lang="scss">
 .home { padding-top: 11px; min-height: 100%; }
 .sk-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 30px; }
-.cats { display: flex; align-items: center; gap: 12px; margin-top: 18px; height: 38px; padding-left: 4px; }
+.cats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 18px; min-height: 38px; padding-left: 4px; }
+.h-label, .more { flex: none; white-space: nowrap; }
 .h-label { font-size: 20px; font-weight: 600; margin-right: 8px; color: var(--c-text); }
-.chip { height: 38px; padding: 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 19px; font-size: 15px; background: var(--c-surface); border: 1px solid var(--c-border); flex: 1; justify-content: center; max-width: 124px; &:hover { background: var(--c-surface-hover); border-color: var(--c-border-strong); } }
+.chip { height: 38px; padding: 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 19px; font-size: 15px; background: var(--c-surface); border: 1px solid var(--c-border); flex: 1 0 auto; justify-content: center; max-width: 124px; white-space: nowrap; &:hover { background: var(--c-surface-hover); border-color: var(--c-border-strong); } }
 .more { margin-left: auto; font-size: 13px; color: var(--c-text-2); display: inline-flex; align-items: center; }
 .block { margin-top: 26px; padding-left: 8px; }
 .sec-h { display: flex; align-items: center; gap: 10px; h2 { font-size: 24px; font-weight: 700; } }
