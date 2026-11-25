@@ -1,6 +1,9 @@
 package app
 
 import (
+	"errors"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -53,6 +56,10 @@ func TestBackupsHaveSeparatePathsAndPreserveData(t *testing.T) {
 	if err != nil || first == second {
 		t.Fatalf("backup paths: %q, %q, %v", first, second, err)
 	}
+	entries, err := os.ReadDir(filepath.Dir(second))
+	if err != nil || len(entries) != 2 {
+		t.Fatalf("backup directory should contain only the two finalized files: %v, %v", entries, err)
+	}
 	copy, err := sqlite.Open(second)
 	if err != nil {
 		t.Fatal(err)
@@ -61,5 +68,49 @@ func TestBackupsHaveSeparatePathsAndPreserveData(t *testing.T) {
 	favorites, err := copy.Favorites()
 	if err != nil || len(favorites) != 1 || favorites[0] != "d1" {
 		t.Fatalf("backup contents: %v, %v", favorites, err)
+	}
+}
+
+func TestBackupSnapshotFailureDoesNotPublishPartialFile(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "backups")
+	dest := filepath.Join(dir, "backup.db")
+	failure := errors.New("snapshot interrupted")
+	err := publishDatabaseBackup(dest, func(staged string) error {
+		if err := os.WriteFile(staged, []byte("partial"), 0o600); err != nil {
+			return err
+		}
+		if _, err := os.Lstat(dest); !errors.Is(err, fs.ErrNotExist) {
+			t.Fatalf("destination appeared before snapshot completed: %v", err)
+		}
+		return failure
+	})
+	if !errors.Is(err, failure) {
+		t.Fatalf("backup returned %v, want snapshot failure", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("failed backup left files: %v, %v", entries, err)
+	}
+}
+
+func TestBackupSnapshotCannotReplaceConcurrentDestination(t *testing.T) {
+	dir := t.TempDir()
+	dest := filepath.Join(dir, "backup.db")
+	err := publishDatabaseBackup(dest, func(staged string) error {
+		if err := os.WriteFile(staged, []byte("completed snapshot"), 0o600); err != nil {
+			return err
+		}
+		return os.WriteFile(dest, []byte("existing file"), 0o600)
+	})
+	if !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("backup returned %v, want existing target error", err)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil || string(data) != "existing file" {
+		t.Fatalf("existing file was modified: %q, %v", data, err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "backup.db" {
+		t.Fatalf("failed publication left staging files: %v, %v", entries, err)
 	}
 }

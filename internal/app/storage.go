@@ -148,8 +148,37 @@ func (a *App) BackupNow() (string, error) {
 func (a *App) backupTo(dir string) (string, error) {
 	name := "jindi-" + time.Now().Format("20060102-150405") + "-" + rand.Text() + ".db"
 	dest := filepath.Join(dir, "backups", name)
-	if err := a.store.Backup(dest); err != nil {
+	if err := publishDatabaseBackup(dest, a.store.Backup); err != nil {
 		return "", err
 	}
 	return dest, nil
+}
+
+func publishDatabaseBackup(dest string, snapshot func(string) error) (result error) {
+	dir := filepath.Dir(dest)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	staging, err := os.MkdirTemp(dir, ".jindi-backup-")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// A cleanup error must not relabel an already published backup as failed.
+		if err := os.RemoveAll(staging); result != nil && err != nil {
+			result = errors.Join(result, err)
+		}
+	}()
+	staged := filepath.Join(staging, "snapshot")
+	if err := snapshot(staged); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(staged, os.O_RDWR, 0)
+	if err != nil {
+		return err
+	}
+	if err := errors.Join(file.Chmod(0o600), file.Sync(), file.Close()); err != nil {
+		return err
+	}
+	return publishExport(staged, dest)
 }
