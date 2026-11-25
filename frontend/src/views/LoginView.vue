@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Smartphone, ShieldCheck, Cloud, ScanLine, RefreshCw, LogOut, CircleCheck, TriangleAlert } from 'lucide-vue-next'
 import { useAuthStore, DEMO_CODE, isValidCode, isValidPhone } from '@/stores/auth'
@@ -10,6 +10,33 @@ import PrivacyNoticeDialog from '@/components/PrivacyNoticeDialog.vue'
 
 const route = useRoute(); const router = useRouter(); const auth = useAuthStore(); const toast = useToastStore()
 const tab = ref<'phone' | 'qr'>(route.query.tab === 'qr' ? 'qr' : 'phone')
+const phoneTab = ref<HTMLButtonElement>()
+const qrTab = ref<HTMLButtonElement>()
+const scanButton = ref<HTMLButtonElement>()
+const sessionHeading = ref<HTMLHeadingElement>()
+function focusLoginTab() {
+  const trigger = tab.value === 'phone' ? phoneTab.value : qrTab.value
+  trigger?.focus()
+}
+async function selectTab(target: 'phone' | 'qr') {
+  tab.value = target
+  await nextTick()
+  focusLoginTab()
+}
+function moveTab(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+  if (event.key === 'Home') void selectTab('phone')
+  else if (event.key === 'End') void selectTab('qr')
+  else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    void selectTab(tab.value === 'phone' ? 'qr' : 'phone')
+  } else return
+  event.preventDefault()
+}
+watch(() => auth.demo, async (demo) => {
+  if (!demo) return
+  await nextTick()
+  sessionHeading.value?.focus()
+})
 const phone = ref(''); const code = ref(''); const agree = ref(false)
 const errs = ref<{ phone?: string; code?: string; agree?: string; form?: string }>({})
 const showPrivacy = ref(false)
@@ -63,6 +90,11 @@ function openPrivacy() {
 const qr = ref<'waiting' | 'scanned' | 'confirmed' | 'expired'>('waiting'); const qrLeft = ref(120); let qrTimer: number | undefined; const token = ref(1)
 function startQr() { clearInterval(qrTimer); qr.value = 'waiting'; qrLeft.value = 120; qrTimer = window.setInterval(() => { if (qr.value !== 'waiting' && qr.value !== 'scanned') return; qrLeft.value--; if (qrLeft.value <= 0) { qr.value = 'expired'; clearInterval(qrTimer) } }, 1000) }
 function refreshQr() { token.value++; startQr() }
+async function refreshFromButton() {
+  refreshQr()
+  await nextTick()
+  scanButton.value?.focus()
+}
 function simScan() { if (qr.value === 'waiting') qr.value = 'scanned' }
 function simConfirm() { if (qr.value === 'scanned' && requireAgreement()) { qr.value = 'confirmed'; clearInterval(qrTimer); auth.loginDemo(); toast.push('已进入演示会话（非官方账号）', 'success') } }
 function simExpire() { qrLeft.value = 0; qr.value = 'expired' }
@@ -71,7 +103,16 @@ onBeforeUnmount(() => { cancelPhoneAttempt(); clearInterval(cdTimer); clearInter
 const cells = computed(() => { let s = token.value * 2654435761 >>> 0; const g: boolean[] = []; for (let i = 0; i < 21 * 21; i++) { s = (s * 1664525 + 1013904223) >>> 0; g.push((s >>> 24) % 2 === 0) } return g })
 const inFinder = (i: number) => { const x = i % 21, y = Math.floor(i / 21); return (x < 7 && y < 7) || (x > 13 && y < 7) || (x < 7 && y > 13) }
 const finder = (i: number) => { const x = i % 21, y = Math.floor(i / 21); const fx = x > 13 ? x - 14 : x; const fy = y > 13 ? y - 14 : y; return fx === 0 || fx === 6 || fy === 0 || fy === 6 || (fx >= 2 && fx <= 4 && fy >= 2 && fy <= 4) }
-function logout() { auth.logout(); phone.value = ''; code.value = ''; agree.value = false; if (tab.value === 'qr') refreshQr(); toast.push('已退出演示会话') }
+async function logout() {
+  auth.logout()
+  phone.value = ''
+  code.value = ''
+  agree.value = false
+  if (tab.value === 'qr') refreshQr()
+  toast.push('已退出演示会话')
+  await nextTick()
+  focusLoginTab()
+}
 const mm = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0')}`
 </script>
 <template>
@@ -82,10 +123,14 @@ const mm = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0
       <h1>账号登录</h1><p class="sub">一个账号 · 畅享海量精品短剧</p>
       <div v-if="expired && !auth.demo" class="alert" role="alert" data-testid="expired"><TriangleAlert :size="16" />登录已过期，请重新登录</div>
 
-      <div v-if="auth.demo" class="done" data-testid="logged-in"><CircleCheck :size="44" color="#46c28a" /><h2>{{ auth.name }}</h2><p>当前为本地演示会话，不会访问红果官方账号，也不会同步云端数据。</p>
+      <div v-if="auth.demo" class="done" data-testid="logged-in"><CircleCheck :size="44" color="#46c28a" /><h2 ref="sessionHeading" tabindex="-1">{{ auth.name }}</h2><p>当前为本地演示会话，不会访问红果官方账号，也不会同步云端数据。</p>
         <div class="dbtn"><BaseButton data-testid="go-home" @click="router.push('/home')">开始看剧</BaseButton><BaseButton variant="ghost" data-testid="logout" @click="logout"><LogOut :size="16" />退出登录</BaseButton></div></div>
       <template v-else>
-        <div class="tabs" role="tablist"><button role="tab" :aria-selected="tab === 'phone'" :class="{ on: tab === 'phone' }" data-testid="tab-phone" @click="tab = 'phone'">手机号登录</button><i /><button role="tab" :aria-selected="tab === 'qr'" :class="{ on: tab === 'qr' }" data-testid="tab-qr" @click="tab = 'qr'">扫码登录</button></div>
+        <div class="tabs" role="tablist" aria-label="登录方式" @keydown="moveTab">
+          <button ref="phoneTab" role="tab" :aria-selected="tab === 'phone'" :tabindex="tab === 'phone' ? 0 : -1" :class="{ on: tab === 'phone' }" data-testid="tab-phone" @click="selectTab('phone')">手机号登录</button>
+          <i aria-hidden="true" />
+          <button ref="qrTab" role="tab" :aria-selected="tab === 'qr'" :tabindex="tab === 'qr' ? 0 : -1" :class="{ on: tab === 'qr' }" data-testid="tab-qr" @click="selectTab('qr')">扫码登录</button>
+        </div>
         <form v-if="tab === 'phone'" novalidate @submit.prevent="submit">
           <label class="f" :class="{ bad: errs.phone }"><Smartphone :size="20" /><input v-model="phone" inputmode="numeric" maxlength="11" placeholder="请输入手机号" aria-label="手机号" data-testid="phone" /></label><p v-if="errs.phone" class="e" role="alert" data-testid="err-phone">{{ errs.phone }}</p>
           <div class="row"><label class="f" :class="{ bad: errs.code }"><ShieldCheck :size="20" /><input v-model="code" inputmode="numeric" maxlength="6" placeholder="请输入验证码" aria-label="验证码" data-testid="code" /></label>
@@ -93,13 +138,13 @@ const mm = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0
           <p v-if="errs.form" class="e form" role="alert" data-testid="err-form">{{ errs.form }}</p>
           <button class="go" type="submit" :disabled="status === 'submitting' || status === 'locked'" data-testid="submit">{{ status === 'submitting' ? '登录中…' : '登录' }}</button>
           <div class="or"><span>或使用扫码登录</span></div>
-          <button type="button" class="qrmini" aria-label="切换到扫码登录" @click="tab = 'qr'"><ScanLine :size="48" :stroke-width="1.2" /></button><p class="qt"><b>扫码登录</b></p><p class="qs">演示模式下不连接红果 App，点此体验扫码流程</p>
+          <button type="button" class="qrmini" aria-label="切换到扫码登录" @click="selectTab('qr')"><ScanLine :size="48" :stroke-width="1.2" /></button><p class="qt"><b>扫码登录</b></p><p class="qs">演示模式下不连接红果 App，点此体验扫码流程</p>
         </form>
         <div v-else class="qrbox" data-testid="qr-panel">
-          <div class="qr" :class="qr"><svg viewBox="0 0 21 21" shape-rendering="crispEdges"><template v-for="(c, i) in cells" :key="i"><rect v-if="inFinder(i) ? finder(i) : c" :x="i % 21" :y="Math.floor(i / 21)" width="1" height="1" fill="#f6ece9" /></template></svg>
-            <div v-if="qr !== 'waiting'" class="ov" data-testid="qr-overlay"><template v-if="qr === 'scanned'"><CircleCheck :size="34" color="#46c28a" /><span>已扫码，请在手机端确认</span></template><template v-else-if="qr === 'expired'"><span>二维码已过期</span><BaseButton size="sm" data-testid="qr-refresh" @click="refreshQr"><RefreshCw :size="14" />刷新</BaseButton></template></div></div>
+          <div class="qr on-dark" :class="qr"><svg viewBox="0 0 21 21" shape-rendering="crispEdges"><template v-for="(c, i) in cells" :key="i"><rect v-if="inFinder(i) ? finder(i) : c" :x="i % 21" :y="Math.floor(i / 21)" width="1" height="1" fill="#f6ece9" /></template></svg>
+            <div v-if="qr !== 'waiting'" class="ov" data-testid="qr-overlay"><template v-if="qr === 'scanned'"><CircleCheck :size="34" color="#46c28a" /><span>已扫码，请在手机端确认</span></template><template v-else-if="qr === 'expired'"><span>二维码已过期</span><BaseButton size="sm" data-testid="qr-refresh" @click="refreshFromButton"><RefreshCw :size="14" />刷新</BaseButton></template></div></div>
           <p class="qt"><b>扫码登录（演示）</b></p><p class="qs">二维码仅为演示图案，{{ qr === 'expired' ? '已失效' : `有效期 ${mm(qrLeft)}` }}</p>
-          <div class="sim"><button data-testid="sim-scan" :disabled="qr !== 'waiting'" @click="simScan">模拟扫码</button><button data-testid="sim-confirm" :disabled="qr !== 'scanned'" @click="simConfirm">模拟确认登录</button><button data-testid="sim-expire" :disabled="qr === 'expired'" @click="simExpire">模拟过期</button></div></div>
+          <div class="sim"><button ref="scanButton" data-testid="sim-scan" :disabled="qr !== 'waiting'" @click="simScan">模拟扫码</button><button data-testid="sim-confirm" :disabled="qr !== 'scanned'" @click="simConfirm">模拟确认登录</button><button data-testid="sim-expire" :disabled="qr === 'expired'" @click="simExpire">模拟过期</button></div></div>
         <div class="agree" :class="{ bad: errs.agree }">
           <input id="demo-agreement" v-model="agree" type="checkbox" data-testid="agree" @change="errs.agree = undefined" />
           <label for="demo-agreement">我已阅读说明，了解这是本地演示</label>
@@ -113,23 +158,25 @@ const mm = (n: number) => `${Math.floor(n / 60)}:${String(n % 60).padStart(2, '0
   </div>
 </template>
 <style scoped lang="scss">
-.login { min-height: 100%; display: flex; justify-content: center; padding: 62px 0 24px; background: radial-gradient(500px 300px at 85% 85%, rgba(238,75,57,.18), transparent 70%); }
-.card { position: relative; width: 670px; padding: 44px 78px 26px; border-radius: 30px; background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.035)); border: 1px solid rgba(255,140,110,.28); box-shadow: 0 0 40px rgba(238,75,57,.12); overflow: hidden; align-self: flex-start; header { display: flex; justify-content: space-between; align-items: center; } h1 { margin-top: 22px; font-size: 28px; text-align: center; } .sub { text-align: center; color: var(--c-text-2); margin-top: 6px; font-size: 14px; } }
+.login { min-height: 100%; display: flex; justify-content: center; padding: clamp(24px, 5.5%, 62px) 0 24px; background: radial-gradient(500px 300px at 85% 85%, rgba(238,75,57,.18), transparent 70%); }
+.card { position: relative; width: min(670px, 100%); min-width: 0; padding: clamp(22px, 4%, 44px) clamp(18px, 8%, 78px) 26px; border-radius: 30px; background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.035)); border: 1px solid rgba(255,140,110,.28); box-shadow: 0 0 40px rgba(238,75,57,.12); overflow: hidden; align-self: flex-start; header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; } h1 { margin-top: 22px; font-size: 28px; text-align: center; } .sub { text-align: center; color: var(--c-text-2); margin-top: 6px; font-size: 14px; } }
 .reel { position: absolute; right: -20px; top: -6px; width: 150px; height: 70px; transform: rotate(32deg); background: repeating-linear-gradient(90deg, rgba(255,255,255,.12) 0 14px, transparent 14px 20px); opacity: .5; border-radius: 6px; }
 .demo { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 14px; background: rgba(244,183,64,.16); border: 1px solid rgba(244,183,64,.5); color: var(--c-gold); font-size: 12.5px; position: relative; z-index: 1; }
 .alert { display: flex; align-items: center; gap: 8px; margin-top: 16px; padding: 10px 14px; border-radius: 10px; background: rgba(255,91,91,.14); border: 1px solid rgba(255,91,91,.5); font-size: 14px; }
 .tabs { display: flex; align-items: center; margin: 24px 0 20px; i { width: 1px; height: 22px; background: var(--c-border-strong); } button { flex: 1; font-size: 20px; font-weight: 600; color: var(--c-text-2); padding-bottom: 10px; position: relative; &.on { color: var(--c-text); &::after { content: ''; position: absolute; left: 50%; bottom: 0; width: 64px; height: 3px; border-radius: 3px; transform: translateX(-50%); background: var(--c-accent); } } } }
-.f { flex: 1; display: flex; align-items: center; gap: 14px; height: 58px; padding: 0 20px; border-radius: 14px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border); color: var(--c-text-2); margin-top: 12px; &:focus-within { border-color: var(--c-accent); } &.bad { border-color: var(--c-danger); } input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; font-size: 16px; color: var(--c-text); } }
-.row { display: flex; gap: 18px; } .get { flex: none; width: 146px; height: 58px; margin-top: 12px; border-radius: 14px; border: 1px solid var(--c-accent); color: var(--c-accent-2); font-size: 16px; &:disabled { opacity: .55; cursor: not-allowed; } }
+.f { flex: 1; display: flex; align-items: center; gap: 14px; height: 58px; padding: 0 20px; border-radius: 14px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border); color: var(--c-text-2); margin-top: 12px; min-width: 0; &:focus-within { border-color: var(--c-accent); } &.bad { border-color: var(--c-danger); } input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; font-size: 16px; color: var(--c-text); } }
+.row { display: flex; flex-wrap: wrap; column-gap: 18px; .f { flex-basis: min(200px, 100%); } } .get { flex: none; width: 146px; max-width: 100%; height: 58px; margin-top: 12px; border-radius: 14px; border: 1px solid var(--c-accent); color: var(--c-accent-2); font-size: 16px; &:disabled { opacity: .55; cursor: not-allowed; } }
 .go { width: 100%; height: 58px; margin-top: 20px; border-radius: 29px; background: linear-gradient(90deg, #f46a4e, #e4402f); font-size: 20px; font-weight: 700; box-shadow: 0 8px 22px rgba(220,58,42,.35); &:disabled { opacity: .6; } }
 .e { margin-top: 6px; padding-left: 6px; font-size: 13px; color: var(--c-danger); &.form { text-align: center; margin-top: 12px; } }
 .or { display: flex; align-items: center; gap: 14px; margin: 18px 0 10px; color: var(--c-text-2); font-size: 14px; &::before, &::after { content: ''; flex: 1; height: 1px; background: var(--c-border); } }
 .qrmini { display: block; margin: 0 auto; width: 110px; height: 110px; border-radius: 18px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border-strong); display: grid; place-items: center; }
 .qt { text-align: center; margin-top: 10px; b { font-size: 16px; } } .qs { text-align: center; font-size: 13.5px; color: var(--c-text-2); margin-top: 4px; }
-.qrbox { padding-top: 6px; } .qr { position: relative; width: 190px; height: 190px; margin: 0 auto; padding: 12px; border-radius: 16px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border-strong); svg { width: 100%; height: 100%; } &.expired svg { opacity: .15; } .ov { position: absolute; inset: 0; border-radius: 16px; background: rgba(15,8,9,.78); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 14px; } }
-.sim { display: flex; justify-content: center; gap: 10px; margin-top: 14px; button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px dashed var(--c-border-strong); font-size: 13px; &:disabled { opacity: .35; } &:hover:not(:disabled) { background: var(--c-surface-hover); } } }
+.qrbox { padding-top: 6px; } .qr { position: relative; width: min(190px, 100%); aspect-ratio: 1; margin: 0 auto; padding: 12px; border-radius: 16px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border-strong); svg { width: 100%; height: 100%; } &.expired svg { opacity: .15; } .ov { position: absolute; inset: 0; border-radius: 16px; background: rgba(15,8,9,.78); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; font-size: 14px; } }
+.sim { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 14px; button { height: 34px; padding: 0 14px; border-radius: 17px; border: 1px dashed var(--c-border-strong); font-size: 13px; &:disabled { opacity: .35; } &:hover:not(:disabled) { background: var(--c-surface-hover); } } }
 .agree { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; margin-top: 22px; font-size: 14px; color: var(--c-text-2); &.bad { color: var(--c-danger); } input { width: 18px; height: 18px; accent-color: #ee4b39; } button { color: var(--c-accent-2); } }
 .agree + .e { text-align: center; }
 .note { display: flex; align-items: center; gap: 14px; margin-top: 22px; padding: 14px 20px; border-radius: 14px; background: rgba(244,183,64,.08); border: 1px solid rgba(244,183,64,.2); font-size: 13.5px; line-height: 1.5; color: var(--c-text-2); svg { color: var(--c-gold); flex: none; } }
-.done { text-align: center; padding: 30px 0 4px; h2 { margin-top: 12px; font-size: 24px; } p { margin-top: 10px; font-size: 14px; color: var(--c-text-2); line-height: 1.6; } .dbtn { display: flex; justify-content: center; gap: 14px; margin-top: 22px; } }
+.done { text-align: center; padding: 30px 0 4px; h2 { margin-top: 12px; font-size: 24px; } p { margin-top: 10px; font-size: 14px; color: var(--c-text-2); line-height: 1.6; } .dbtn { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 22px; } }
+:global(:root[data-theme='light'] .login .demo) { color: #755115; }
+:global(:root[data-theme='light'] .login .qr) { background: #261719; }
 </style>

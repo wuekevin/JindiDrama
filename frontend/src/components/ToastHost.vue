@@ -13,7 +13,7 @@ onBeforeUnmount(() => document.removeEventListener('fullscreenchange', updateTar
 <template>
   <Teleport :to="fullscreenTarget ?? 'body'" :disabled="!fullscreenTarget">
     <div class="toasts" role="status" aria-live="polite">
-      <div v-for="i in t.items" :key="i.id" class="toast" :class="i.kind" data-testid="toast">
+      <div v-for="i in t.items" :key="i.id" class="toast on-dark" :class="i.kind" data-testid="toast">
         <span>{{ i.text }}</span>
         <button v-if="i.action" type="button" :disabled="i.action.busy()" @click="i.action.run()">
           {{ i.action.busy() ? '正在重试…' : i.action.label }}
