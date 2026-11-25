@@ -128,3 +128,123 @@ test('related drama shuffle changes the batch while retaining playback and links
   await expect(page.getByTestId('page-detail').getByRole('heading', { name: title })).toBeVisible()
   await expect(page).not.toHaveURL(/#\/drama\/d1$/)
 })
+
+for (const dpi of [100, 150, 220]) {
+  test(`player controls stay in the active surface at ${dpi}% zoom`, async ({ page }, testInfo) => {
+    await page.setViewportSize(dpi === 100 ? { width: 1448, height: 1086 } : { width: 1280, height: 860 })
+    await page.addInitScript((zoom) => {
+      localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: zoom }))
+    }, dpi)
+    await page.goto('/#/watch/d1/32?t=192&paused')
+    const player = page.getByTestId('player')
+    await expect(player).toHaveAttribute('data-state', 'paused')
+    async function checkControls() {
+      const clipped = await player.evaluate((surface) => {
+        const box = surface.getBoundingClientRect()
+        return [...surface.querySelectorAll('button, input, [role=slider], .pop')].flatMap((el) => {
+          const rect = el.getBoundingClientRect()
+          const visible = rect.width > 0 && rect.height > 0 && (!el.closest('.pop') || el.matches('.pop'))
+          return visible && (rect.left < box.left - 1 || rect.right > box.right + 1 ||
+            rect.top < box.top - 1 || rect.bottom > box.bottom + 1)
+            ? [el.getAttribute('aria-label') || el.textContent?.trim()] : []
+        })
+      })
+      expect(clipped).toEqual([])
+    }
+    await checkControls()
+    if (dpi === 100) {
+      const playBox = (await player.getByTestId('toggle').boundingBox())!
+      const fullscreenBox = (await player.getByTestId('fullscreen').boundingBox())!
+      expect(Math.abs(playBox.y - fullscreenBox.y)).toBeLessThanOrEqual(1)
+    }
+    await page.screenshot({ path: testInfo.outputPath('player.png') })
+    const quality = player.getByTestId('quality')
+    await quality.press('Enter')
+    await checkControls()
+    await page.keyboard.press('Escape')
+    await expect(quality).toBeFocused()
+    await quality.press('Enter')
+    await player.getByTestId('q-流畅').click()
+    await expect(quality).toContainText('流畅')
+    await player.getByTestId('speed').click()
+    await checkControls()
+    await player.getByTestId('speed-0.5').click()
+    await expect(player.getByTestId('speed')).toContainText('0.5')
+    await player.getByTestId('speed').press('Enter')
+    await player.getByTestId('speed-2').click()
+    await expect(player.getByTestId('speed')).toContainText('2.0x')
+    if (dpi === 100) return
+
+    await player.getByTestId('mute').click()
+    await expect(player.getByTestId('mute')).toHaveAttribute('aria-label', '取消静音')
+    const volume = player.getByTestId('volume')
+    await volume.press('Home')
+    await expect(volume).toHaveValue('0')
+    const saved = page.waitForEvent('download')
+    await player.getByRole('button', { name: '下载', exact: true }).click()
+    expect((await saved).suggestedFilename()).toBe('JindiDrama-demo-d1-32.mp4')
+    await player.getByTestId('fullscreen').click()
+    await expect.poll(() => page.evaluate(() => document.fullscreenElement?.getAttribute('data-testid')))
+      .toBe('player')
+    await page.evaluate(() => document.exitFullscreen())
+
+    await player.getByTestId('to-comments').click()
+    const comments = page.getByTestId('comment-panel')
+    await expect(comments).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(comments).toHaveCount(0)
+    await expect(player).toBeFocused()
+    await player.getByTestId('to-comments').click()
+    await expect(comments).toBeFocused()
+    await expect(player).toHaveAttribute('data-state', 'paused')
+    await checkControls()
+    expect((await comments.boundingBox())!.y).toBeGreaterThan((await player.boundingBox())!.y)
+    await comments.getByTestId('comment-input').fill('缩放评论')
+    await comments.getByTestId('comment-post').click()
+    await expect(comments.getByText('缩放评论', { exact: true })).toBeVisible()
+    await comments.getByTestId('comment-close').click()
+    await expect(player).toBeFocused()
+    await player.getByTestId('to-comments').click()
+    await page.getByTestId('continue').click()
+    await expect(player).toBeFocused()
+    await expect(player).toHaveAttribute('data-state', 'playing')
+    await player.getByTestId('toggle').click()
+    await expect(player).toHaveAttribute('data-state', 'paused')
+
+    await player.getByTestId('open-danmaku-settings').click()
+    const settings = page.getByTestId('danmaku-settings')
+    await expect(settings.getByTestId('dm-enabled')).toBeVisible()
+    expect((await settings.boundingBox())!.y).toBeGreaterThan((await player.boundingBox())!.y)
+    await checkControls()
+    await expect(player).toHaveAttribute('data-state', 'paused')
+    await expect(settings.getByRole('heading', { name: '弹幕设置' })).toHaveCSS('color', 'rgb(246, 236, 233)')
+    await page.getByTestId('danmaku-back').click()
+    const nextEpisode = page.getByTestId('ep').filter({ hasNot: page.locator('.np') }).first()
+    const index = (await nextEpisode.getAttribute('aria-label'))!.match(/\d+/)![0]
+    await nextEpisode.click()
+    await expect(page).toHaveURL(new RegExp(`/watch/d1/${index}$`))
+    await expect(player).toBeFocused()
+    expect(await player.evaluate((surface) => {
+      const viewport = surface.closest('#content')!.getBoundingClientRect()
+      return surface.getBoundingClientRect().top >= viewport.top - 1 && surface.getBoundingClientRect().top < viewport.bottom
+    })).toBe(true)
+  })
+}
+
+test('long speed labels keep fullscreen inside the player across the dual-pane width range', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
+    localStorage.setItem('jindi.player.v1', JSON.stringify({ speed: 1.75, quality: '高清', volume: 70 }))
+  })
+  await page.setViewportSize({ width: 2448, height: 860 })
+  await page.goto('/#/watch/d1/32?paused')
+  const player = page.getByTestId('player')
+  await expect(player.getByTestId('speed')).toContainText('1.75x')
+  for (const width of [2448, 2468, 2500, 2560, 2600, 2650]) {
+    await page.setViewportSize({ width, height: 860 })
+    await expect.poll(() => player.getByTestId('fullscreen').evaluate((button) => {
+      const surface = button.closest('.player')!.getBoundingClientRect()
+      return button.getBoundingClientRect().right <= surface.right - 2
+    })).toBe(true)
+  }
+})

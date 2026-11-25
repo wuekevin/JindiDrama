@@ -101,7 +101,7 @@ async function deleteReply(commentId: string, replyId: string, event: MouseEvent
 const dummy = () => toast.push('该功能在演示模式下暂不可用')
 </script>
 <template>
-  <aside class="cp on-dark" role="complementary" aria-label="本集评论" data-testid="comment-panel"
+  <aside class="cp on-dark" role="complementary" aria-label="本集评论" tabindex="-1" data-testid="comment-panel"
     @keydown.esc="closeOnEscape" @focusout="closePickerOnFocusExit">
     <header><h2>本集评论 <small data-testid="comment-total">({{ c.total.toLocaleString() }})</small></h2><button aria-label="关闭评论" data-testid="comment-close" @click="emit('close')"><X :size="24" /></button></header>
     <div class="sorts"><button v-for="t in tabs" :key="t.k" :class="{ on: c.sort === t.k }" :data-testid="`csort-${t.k}`" @click="c.sort = t.k">{{ t.l }}</button></div>

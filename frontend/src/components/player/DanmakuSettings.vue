@@ -34,7 +34,7 @@ async function send() {
 const pct = (v: number, lo: number, hi: number) => ((v - lo) / (hi - lo)) * 100
 </script>
 <template>
-  <aside class="ds" data-testid="danmaku-settings" aria-label="弹幕设置">
+  <aside class="ds on-dark" data-testid="danmaku-settings" aria-label="弹幕设置">
     <h2><MessageSquareText :size="26" color="#ff6a4d" />弹幕设置</h2>
     <div class="row sw"><Eye :size="22" /><div><b>弹幕开关</b><small>开启后，视频中将显示弹幕</small></div><button class="tg" :class="{ on: d.enabled }" role="switch" :aria-checked="d.enabled" aria-label="弹幕开关" data-testid="dm-enabled" @click="d.enabled = !d.enabled"><i /></button></div>
     <div class="card"><h4><Scan :size="18" />显示区域</h4>

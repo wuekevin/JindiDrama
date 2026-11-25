@@ -19,9 +19,31 @@ const emit = defineEmits<{ next: []; prev: []; back: []; comments: []; danmakuPa
 const s = useSettingsStore(); const toast = useToastStore(); const root = ref<HTMLElement>()
 const preferences = useAppSettings()
 const screenshotBusy = ref(false)
+const footer = ref<HTMLElement>()
+const surfaceWidth = ref(Infinity)
+const popupHeight = ref(240)
+const compactControls = computed(() => surfaceWidth.value <= (props.variant === 'tall' ? 720 : 450))
+let controlObserver: ResizeObserver | undefined
+onMounted(() => {
+  const surface = root.value
+  const controls = footer.value
+  if (!surface || !controls) return
+  controlObserver = new ResizeObserver(() => {
+    surfaceWidth.value = surface.clientWidth
+    popupHeight.value = Math.max(36, surface.clientHeight - controls.offsetHeight - 10)
+  })
+  controlObserver.observe(surface)
+  controlObserver.observe(controls, { box: 'border-box' })
+})
+onBeforeUnmount(() => controlObserver?.disconnect())
 const bg = computed(() => posterSvg({ hue: 350, hue2: 20, seed: 1 + (props.episode % 3) }))
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
 const menu = ref<'' | 'speed' | 'quality'>('')
+function dismissMenu(event: Event) {
+  menu.value = ''
+  const trigger = (event.currentTarget as HTMLElement).closest('.menu')?.querySelector('button')
+  trigger?.focus({ preventScroll: true })
+}
 watch(() => props.variant, () => {
   menu.value = ''
   if (root.value?.contains(document.fullscreenElement)) {
@@ -142,7 +164,7 @@ function seekKey(e: KeyboardEvent) {
 const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volume2))
 </script>
 <template>
-  <div ref="root" class="player on-dark" :class="variant" tabindex="0" data-testid="player" :data-state="player.state.value">
+  <div ref="root" class="player on-dark" :class="[variant, { compactControls, snug: surfaceWidth <= 800 }]" :style="{ '--popup-height': popupHeight + 'px' }" tabindex="0" data-testid="player" :data-state="player.state.value">
     <video v-if="p.mode === 'demo'" :ref="(el) => (p.video.value = el as HTMLVideoElement | null)" class="vid" playsinline preload="auto" data-testid="video" @loadedmetadata="p.onMeta" @canplay="p.onMeta" @timeupdate="p.onTime" @seeked="p.onSeeked" @ended="p.onEnded" @waiting="p.onWaiting" @playing="p.onMediaControl" @pause="p.onMediaControl" @error="p.onError" @click="p.toggle()"><source v-for="(s, i) in playbackSources" :key="s.src" :src="s.src" :type="s.type" @error="i === playbackSources.length - 1 && p.onError()" /></video>
     <div v-else class="bg" :style="{ backgroundImage: `url('${bg}')` }" @click="p.toggle()" />
     <DanmakuLayer :items="items" :time="player.time.value" />
@@ -159,7 +181,7 @@ const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volu
     <div v-if="player.state.value === 'resolving'" class="over" data-testid="loading"><Loader :size="34" class="spin" /><span>正在获取播放源…</span></div>
     <div v-else-if="player.state.value === 'error'" class="over err" role="alert" data-testid="player-error"><span>播放失败：{{ player.error.value }}</span><span class="hint">仅演示数据，可重试或切换其他集</span><button class="retry" data-testid="retry" @click="player.retry()"><RotateCw :size="15" />重试</button></div>
     <div v-else-if="player.state.value === 'ended'" class="over end" data-testid="ended"><button class="retry" @click="player.play()"><RotateCw :size="15" />重新播放</button><button v-if="hasNext" class="retry" @click="emit('next')">下一集</button></div>
-    <footer class="ctl">
+    <footer ref="footer" class="ctl">
       <div v-if="variant !== 'wide'" class="time">{{ fmt(player.time.value) }} / {{ fmt(player.duration.value) }}</div>
       <div class="seek" role="slider" tabindex="0" aria-label="播放进度" :aria-valuenow="Math.round(player.percent.value)" aria-valuemin="0" aria-valuemax="100" data-testid="seek" @click="seekClick" @keydown="seekKey"><i :style="{ width: player.percent.value + '%' }" /><b :style="{ left: player.percent.value + '%' }" /></div>
       <div class="row">
@@ -172,13 +194,13 @@ const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volu
           <button class="pill plain" data-testid="to-comments" @click="emit('comments')"><MessageCircle :size="15" />评论</button>
         </template>
         <span class="sp" />
-        <div v-if="variant !== 'danmaku'" class="menu"><button class="pill plain" data-testid="speed" @click="menu = menu === 'speed' ? '' : 'speed'">{{ variant === 'tall' ? '倍速 ' : '' }}{{ formatSpeed(s.speed) }}x ▾</button>
-          <ul v-if="menu === 'speed'" class="pop"><li v-for="v in SPEEDS" :key="v"><button :class="{ on: s.speed === v }" :data-testid="`speed-${v}`" @click="s.speed = v; menu = ''">{{ v }}x</button></li></ul></div>
-        <div class="menu"><button class="pill plain" data-testid="quality" @click="menu = menu === 'quality' ? '' : 'quality'">{{ p.mode === 'sim' ? '模拟 ' : variant === 'tall' ? '画质 ' : '' }}{{ s.quality }} ▾</button>
-          <ul v-if="menu === 'quality'" class="pop quality-pop"><li v-for="q in DEMO_QUALITIES" :key="q.id"><button :class="{ on: s.quality === q.label }" :data-testid="`q-${q.label}`" @click="s.quality = q.label; menu = ''">{{ q.label }} {{ q.detail }}</button></li></ul></div>
+        <div v-if="variant !== 'danmaku'" class="menu" @keydown.esc.stop="dismissMenu"><button class="pill plain" :aria-expanded="menu === 'speed'" data-testid="speed" @click="menu = menu === 'speed' ? '' : 'speed'">{{ variant === 'tall' ? '倍速 ' : '' }}{{ formatSpeed(s.speed) }}x ▾</button>
+          <ul v-if="menu === 'speed'" class="pop"><li v-for="v in SPEEDS" :key="v"><button :class="{ on: s.speed === v }" :data-testid="`speed-${v}`" @click="s.speed = v; dismissMenu($event)">{{ v }}x</button></li></ul></div>
+        <div class="menu" @keydown.esc.stop="dismissMenu"><button class="pill plain" :aria-expanded="menu === 'quality'" data-testid="quality" @click="menu = menu === 'quality' ? '' : 'quality'">{{ p.mode === 'sim' ? '模拟 ' : variant === 'tall' ? '画质 ' : '' }}{{ s.quality }} ▾</button>
+          <ul v-if="menu === 'quality'" class="pop quality-pop"><li v-for="q in DEMO_QUALITIES" :key="q.id"><button :class="{ on: s.quality === q.label }" :data-testid="`q-${q.label}`" @click="s.quality = q.label; dismissMenu($event)">{{ q.label }} {{ q.detail }}</button></li></ul></div>
         <button v-if="variant === 'tall'" class="pill plain" :disabled="exporting" @click="emit('download')"><Download :size="14" />下载</button>
         <button class="ic" :aria-label="p.muted.value ? '取消静音' : '静音'" data-testid="mute" @click="p.muted.value = !p.muted.value"><component :is="volIcon" :size="20" /></button>
-        <input v-if="variant !== 'wide' || true" v-model.number="s.volume" class="vol" type="range" min="0" max="100" aria-label="音量" data-testid="volume" />
+        <input v-model.number="s.volume" class="vol" type="range" min="0" max="100" aria-label="音量" data-testid="volume" />
         <button class="ic" aria-label="全屏" data-testid="fullscreen" @click="fullscreen"><Maximize :size="20" /></button>
       </div>
     </footer>
@@ -190,7 +212,7 @@ const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volu
 .buf { position: absolute; left: 50%; top: 50%; z-index: 4; transform: translate(-50%, -50%); }
 .bg { position: absolute; inset: 0; background-size: cover; background-position: center; cursor: pointer; }
 .player::after { content: ''; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0,0,0,.45), transparent 22%, transparent 60%, rgba(0,0,0,.72)); }
-.top { position: absolute; left: 0; right: 0; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 14px 16px; .sp { flex: 1; } .ttl { font-size: 18px; font-weight: 600; margin-left: 4px; } }
+.top { position: absolute; left: 0; right: 0; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 14px 16px; .sp { flex: 1; } .ttl { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 18px; font-weight: 600; margin-left: 4px; } }
 .rnd { width: 38px; height: 38px; border-radius: 50%; background: rgba(0,0,0,.45); border: 1px solid var(--c-border-strong); display: grid; place-items: center; }
 .chip { display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 10px; background: rgba(0,0,0,.5); border: 1px solid var(--c-border-strong); font-size: 14px; }
 .over { position: absolute; inset: 0; z-index: 4; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; background: rgba(10,4,5,.6); font-size: 16px; .hint { font-size: 13px; color: var(--c-text-2); } &.end { flex-direction: row; } }
@@ -205,4 +227,25 @@ const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volu
 .menu { position: relative; } .pop { &.quality-pop { min-width: 122px; white-space: nowrap; } position: absolute; bottom: 38px; right: 0; min-width: 90px; padding: 6px; border-radius: 12px; background: #2a1719; border: 1px solid var(--c-border-strong); button { width: 100%; height: 30px; border-radius: 8px; &.on { color: var(--c-accent-2); } &:hover { background: var(--c-surface-hover); } } }
 .vol { width: 70px; accent-color: #ee4b39; }
 .wide .vol { display: none; } .danmaku .ctl { padding-bottom: 14px; }
+
+.player.tall.snug:not(.compactControls) {
+  .ctl { padding-inline: 10px; }
+  .row { flex-wrap: wrap; gap: 4px; }
+  .row .sp { display: none; }
+  .ic, .vol { flex: none; }
+  .vol { width: 64px; margin: 0; }
+}
+.player.compactControls {
+  .top { flex-wrap: wrap; padding: 10px 12px; gap: 6px; }
+  .top .ttl { flex: 1; }
+  .chip, .rnd, .ic, .vol { flex: none; }
+  .chip { padding-inline: 8px; white-space: nowrap; }
+  .ctl { padding: 8px 12px 10px; background: rgba(18, 9, 10, .78); }
+  .row { flex-wrap: wrap; gap: 6px; }
+  .row .sp { display: none; }
+}
+.player.compactControls, .player.tall.snug {
+  .menu { position: static; }
+  .pop { left: 12px; right: auto; bottom: 100%; z-index: 1; max-height: var(--popup-height); overflow-y: auto; }
+}
 </style>
