@@ -1,3 +1,4 @@
+import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 test.describe('08 观看历史', () => {
   test.beforeEach(async ({ page }) => {
@@ -26,6 +27,64 @@ test.describe('08 观看历史', () => {
   })
   test('list view toggle & sort by progress', async ({ page }) => { await page.getByTestId('view-list').click(); await page.getByTestId('sort').click(); await expect(page.getByTestId('sort')).toContainText('按观看进度') })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=history-item]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/08-${w}x${h}.png` }) })
+})
+
+async function seedCalendarHistory(page: Page, dates: string[]) {
+  await page.addInitScript((timestamps) => {
+    const history = timestamps.map((timestamp, index) => ({
+      dramaId: `d${index + 1}`, episode: 31 + index, percent: 20,
+      watchedAt: Date.parse(timestamp),
+    }))
+    localStorage.setItem('jindi.library.v1', JSON.stringify({ history, favorites: [] }))
+  }, dates)
+}
+
+test.describe('观看历史自然日', () => {
+  test.use({ timezoneId: 'America/New_York' })
+
+  test('keeps the day before a short spring day in the earlier group', async ({ page }) => {
+    await page.clock.setFixedTime(new Date('2026-03-09T04:15:00Z'))
+    await seedCalendarHistory(page, ['2026-03-08T05:00:00Z', '2026-03-08T04:30:00Z'])
+    await page.goto('/#/history')
+    await expect(page.getByTestId('group-yesterday').getByTestId('history-item')).toHaveCount(1)
+    await expect(page.getByTestId('group-yesterday')).toContainText('第31集')
+    await expect(page.getByTestId('group-earlier')).toContainText('第32集')
+    await expect(page.getByTestId('group-earlier')).toContainText('2天前观看')
+  })
+
+  test('refreshes across a long autumn day and keeps exact 7-day and 30-day limits', async ({ page }) => {
+    await page.clock.install({ time: new Date('2026-11-02T04:59:40Z') })
+    await page.clock.pauseAt(new Date('2026-11-02T04:59:50Z'))
+    await seedCalendarHistory(page, [
+      '2026-11-01T04:30:00Z', '2026-11-01T03:59:00Z',
+      '2026-10-27T16:00:00Z', '2026-10-26T16:00:00Z',
+      '2026-10-04T16:00:00Z', '2026-10-03T16:00:00Z',
+    ])
+    await page.goto('/#/history')
+    await expect(page.getByTestId('group-today')).toContainText('第31集')
+    await expect(page.getByTestId('group-yesterday')).toContainText('第32集')
+
+    await page.clock.fastForward(15_000)
+    await expect(page.getByTestId('group-today')).toHaveCount(0)
+    await expect(page.getByTestId('group-yesterday')).toContainText('第31集')
+    await expect(page.getByTestId('group-earlier')).toContainText('第32集')
+    await expect(page.getByTestId('group-earlier')).toContainText('2天前观看')
+
+    await page.getByTestId('fw-近7天').click()
+    await expect(page.getByTestId('history-item')).toHaveCount(3)
+    await expect(page.getByTestId('page-history')).toContainText('第33集')
+    await expect(page.getByTestId('page-history')).not.toContainText('第34集')
+    await page.getByTestId('fw-近30天').click()
+    await expect(page.getByTestId('history-item')).toHaveCount(5)
+    await expect(page.getByTestId('page-history')).toContainText('第35集')
+    await expect(page.getByTestId('page-history')).not.toContainText('第36集')
+
+    await page.clock.setSystemTime(new Date('2026-11-03T05:15:00Z'))
+    await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+    await expect(page.getByTestId('history-item')).toHaveCount(4)
+    await expect(page.getByTestId('page-history')).not.toContainText('第35集')
+    await expect(page.getByTestId('group-yesterday')).toHaveCount(0)
+  })
 })
 
 test('desktop history clear survives a failed write and restart', async ({ page }) => {

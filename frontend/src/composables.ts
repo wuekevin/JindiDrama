@@ -8,11 +8,21 @@ export function watchStatus(history: HistoryEntry | undefined, drama: Drama): 'u
   }
   return drama.episodeCount > 0 && history.episode >= drama.episodeCount ? 'done' : 'watching'
 }
-export function dayBucket(ts: number, now = Date.now()): 'today' | 'yesterday' | 'earlier' {
-  const s = new Date(now); s.setHours(0, 0, 0, 0); const t0 = s.getTime()
-  return ts >= t0 ? 'today' : ts >= t0 - 86400e3 ? 'yesterday' : 'earlier'
+function localCalendarDay(timestamp: number): number {
+  const date = new Date(timestamp)
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86_400_000
 }
-export function agoText(ts: number, now = Date.now()): string { const d = Math.floor((now - ts) / 86400e3); return d <= 0 ? '今天观看' : `${d}天前观看` }
+
+export function historyDay(timestamp: number, now = Date.now()) {
+  const age = Math.max(0, localCalendarDay(now) - localCalendarDay(timestamp))
+  const bucket = age === 0 ? 'today' : age === 1 ? 'yesterday' : 'earlier'
+  return { age, bucket } as const
+}
+
+export function agoText(age: number): string {
+  return age === 0 ? '今天观看' : `${age}天前观看`
+}
+
 export function watchHours(hs: HistoryEntry[]): number {
   const minutes = hs.reduce((total, entry) => {
     if (entry.dramaId.startsWith('local-')) {
