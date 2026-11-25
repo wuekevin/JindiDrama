@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { createReadStream } from 'node:fs'
+import { createReadStream, realpathSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hostedPackageHeader } from './package-provenance.mjs'
 
 const manifest = 'SHA256SUMS.txt'
@@ -103,7 +103,18 @@ export async function verifyHostedPackage(directory, platform, env = process.env
   return checksums
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule(entry) {
+  // Older Node 22 versions lack import.meta.main. Eval uses argv[1] for the first user argument.
+  if (!entry || entry === '-' || process.execArgv.some((arg) => /^(-[ep]+$|--(eval|print)(=|$))/.test(arg))) return false
+  if (import.meta.url === pathToFileURL(entry).href) return true
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url))
+  } catch {
+    return false
+  }
+}
+
+if (import.meta.main ?? isMainModule(process.argv[1])) {
   const [first, platform, directory, ...extra] = process.argv.slice(2)
   if (first === '--verify' && (platformPackages.has(platform) || platform === 'release') && directory && extra.length === 0) {
     await verify(directory, platform)

@@ -88,7 +88,7 @@ const isolatedMacTest = onMac && mode === 'smoke'
       '',
       '从 Finder 正常打开应用时，会使用当前用户的 JindiDrama 数据目录。相同应用标识也会共享网页缓存。要与日常资料和缓存隔离，请登录专用的 macOS 测试用户账号。',
       '',
-      '如需在测试账号中为这次试用创建临时数据库，请在终端进入解压得到的 `JindiDrama.app` 所在目录，再运行以下命令。该命令只更改数据库所在的数据目录，网页缓存仍属于当前账号。',
+      '如需在测试账号中为这次试用创建临时数据库，请在终端进入解压得到的 `JindiDrama.app` 所在目录，再运行以下命令。该命令将 SQLite、日志和应用默认缓存放在临时数据目录。网页缓存仍属于当前测试账号。',
       '',
       '```sh',
       'jindi_test_dir=$(mktemp -d /tmp/jindidrama-smoke.XXXXXX) &&',
