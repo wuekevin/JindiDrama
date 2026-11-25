@@ -1,0 +1,47 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix: { os: [windows-latest, macos-latest] }
+    runs-on: ${{ matrix.os }}
+    env:
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: node --test scripts/package-checksums.test.mjs scripts/assemble-release.test.mjs
+      - shell: bash
+        run: bash scripts/test-verify-distribution-source.sh
+      - if: runner.os == 'macOS'
+        run: python3 -m unittest discover -s scripts -p test_macos_desktop_smoke.py
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-windows-smoke-session.ps1
+      - run: npm ci
+        working-directory: frontend
+      - run: npm run typecheck && npm run test && npm run build
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npm run test:e2e
+        working-directory: frontend
+      - run: go vet ./... && go test ./...
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+      - run: wails build -s -m -nosyncgomod -skipbindings
+        env:
+          CGO_CFLAGS: ${{ runner.os == 'macOS' && '-mmacosx-version-min=13.0' || '' }}
+          CGO_LDFLAGS: ${{ runner.os == 'macOS' && '-mmacosx-version-min=13.0' || '' }}
+      - run: git diff --exit-code -- go.mod go.sum frontend/package-lock.json
+      # 冒烟：产物存在（未签名；签名/公证需证书，见 docs/STATUS.md）
+      - name: smoke (binary exists)
+        shell: bash
+        run: ls build/bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.os }}
+          path: build/bin

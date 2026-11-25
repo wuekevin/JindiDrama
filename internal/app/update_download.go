@@ -1,0 +1,126 @@
+package app
+
+import (
+	"context"
+	"errors"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/wailsapp/wails/v2/pkg/runtime"
+)
+
+// DownloadUpdate saves the package bound to the last verified release check.
+func (a *App) DownloadUpdate(releaseURL string) (bool, error) {
+	if a.ctx == nil {
+		return false, errors.New("窗口尚未就绪")
+	}
+	a.updateMu.Lock()
+	asset := a.releaseAsset
+	if asset == nil || releaseURL != a.releaseURL {
+		a.updateMu.Unlock()
+		return false, errors.New("安装包已变更，请重新检查更新")
+	}
+	if !a.beginMediaExport() {
+		a.updateMu.Unlock()
+		return false, errors.New("已有保存操作进行中，或窗口正在关闭")
+	}
+	ctx, cancel := context.WithCancel(a.context())
+	a.cancelUpdate = cancel
+	a.updateMu.Unlock()
+	defer func() {
+		cancel()
+		a.updateMu.Lock()
+		a.cancelUpdate = nil
+		a.endMediaExport()
+		a.updateMu.Unlock()
+	}()
+
+	ext := filepath.Ext(asset.Name)
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:                "保存新版安装包",
+		DefaultFilename:      asset.Name,
+		Filters:              []runtime.FileFilter{{DisplayName: "金帝短剧安装包", Pattern: "*" + ext}},
+		CanCreateDirectories: true,
+	})
+	if err != nil {
+		return false, errors.New("无法打开系统保存对话框")
+	}
+	if path == "" || ctx.Err() != nil {
+		return false, nil
+	}
+	if !strings.EqualFold(filepath.Ext(path), ext) {
+		return false, errors.New("请选择以 " + ext + " 结尾的文件名")
+	}
+	a.updateMu.Lock()
+	current := asset == a.releaseAsset
+	a.updateMu.Unlock()
+	if !current {
+		return false, errors.New("安装包已变更，请重新检查更新")
+	}
+	return saveUpdate(ctx, path, asset.Download, func(publish func() error) error {
+		a.updateMu.Lock()
+		defer a.updateMu.Unlock()
+		return publish()
+	})
+}
+
+func (a *App) CancelUpdateDownload() {
+	a.updateMu.Lock()
+	defer a.updateMu.Unlock()
+	if a.cancelUpdate != nil {
+		a.cancelUpdate()
+	}
+}
+
+type stagedUpdate struct {
+	file    *os.File
+	publish func(string) error
+	cleanup func()
+}
+
+var errUpdateOrigin = errors.New("当前保存位置无法标记文件来源，请选择其他位置或前往发布页下载")
+
+func saveUpdate(ctx context.Context, path string, download func(context.Context, io.Writer) error, commit func(func() error) error) (bool, error) {
+	const saveError = "无法保存安装包，请检查保存位置和可用空间"
+	if _, err := os.Lstat(path); err == nil {
+		return false, errors.New("目标文件已存在，请使用其他文件名")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return false, errors.New(saveError)
+	}
+	stage, err := createUpdateStage(filepath.Dir(path))
+	if errors.Is(err, errUpdateOrigin) {
+		return false, err
+	}
+	if err != nil {
+		return false, errors.New(saveError)
+	}
+	defer stage.cleanup()
+	if err := download(ctx, stage.file); err != nil {
+		if ctx.Err() != nil {
+			return false, nil
+		}
+		return false, err
+	}
+	if err := stage.file.Sync(); err != nil {
+		return false, errors.New(saveError)
+	}
+	err = commit(func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return stage.publish(path)
+	})
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false, nil
+	}
+	if errors.Is(err, fs.ErrExist) {
+		return false, errors.New("目标文件已存在，请使用其他文件名")
+	}
+	if err != nil {
+		return false, errors.New(saveError)
+	}
+	return true, nil
+}

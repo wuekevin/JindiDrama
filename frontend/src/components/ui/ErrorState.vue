@@ -1,0 +1,3 @@
+<script setup lang="ts">import { WifiOff } from 'lucide-vue-next'; import BaseButton from './BaseButton.vue'; defineProps<{ message: string }>(); defineEmits<{ retry: [] }>()</script>
+<template><div class="err" role="alert" data-testid="error"><WifiOff :size="44" :stroke-width="1.4" /><h3>加载失败</h3><p>{{ message }}</p><BaseButton variant="outline" @click="$emit('retry')">重试</BaseButton></div></template>
+<style scoped lang="scss">.err { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 70px 0; color: var(--c-text-2); h3 { font-size: 18px; color: var(--c-text); } }</style>

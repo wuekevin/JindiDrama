@@ -1,0 +1,343 @@
+name: package
+# 手动触发：生成测试或签名候选安装包，仅上传 artifact。
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（如 v0.1.0）
+        default: v0.1.0
+      mode:
+        description: 打包模式
+        type: choice
+        default: smoke
+        options:
+          - smoke
+          - release
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PACKAGE_MODE: ${{ inputs.mode }}
+      PACKAGE_VERSION: ${{ inputs.version }}
+      LDFLAGS: -X jindi-drama/internal/app.Version=${{ inputs.version }}
+      GOFLAGS: -mod=readonly
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ inputs.mode == 'release' && '0' || '1' }}
+      - name: verify distribution source history
+        if: inputs.mode == 'release'
+        shell: bash
+        run: bash scripts/verify-distribution-source.sh
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: validate packaging inputs
+        shell: bash
+        run: |
+          if [[ "$PACKAGE_MODE" != smoke && "$PACKAGE_MODE" != release ]]; then exit 1; fi
+          core=$(go run ./cmd/validate-package-version -wails-config wails.json "$PACKAGE_VERSION")
+          echo "PACKAGE_CORE_VERSION=$core" >> "$GITHUB_ENV"
+      - name: validate release credentials
+        if: inputs.mode == 'release'
+        shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            required=(MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD)
+          else
+            required=(WINDOWS_CERT_PFX WINDOWS_CERT_PASSWORD)
+          fi
+          missing=()
+          for key in "${required[@]}"; do
+            if [[ -z "${!key}" ]]; then missing+=("$key"); fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "Missing release credentials: ${missing[*]}"
+            exit 1
+          fi
+      - name: build the frontend from its lockfile
+        working-directory: frontend
+        run: npm ci && npm run build
+      - name: verify Go dependencies
+        run: go mod download && go mod verify
+      - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+      - name: install NSIS (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis -y --no-progress
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+      - name: build (windows, NSIS installer)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          Get-Command makensis
+          wails build -s -m -nosyncgomod -clean -platform windows/amd64 -nsis -skipbindings -ldflags "$env:LDFLAGS"
+          if (-not (Get-ChildItem build/bin/*installer*.exe)) { Write-Error "NSIS 安装包未生成"; exit 1 }
+      - name: build and verify deployment target (macos)
+        if: runner.os == 'macOS'
+        env:
+          CGO_CFLAGS: -mmacosx-version-min=13.0
+          CGO_LDFLAGS: -mmacosx-version-min=13.0
+        run: |
+          wails build -s -m -nosyncgomod -clean -platform darwin/universal -skipbindings -ldflags "$LDFLAGS"
+          app=build/bin/JindiDrama.app
+          binary="$app/Contents/MacOS/JindiDrama"
+          lipo "$binary" -verify_arch arm64 x86_64
+          for key in CFBundleShortVersionString CFBundleVersion; do
+            actual=$(plutil -extract "$key" raw "$app/Contents/Info.plist")
+            test "$actual" = "$PACKAGE_CORE_VERSION"
+          done
+          target=$(plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist")
+          test "$target" = 13.0
+          for arch in arm64 x86_64; do
+            minimum=$(xcrun vtool -arch "$arch" -show-build "$binary" | awk '$1 == "minos" { print $2 }')
+            if [[ "$minimum" != "$target" ]]; then
+              echo "Unexpected deployment target for $arch: ${minimum:-missing}"
+              exit 1
+            fi
+          done
+      - name: confirm dependency files stayed unchanged
+        run: git diff --exit-code -- go.mod go.sum frontend/package-lock.json
+      - name: sign application (macos release)
+        if: runner.os == 'macOS' && inputs.mode == 'release'
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci ci.keychain
+          security default-keychain -s ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security import cert.p12 -k ci.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain
+          codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" build/bin/JindiDrama.app
+          codesign --verify --deep --strict build/bin/JindiDrama.app
+          rm -f cert.p12
+      - name: notarize application (macos release)
+        if: runner.os == 'macOS' && inputs.mode == 'release'
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          ditto -c -k --keepParent build/bin/JindiDrama.app notarize.zip
+          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
+          xcrun stapler staple build/bin/JindiDrama.app
+          xcrun stapler validate build/bin/JindiDrama.app
+          codesign --verify --deep --strict build/bin/JindiDrama.app
+          rm -f notarize.zip
+      - name: zip (macos)
+        if: runner.os == 'macOS'
+        working-directory: build/bin
+        run: |
+          ditto -c -k --keepParent JindiDrama.app JindiDrama-macos-universal.zip
+          unzip -tq JindiDrama-macos-universal.zip
+      - name: verify archived desktop startup (macos)
+        if: runner.os == 'macOS'
+        run: |
+          test "$(uname -m)" = arm64
+          set -- build/bin/JindiDrama-macos-universal.zip --version "$PACKAGE_VERSION" --arch arm64 --diagnostics-dir "$RUNNER_TEMP/jindi-arm64-smoke"
+          if [[ "$PACKAGE_MODE" == release ]]; then set -- "$@" --release; fi
+          python3 scripts/smoke-macos-desktop.py "$@"
+      - name: upload macOS startup diagnostics
+        if: failure() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-smoke-diagnostics
+          path: ${{ runner.temp }}/jindi-arm64-smoke/smoke.log
+          if-no-files-found: ignore
+      - name: sign application and installer (windows release)
+        if: runner.os == 'Windows' && inputs.mode == 'release'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $env:JD_SIGN_CERT = Join-Path $env:RUNNER_TEMP "jindidrama-signing.pfx"
+          $env:JD_SIGNTOOL = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          try {
+            [IO.File]::WriteAllBytes($env:JD_SIGN_CERT, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+            & ./scripts/sign-windows-release.ps1 build/bin/JindiDrama.exe
+            Push-Location build/windows/installer
+            try {
+              makensis '-DARG_WAILS_AMD64_BINARY=..\..\bin\JindiDrama.exe' -DJINDI_SIGN_UNINSTALLER project.nsi
+              if ($LASTEXITCODE -ne 0) { throw "NSIS rebuild failed" }
+            } finally {
+              Pop-Location
+            }
+            & ./scripts/sign-windows-release.ps1 build/bin/JindiDrama-amd64-installer.exe
+          } finally {
+            if (Test-Path $env:JD_SIGN_CERT) { Remove-Item $env:JD_SIGN_CERT }
+          }
+      - name: verify installer and WebView2 startup (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $inst = (Get-ChildItem build/bin/*installer*.exe | Select-Object -First 1).FullName
+          $expected = "${env:PACKAGE_CORE_VERSION}.0"
+          foreach ($binary in @("build/bin/JindiDrama.exe", $inst)) {
+            $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $binary).Path)
+            $product = "$($info.ProductMajorPart).$($info.ProductMinorPart).$($info.ProductBuildPart).$($info.ProductPrivatePart)"
+            $file = "$($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart).$($info.FilePrivatePart)"
+            if ($product -ne $expected -or $file -ne $expected) {
+              throw "Unexpected package version for ${binary}: product=$product file=$file expected=$expected"
+            }
+          }
+          $nativeProbe = Join-Path $env:RUNNER_TEMP 'jindi-windows-desktop-smoke.exe'
+          go build -o $nativeProbe ./cmd/windows-desktop-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Windows desktop smoke probe could not be built' }
+          $install = Start-Process -FilePath $inst -ArgumentList "/S" -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
+          $exe = "C:\Program Files\JindiDrama\JindiDrama.exe"
+          $uninstaller = "C:\Program Files\JindiDrama\uninstall.exe"
+          $checkFailure = $null
+          try {
+            if (-not (Test-Path $exe)) { throw "安装目录不符，$exe 不存在" }
+            if (Test-Path "C:\Program Files\JindiDrama\JindiDrama\JindiDrama.exe") { throw "安装目录多了一层 JindiDrama" }
+            $desk = @("C:\Users\Public\Desktop", [Environment]::GetFolderPath("Desktop")) | ForEach-Object { Join-Path $_ "金帝短剧.lnk" }
+            if (-not ($desk | Where-Object { Test-Path $_ })) { throw "桌面快捷方式「金帝短剧」不存在" }
+            $packaged = (Get-FileHash build/bin/JindiDrama.exe).Hash
+            if ((Get-FileHash $exe).Hash -ne $packaged) { throw "Installed application differs from packaged executable" }
+            Write-Host "安装目录与中文桌面快捷方式验证通过"
+            & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application "build/bin/JindiDrama.exe" -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application "build/bin/JindiDrama.exe" -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Tray -NativeProbe $nativeProbe
+          } catch {
+            $checkFailure = $_
+          } finally {
+            try {
+              if ($env:PACKAGE_MODE -eq "release" -and (Get-AuthenticodeSignature $uninstaller).Status -ne "Valid") {
+                throw "Installed uninstaller signature is invalid"
+              }
+              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+              if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
+              if (Test-Path $exe) { throw "Application remains after uninstall" }
+            } catch {
+              if ($null -eq $checkFailure) { throw }
+              Write-Warning "Uninstall also failed: $_"
+            }
+          }
+          if ($checkFailure) { throw $checkFailure }
+      - name: collect privacy and license notices
+        run: node scripts/package-notices.mjs build/bin
+      - name: generate release notes
+        run: node scripts/package-release-notes.mjs build/bin
+      - name: generate SHA-256 checksums
+        run: node scripts/package-checksums.mjs build/bin
+      - name: list output
+        shell: bash
+        run: ls -la build/bin
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.mode == 'release' && format('release-{0}-attempt-{1}', matrix.os, github.run_attempt) || format('package-{0}', matrix.os) }}
+          if-no-files-found: error
+          path: |
+            build/bin/*.exe
+            build/bin/*.zip
+            build/bin/RELEASE-NOTES.md
+            build/bin/RELEASE-ROLLBACK.md
+            build/bin/PRIVACY.md
+            build/bin/FRONTEND-LICENSES.md
+            build/bin/GO-LICENSES.md
+            build/bin/SHA256SUMS.txt
+  verify-windows-download:
+    needs: package
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.mode == 'release' && format('release-windows-latest-attempt-{0}', github.run_attempt) || 'package-windows-latest' }}
+          path: build/bin
+      - name: verify downloaded Windows packages
+        run: node scripts/package-checksums.mjs --verify windows build/bin
+
+  verify-macos-intel:
+    needs: package
+    if: ${{ !cancelled() }}
+    runs-on: macos-15-intel
+    env:
+      PACKAGE_MODE: ${{ inputs.mode }}
+      PACKAGE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.mode == 'release' && format('release-macos-latest-attempt-{0}', github.run_attempt) || 'package-macos-latest' }}
+          path: build/bin
+      - name: verify the downloaded Universal archive on Intel
+        run: |
+          test "$(uname -m)" = x86_64
+          node scripts/package-checksums.mjs --verify macos build/bin
+          set -- build/bin/JindiDrama-macos-universal.zip --version "$PACKAGE_VERSION" --arch amd64 --diagnostics-dir "$RUNNER_TEMP/jindi-intel-smoke"
+          if [[ "$PACKAGE_MODE" == release ]]; then set -- "$@" --release; fi
+          python3 scripts/smoke-macos-desktop.py "$@"
+      - name: upload Intel startup diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-intel-smoke-diagnostics
+          path: ${{ runner.temp }}/jindi-intel-smoke/smoke.log
+          if-no-files-found: ignore
+
+  assemble-release:
+    needs: [package, verify-windows-download, verify-macos-intel]
+    if: inputs.mode == 'release'
+    runs-on: ubuntu-latest
+    env:
+      PACKAGE_MODE: ${{ inputs.mode }}
+      PACKAGE_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-windows-latest-attempt-${{ github.run_attempt }}
+          path: release-input/windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-macos-latest-attempt-${{ github.run_attempt }}
+          path: release-input/macos
+      - name: assemble and verify the release handoff
+        run: node scripts/assemble-release.mjs release-input/windows release-input/macos release-handoff
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-handoff-${{ inputs.version }}-attempt-${{ github.run_attempt }}
+          path: release-handoff/
+          if-no-files-found: error

@@ -1,0 +1,5 @@
+.DS_Store
+node_modules/
+frontend/dist/
+frontend/test-results/
+build/bin/

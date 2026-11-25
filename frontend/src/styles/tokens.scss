@@ -1,0 +1,40 @@
+// Design tokens — 金帝短剧 Design System
+:root {
+  --c-bg-0: #0f0809;
+  --c-bg-1: #170e10;
+  --c-bg-2: #1e1214;
+  --c-surface: rgba(255, 255, 255, 0.05);
+  --c-surface-hover: rgba(255, 255, 255, 0.09);
+  --c-surface-solid: #2a1b1d;
+  --c-border: rgba(255, 255, 255, 0.09);
+  --c-border-strong: rgba(255, 255, 255, 0.18);
+  --c-text: #f6ece9;
+  --c-text-2: #c8b7b3;
+  --c-text-3: #8f7d79;
+  --c-accent: #ee4b39;
+  --c-accent-2: #ff7a5c;
+  --c-accent-deep: #b9281c;
+  --c-accent-soft: rgba(238, 75, 57, 0.18);
+  --c-gold: #f4b740;
+  --c-purple: #8f6cf0;
+  --c-success: #46c28a;
+  --c-danger: #ff5b5b;
+  --g-accent: linear-gradient(180deg, #f2634a 0%, #dc3a2a 100%);
+  --g-accent-h: linear-gradient(90deg, #ef5a45 0%, #e5402f 100%);
+  --g-nav-active: linear-gradient(90deg, rgba(214, 70, 52, 0.85), rgba(150, 40, 32, 0.55));
+  --r-xs: 6px; --r-sm: 10px; --r-md: 14px; --r-lg: 20px; --r-xl: 26px; --r-pill: 999px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 20px; --sp-6: 28px;
+  --sidebar-w: 200px; --topbar-h: 56px;
+  --font: 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Source Han Sans SC', system-ui, sans-serif;
+  --font-display: 'STKaiti', 'Kaiti SC', 'KaiTi', 'Songti SC', 'SimSun', serif;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-md: 15px; --fs-lg: 18px; --fs-xl: 22px;
+  --shadow-card: 0 6px 18px rgba(0, 0, 0, 0.35);
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --app-zoom: 1;
+}
+:root[data-theme='light'] {
+  --c-bg-0: #f6ece8; --c-bg-1: #fbf3f0; --c-bg-2: #fff8f5;
+  --c-surface: rgba(80, 30, 20, 0.05); --c-surface-hover: rgba(80, 30, 20, 0.09); --c-surface-solid: #ffffff;
+  --c-border: rgba(80, 30, 20, 0.12); --c-border-strong: rgba(80, 30, 20, 0.25);
+  --c-text: #2a1a18; --c-text-2: #5d4642; --c-text-3: #8a726d;
+}
