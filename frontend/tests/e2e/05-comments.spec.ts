@@ -385,3 +385,66 @@ test('desktop episode likes retry reads, keep committed state on write failure, 
   await page.reload()
   await expect(like).toHaveAttribute('aria-pressed', 'true')
 })
+
+test('only the selected own reply is deleted, with persistence and keyboard focus', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    Object.assign(window, { __JD_MEDIA: 'sim', go: { app: { App: {
+      StorageReady: async () => false,
+      LocalDanmaku: async () => [],
+      LocalEpisodeLiked: async () => false,
+      LocalComments: async (drama: string, episode: number) =>
+        sessionStorage.getItem(`comment-snapshot-${drama}-${episode}`) ?? '',
+      SaveLocalComments: async (drama: string, episode: number, snapshot: string) => {
+        if (sessionStorage.getItem('comment-fail-next-save')) {
+          sessionStorage.removeItem('comment-fail-next-save')
+          throw new Error('write failed')
+        }
+        sessionStorage.setItem(`comment-snapshot-${drama}-${episode}`, snapshot)
+      },
+    } } } })
+  })
+  await page.goto('/#/watch/d1/32?panel=comments&t=192&paused=1')
+  const comment = page.getByTestId('comment').first()
+  const replyButton = comment.getByTestId('reply-btn')
+  const replies = comment.getByTestId('comment-reply')
+  const count = comment.getByTestId('toggle-replies')
+  const saved = () => page.evaluate(() => sessionStorage.getItem('comment-snapshot-d1-32') ?? '')
+
+  await expect(replyButton).toHaveText('回复 (326)')
+  await count.click()
+  await expect(replies).toHaveCount(2)
+  await expect(comment.getByRole('button', { name: '删除回复' })).toHaveCount(0)
+
+  for (const text of ['只删除这一条', '保留这条回复']) {
+    await replyButton.click()
+    await comment.getByTestId('reply-input').fill(text)
+    await comment.getByTestId('reply-send').click()
+  }
+  await expect.poll(saved).toContain('保留这条回复')
+  await expect(replyButton).toHaveText('回复 (328)')
+  await expect(replies).toHaveCount(4)
+  const remove = replies.filter({ hasText: '只删除这一条' }).getByRole('button', { name: '删除回复' })
+  await remove.focus()
+  await expect(page.getByTestId('player')).toHaveAttribute('data-state', /^(ready|paused)$/)
+  await page.screenshot({ path: testInfo.outputPath('comment-own-reply.png') })
+  await page.evaluate(() => sessionStorage.setItem('comment-fail-next-save', '1'))
+  await remove.press('Enter')
+
+  await expect(replies).toHaveCount(3)
+  await expect(replies.filter({ hasText: '只删除这一条' })).toHaveCount(0)
+  await expect(replyButton).toHaveText('回复 (327)')
+  await expect(replyButton).toBeFocused()
+  const failedSave = page.getByRole('alert').filter({ hasText: '本地评论保存失败' })
+  await expect(failedSave).toBeVisible()
+  expect(await saved()).toContain('只删除这一条')
+  await failedSave.getByRole('button', { name: '重试' }).click()
+  await expect(failedSave).toHaveCount(0)
+  expect(await saved()).not.toContain('只删除这一条')
+
+  await page.reload()
+  await expect(replyButton).toHaveText('回复 (327)')
+  await count.click()
+  await expect(replies).toHaveCount(3)
+  await expect(replies.filter({ hasText: '保留这条回复' })).toBeVisible()
+  await expect(comment.getByRole('button', { name: '删除回复' })).toHaveCount(1)
+})

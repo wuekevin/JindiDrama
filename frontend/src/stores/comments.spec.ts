@@ -34,5 +34,24 @@ describe('comments store', () => {
       vi.unstubAllGlobals()
     }
   })
+  it('rejects demo replies and replies from another episode', () => {
+    const store = useCommentStore()
+    const parent = store.visible[0]
+    const demoReply = parent.replies[0]
+    const originalTotal = parent.replyTotal
+    expect(store.removeReply(parent.id, demoReply.id)).toBe(false)
+    expect(parent.replies[0]).toBe(demoReply)
+    expect(parent.replyTotal).toBe(originalTotal)
+
+    expect(store.reply(parent, '自己的回复')).toBeNull()
+    const ownReply = parent.replies.at(-1)!
+    store.open('d1', 31)
+    expect(store.removeReply(parent.id, ownReply.id)).toBe(false)
+    store.open('d1', 32)
+    expect(store.visible[0].replies).toContain(ownReply)
+    expect(store.removeReply(parent.id, ownReply.id)).toBe(true)
+    expect(store.removeReply(parent.id, ownReply.id)).toBe(false)
+    expect(parent.replyTotal).toBe(originalTotal)
+  })
   it('reply adds', () => { const s = useCommentStore(); const c = s.visible[0]; const n = c.replyTotal; expect(s.reply(c, '')).not.toBeNull(); expect(s.reply(c, '同意')).toBeNull(); expect(c.replyTotal).toBe(n + 1) })
 })

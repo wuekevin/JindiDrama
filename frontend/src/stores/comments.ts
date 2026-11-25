@@ -80,6 +80,18 @@ export const useCommentStore = defineStore('comments', () => {
   function like(c: Comment | Reply) { if (!canEdit()) return; c.liked = !c.liked; c.likes += c.liked ? 1 : -1; void persist() }
   function remove(id: string) { if (!canEdit()) return; const l = all.value; const i = l.findIndex((c) => c.id === id && c.mine); if (i >= 0) { l.splice(i, 1); void persist() } }
   function reply(c: Comment, text: string): string | null { if (!canEdit()) return '本集评论尚未载入'; const e = validate(text); if (e) return e; c.replies.push({ id: `${c.id}-m${localId()}`, user: '我', level: 1, text: text.trim(), likes: 0, liked: false, ago: '刚刚', mine: true }); c.replyTotal++; void persist(); return null }
+  function removeReply(commentId: string, replyId: string): boolean {
+    if (!canEdit()) return false
+    const comment = all.value.find(({ id }) => id === commentId)
+    if (!comment) return false
+    const index = comment.replies.findIndex(({ id, mine }) => id === replyId && mine === true)
+    if (index < 0) return false
+    comment.replies.splice(index, 1)
+    comment.replyTotal = Math.max(comment.replies.length, comment.replyTotal - 1)
+    void persist()
+    return true
+  }
+
   const toggleReplies = (id: string) => { const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s }
-  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, validate, open, loading, readError, saveError, load, persist, expanded, toggleReplies }
+  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, removeReply, validate, open, loading, readError, saveError, load, persist, expanded, toggleReplies }
 })
