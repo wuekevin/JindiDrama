@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { hostedPackageHeader } from './package-provenance.mjs'
 
 const manifest = 'SHA256SUMS.txt'
 const sidecars = ['RELEASE-NOTES.md', 'RELEASE-ROLLBACK.md', 'PRIVACY.md', 'FRONTEND-LICENSES.md', 'GO-LICENSES.md']
@@ -82,13 +83,35 @@ export async function verify(directory, platform) {
   return checksums
 }
 
+export async function readVerifiedText(directory, name, digest) {
+  const contents = await readFile(join(directory, name))
+  if (createHash('sha256').update(contents).digest('hex') !== digest) {
+    throw new Error(`SHA-256 mismatch: ${name}`)
+  }
+  return contents.toString('utf8')
+}
+
+export async function verifyHostedPackage(directory, platform, env = process.env) {
+  const header = hostedPackageHeader(env)
+  const checksums = await verify(directory, platform)
+  const name = 'RELEASE-NOTES.md'
+  const notes = await readVerifiedText(directory, name, checksums.get(name))
+  const lines = notes.split(/\r?\n/, header.length)
+  if (header.some((line, index) => lines[index] !== line)) {
+    throw new Error(`${platform} release notes do not match the expected mode, version, commit, run, and attempt`)
+  }
+  return checksums
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const [first, platform, directory, ...extra] = process.argv.slice(2)
   if (first === '--verify' && (platformPackages.has(platform) || platform === 'release') && directory && extra.length === 0) {
     await verify(directory, platform)
+  } else if (first === '--verify-hosted' && platformPackages.has(platform) && directory && extra.length === 0) {
+    await verifyHostedPackage(directory, platform)
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory>')
   }
 }

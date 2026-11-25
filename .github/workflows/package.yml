@@ -155,7 +155,7 @@ jobs:
         if: failure() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
         with:
-          name: macos-arm64-smoke-diagnostics
+          name: macos-arm64-${{ inputs.mode }}-startup-diagnostics-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/jindi-arm64-smoke/smoke.log
           if-no-files-found: ignore
       - name: sign application and installer (windows release)
@@ -282,7 +282,7 @@ jobs:
         run: ls -la "$PACKAGE_DIR"
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.mode == 'release' && format('release-{0}-attempt-{1}', matrix.os, github.run_attempt) || format('package-{0}', matrix.os) }}
+          name: ${{ inputs.mode == 'release' && format('release-{0}-attempt-{1}', matrix.os, github.run_attempt) || format('package-{0}-attempt-{1}', matrix.os, github.run_attempt) }}
           if-no-files-found: error
           path: |
             ${{ env.PACKAGE_DIR }}/*.exe
@@ -297,6 +297,9 @@ jobs:
     needs: package
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    env:
+      PACKAGE_MODE: ${{ inputs.mode }}
+      PACKAGE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -304,10 +307,10 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.mode == 'release' && format('release-windows-latest-attempt-{0}', github.run_attempt) || 'package-windows-latest' }}
+          name: ${{ inputs.mode == 'release' && format('release-windows-latest-attempt-{0}', github.run_attempt) || format('package-windows-latest-attempt-{0}', github.run_attempt) }}
           path: build/bin
       - name: verify downloaded Windows packages
-        run: node scripts/package-checksums.mjs --verify windows build/bin
+        run: node scripts/package-checksums.mjs --verify-hosted windows build/bin
 
   verify-macos-intel:
     needs: package
@@ -326,12 +329,12 @@ jobs:
           node-version: 22
       - uses: actions/download-artifact@v4
         with:
-          name: ${{ inputs.mode == 'release' && format('release-macos-latest-attempt-{0}', github.run_attempt) || 'package-macos-latest' }}
+          name: ${{ inputs.mode == 'release' && format('release-macos-latest-attempt-{0}', github.run_attempt) || format('package-macos-latest-attempt-{0}', github.run_attempt) }}
           path: build/bin
       - name: verify the downloaded Universal archive on Intel
         run: |
           test "$(uname -m)" = x86_64
-          node scripts/package-checksums.mjs --verify macos build/bin
+          node scripts/package-checksums.mjs --verify-hosted macos build/bin
           set -- build/bin/JindiDrama-macos-universal.zip --version "$PACKAGE_VERSION" --arch amd64 --diagnostics-dir "$RUNNER_TEMP/jindi-intel-smoke"
           if [[ "$PACKAGE_MODE" == release ]]; then set -- "$@" --release; fi
           python3 scripts/smoke-macos-desktop.py "$@"
@@ -339,7 +342,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: macos-intel-smoke-diagnostics
+          name: macos-intel-${{ inputs.mode }}-startup-diagnostics-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/jindi-intel-smoke/smoke.log
           if-no-files-found: ignore
 

@@ -8,3 +8,17 @@ export function githubBuildSource({ GITHUB_SHA: sha, GITHUB_REPOSITORY: reposito
   return '[提交 `' + sha + '`](' + sourceURL + '/commit/' + sha + ') · [打包运行 ' + runID +
     '，第 ' + attempt + ' 次](' + sourceURL + '/actions/runs/' + runID + '/attempts/' + attempt + ')'
 }
+
+export function hostedPackageHeader(env) {
+  const { PACKAGE_VERSION: version, PACKAGE_MODE: mode, GITHUB_ACTIONS: inActions } = env
+  if (inActions !== 'true' || !['smoke', 'release'].includes(mode) ||
+      !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version ?? '')) {
+    throw new Error('Expected provenance from a GitHub Actions package build')
+  }
+  return [
+    '# 金帝短剧 ' + version,
+    '',
+    '- 打包类型 ' + (mode === 'release' ? '正式候选' : '测试包'),
+    '- 构建来源 ' + githubBuildSource(env),
+  ]
+}

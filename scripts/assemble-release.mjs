@@ -1,41 +1,29 @@
-import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { hashFile, platformPackages, releaseLicenses, sharedReleaseDocuments, verify, writeManifest } from './package-checksums.mjs'
-import { githubBuildSource } from './package-provenance.mjs'
+import { hashFile, platformPackages, readVerifiedText, releaseLicenses, sharedReleaseDocuments, verify, verifyHostedPackage, writeManifest } from './package-checksums.mjs'
+import { hostedPackageHeader } from './package-provenance.mjs'
 
 const [windowsDirectory, macosDirectory, output, ...extra] = process.argv.slice(2)
-const { PACKAGE_VERSION: version, PACKAGE_MODE: mode, GITHUB_ACTIONS: inActions } = process.env
+const { PACKAGE_MODE: mode } = process.env
 
 if (!windowsDirectory || !macosDirectory || !output || extra.length) {
   throw new Error('Usage: node scripts/assemble-release.mjs <windows-artifact> <macos-artifact> <output-directory>')
 }
-if (inActions !== 'true' || mode !== 'release' ||
-    !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version ?? '')) {
+if (mode !== 'release') {
   throw new Error('Release assembly requires provenance from a GitHub Actions release-mode build')
 }
 
-const source = '- 构建来源 ' + githubBuildSource(process.env)
-const header = ['# 金帝短剧 ' + version, '', '- 打包类型 正式候选', source]
+const header = hostedPackageHeader(process.env)
 const manifests = new Map()
 const directories = new Map([['windows', windowsDirectory], ['macos', macosDirectory]])
 
 async function verifiedText(platform, name) {
-  const contents = await readFile(join(directories.get(platform), name))
-  if (createHash('sha256').update(contents).digest('hex') !== manifests.get(platform).get(name)) {
-    throw new Error(`SHA-256 mismatch: ${platform}/${name}`)
-  }
-  return contents.toString('utf8')
+  return readVerifiedText(directories.get(platform), name, manifests.get(platform).get(name))
 }
 
 for (const [platform, directory] of directories) {
-  manifests.set(platform, await verify(directory, platform))
-  const notes = await verifiedText(platform, 'RELEASE-NOTES.md')
-  const [title, blank, kind, provenance] = notes.split(/\r?\n/, header.length)
-  if ([title, blank, kind, provenance].some((line, index) => line !== header[index])) {
-    throw new Error(`${platform} release notes do not match the expected mode, version, commit, run, and attempt`)
-  }
+  manifests.set(platform, await verifyHostedPackage(directory, platform))
 }
 
 for (const name of sharedReleaseDocuments) {

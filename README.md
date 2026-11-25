@@ -72,6 +72,8 @@ pwsh -NoProfile -File scripts/smoke-windows-desktop.ps1 -Application 'C:\Program
 
 macOS 打包会解压最终 Universal ZIP，在 Apple Silicon 上启动归档中的应用，并确认实际运行的是 arm64。Intel runner 下载同一份产物、核验 SHA-256，再确认 amd64 启动。两边都核对应用版本，正式候选还校验解包后的公证票据。开发者用本机运行该检查时，测试构建使用独立的 `local.jindidrama.archiveqa.*` bundle ID。
 
+GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-windows-latest-attempt-2` 和 `package-macos-latest-attempt-2`。下载复验会核对本轮的版本、提交和 SHA-256。遇到构建或验收失败时，选择「重新运行所有任务」或发起新运行，使两平台都能生成当前轮次的产物。
+
 ### 准备 GitHub Release
 
 正式打包检查所选提交的完整 Git 历史。可先运行 `bash scripts/verify-distribution-source.sh`，再按照验收记录准备发行。

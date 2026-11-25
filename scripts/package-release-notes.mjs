@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { copyFile, lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { githubBuildSource } from './package-provenance.mjs'
+import { hostedPackageHeader } from './package-provenance.mjs'
 
 const [directory, platform = process.platform] = process.argv.slice(2)
 const { PACKAGE_VERSION: version, PACKAGE_MODE: mode, GITHUB_SHA: sha,
@@ -15,13 +15,13 @@ if (inActions !== 'true' && mode === 'release') {
   throw new Error('Release-candidate notes require a GitHub Actions build')
 }
 
-let provenance = '本地工作树（供测试）'
+let header = ['# 金帝短剧 ' + version, '', '- 打包类型 测试包', '- 构建来源 本地工作树（供测试）']
 if (inActions === 'true') {
   const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim()
   if (head !== sha) {
     throw new Error('GitHub build provenance does not match the checkout')
   }
-  provenance = githubBuildSource(process.env)
+  header = hostedPackageHeader(process.env)
 }
 
 const onMac = platform === 'darwin'
@@ -80,10 +80,7 @@ const verification = onMac
       '```',
     ]
 const lines = [
-  '# 金帝短剧 ' + version,
-  '',
-  '- 打包类型 ' + (mode === 'release' ? '正式候选' : '测试包'),
-  '- 构建来源 ' + provenance,
+  ...header,
   '- 系统要求 ' + system,
   '',
   '## 安装文件',

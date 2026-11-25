@@ -114,3 +114,31 @@ test('requires release mode and preserves an existing handoff directory', async 
   assert.match(exists.stderr, /EEXIST/)
   assert.equal(await readFile(join(output, 'existing'), 'utf8'), 'keep')
 })
+
+test('hosted verification matches the current smoke or release attempt on both platforms', async (t) => {
+  const { windows, mac } = await fixture(t)
+  for (const [platform, directory] of [['windows', windows], ['macos', mac]]) {
+    const args = ['--verify-hosted', platform, directory]
+    const release = run(checksums, args, { env })
+    assert.equal(release.status, 0, release.stderr)
+
+    await writeFile(join(directory, 'RELEASE-NOTES.md'), releaseNotes.replace('正式候选', '测试包'))
+    generate(directory)
+    const smokeEnv = { ...env, PACKAGE_MODE: 'smoke' }
+    const smoke = run(checksums, args, { env: smokeEnv })
+    assert.equal(smoke.status, 0, smoke.stderr)
+
+    for (const change of [
+      { PACKAGE_MODE: 'release' },
+      { PACKAGE_VERSION: 'v0.1.1-rc.1' },
+      { GITHUB_SHA: 'b'.repeat(40) },
+      { GITHUB_REPOSITORY: 'other/JindiDrama' },
+      { GITHUB_RUN_ID: '54321' },
+      { GITHUB_RUN_ATTEMPT: '3' },
+    ]) {
+      const wrong = run(checksums, args, { env: { ...smokeEnv, ...change } })
+      assert.equal(wrong.status, 1)
+      assert.match(wrong.stderr, /release notes do not match/)
+    }
+  }
+})
