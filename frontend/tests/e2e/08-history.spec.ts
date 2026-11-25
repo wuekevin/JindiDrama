@@ -642,3 +642,163 @@ test('terminal and locked bookmarks keep replay or selection available without o
   await expect(page.getByTestId('continue')).toHaveCount(0)
   await expect(page.getByTestId('ep').first()).toBeVisible()
 })
+
+test('history keeps grid, list, filters and selection reachable at the saved 220% zoom', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.addInitScript(() => {
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: 220 }))
+    if (localStorage.getItem('jindi.library.v1')) return
+    const history = Array.from({ length: 12 }, (_, index) => {
+      const time = new Date()
+      time.setHours(0, 0, 0, 0)
+      time.setDate(time.getDate() - (index < 3 ? 0 : index < 7 ? 1 : 3))
+      return { dramaId: `d${index + 1}`, episode: index === 0 ? 32 : 1, percent: 40, watchedAt: time.getTime() - index * 1000 + 15000 }
+    })
+    localStorage.setItem('jindi.library.v1', JSON.stringify({ history, favorites: [] }))
+  })
+  await page.goto('/#/history')
+  const history = page.getByTestId('page-history')
+  const items = history.getByTestId('history-item')
+  await expect(items).toHaveCount(12)
+  const bounds = (await history.boundingBox())!
+  const clipped = (testIds: string[]) => history.evaluate((root, ids) =>
+    ids.flatMap(id => [...root.querySelectorAll(`[data-testid="${id}"]`)].flatMap(el => {
+      const box = el.getBoundingClientRect()
+      const area = root.getBoundingClientRect()
+      return box.width > 0 && box.left >= area.left - 1 && box.right <= area.right + 1 ? [] : [id]
+    })), testIds)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(1281)
+  const controls = ['continue-latest', 'clear-all', 'htab-watching', 'sort', 'view-list', 'resume', 'h-more', 'hcheck']
+  expect(await clipped(controls)).toEqual([])
+  await page.screenshot({ path: testInfo.outputPath('history-grid-220.png') })
+
+  const filters = history.getByRole('button', { name: '筛选历史' })
+  await filters.press('Enter')
+  await expect(filters).toHaveAttribute('aria-expanded', 'false')
+  await filters.press('Enter')
+  await history.getByTestId('fw-今天').click()
+  await expect(items).toHaveCount(3)
+  await history.getByTestId('fw-全部').click()
+  await history.getByTestId('view-list').click()
+  expect(await clipped(controls)).toEqual([])
+  const first = items.first()
+  const more = first.getByTestId('h-more')
+  await more.press('Enter')
+  await page.keyboard.press('Tab')
+  const deleteItem = first.getByTestId('h-delete')
+  await expect(deleteItem).toBeFocused()
+  await expect(deleteItem).toHaveCSS('color', 'rgb(246, 236, 233)')
+  await page.keyboard.press('Escape')
+  await expect(more).toBeFocused()
+
+  await first.getByTestId('resume').click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32/)
+  await page.goBack()
+  await items.first().getByRole('checkbox').press('Space')
+  const batch = history.getByTestId('batchbar')
+  await expect(batch).toContainText('已选 1 条')
+  await batch.getByTestId('batch-delete').press('Enter')
+  const dialog = page.getByRole('dialog', { name: '删除所选记录' })
+  await expect(dialog).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toHaveCount(0)
+  await expect(batch.getByTestId('batch-delete')).toBeFocused()
+  await batch.getByTestId('batch-delete').press('Enter')
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Enter')
+  await expect(items).toHaveCount(11)
+  await page.reload()
+  await expect(items).toHaveCount(11)
+  await items.first().getByTestId('h-more').click()
+  await items.first().getByTestId('h-delete').click()
+  await expect(items).toHaveCount(10)
+  await page.reload()
+  await expect(items).toHaveCount(10)
+})
+
+test('clear history supports keyboard cancel and confirmation at 220% zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.addInitScript(() => {
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
+  })
+  await page.goto('/#/history')
+  const clear = page.getByTestId('clear-all')
+  const dialog = page.getByRole('dialog', { name: '清空观看历史' })
+  await clear.press('Enter')
+  await expect(dialog).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(clear).toBeFocused()
+  await expect(page.getByTestId('stat-total')).toHaveText('12')
+  await clear.press('Enter')
+  await page.keyboard.press('Shift+Tab')
+  await expect(dialog.getByTestId('modal-confirm')).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: '观看历史', exact: true })).toBeFocused()
+  await expect(page.getByTestId('empty')).toBeVisible()
+  await page.reload()
+  await expect(page.getByTestId('empty')).toBeVisible()
+})
+
+test('long licensed history metadata stays inside both layouts at high zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  const tag = 'LongLicensedTopic'.repeat(18)
+  await page.addInitScript((topic) => {
+    const entry = { id: 'local-history-tag', title: '授权短片', tags: [topic], summary: '', license: '作者自有', updatedTo: 1, episodeCount: 1 }
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 150 }))
+    localStorage.setItem('jindi.library.v1', JSON.stringify({
+      favorites: [], history: [{ dramaId: entry.id, episode: 1, percent: 35, watchedAt: Date.now() }],
+    }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false, LicensedCatalog: async () => [entry],
+    } } } })
+  }, tag)
+  await page.goto('/#/history')
+  const history = page.getByTestId('page-history')
+  const item = history.getByTestId('history-item').filter({ hasText: '授权短片' })
+  await expect(item).toHaveCount(1)
+  for (const view of ['view-grid', 'view-list']) {
+    await history.getByTestId(view).click()
+    const tagText = item.locator('.tg')
+    await expect(tagText).toHaveText(tag)
+    expect(await tagText.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  }
+})
+
+test('clear history can remove an older record whose drama is absent from the catalog', async ({ page }) => {
+  await page.addInitScript(() => {
+    if (localStorage.getItem('jindi.library.v1')) return
+    localStorage.setItem('jindi.library.v1', JSON.stringify({
+      favorites: ['d1'], history: [{ dramaId: 'd999999', episode: 1, percent: 10, watchedAt: Date.now() }],
+    }))
+  })
+  await page.goto('/#/history')
+  const clear = page.getByTestId('clear-all')
+  await expect(page.getByTestId('stat-total')).toHaveText('0')
+  await expect(clear).toBeEnabled()
+  await clear.click()
+  const dialog = page.getByRole('dialog', { name: '清空观看历史' })
+  await expect(dialog).toContainText('将删除全部 1 条观看记录')
+  await dialog.getByTestId('modal-confirm').click()
+  await expect(clear).toBeDisabled()
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jindi.library.v1')!)))
+    .toMatchObject({ favorites: ['d1'], history: [] })
+})
+
+test('history header wraps before the compact list breakpoint at 220% zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1640, height: 860 })
+  await page.addInitScript(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 })))
+  await page.goto('/#/history')
+  const title = page.getByRole('heading', { name: '观看历史', exact: true })
+  await expect(title).toBeVisible()
+  const lines = await title.evaluate((heading) => {
+    const text = document.createRange()
+    text.selectNodeContents(heading)
+    return text.getClientRects().length
+  })
+  expect(lines).toBe(1)
+  const geometry = await page.getByTestId('clear-all').evaluate((button) => ({
+    right: button.getBoundingClientRect().right,
+    end: button.closest('.hero')!.getBoundingClientRect().right,
+  }))
+  expect(geometry.right).toBeLessThanOrEqual(geometry.end)
+})
