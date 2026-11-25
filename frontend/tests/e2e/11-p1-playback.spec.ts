@@ -108,6 +108,11 @@ test.describe('P1 真实演示媒体播放', () => {
     await checkMedia(true)
     expect(await t(page)).toBeCloseTo(pausedAt, 1)
     await page.screenshot({ path: testInfo.outputPath('comments-video-continuity.png') })
+    await page.getByRole('button', { name: '表情', exact: true }).click()
+    await page.getByRole('button', { name: '微笑' }).click()
+    await expect(page.getByTestId('comment-input')).toHaveValue('😊')
+    await checkMedia(true)
+    expect(await t(page)).toBeCloseTo(pausedAt, 1)
 
     await page.getByTestId('comment-close').click()
     await expect(page.getByTestId('page-watch')).toBeVisible()

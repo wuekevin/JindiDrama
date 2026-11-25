@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { X, Smile, Image, Video, AtSign, ThumbsUp, MessageCircle, Ellipsis, Crown, ChevronRight } from 'lucide-vue-next'
 import { useCommentStore, MAX_LEN, type Comment } from '@/stores/comments'
 import { useToastStore } from '@/stores/toast'
@@ -10,12 +10,66 @@ const err = ref('')
 const replyFor = ref<string | null>(null)
 const menuFor = ref<string | null>(null)
 const draft = c.draftForEpisode()
+const editor = ref<HTMLTextAreaElement>()
+const emojiTrigger = ref<HTMLButtonElement>()
+const emojiChoices = ref<HTMLElement>()
+const emojiOpen = ref(false)
+const editorComposing = ref(false)
+const emojis = [
+  { label: '微笑', value: '😊' },
+  { label: '喜欢', value: '💖' },
+  { label: '笑哭', value: '😂' },
+  { label: '鼓掌', value: '👏' },
+  { label: '惊讶', value: '😮' },
+  { label: '流泪', value: '😢' },
+  { label: '期待', value: '✨' },
+  { label: '赞', value: '👍' },
+]
 const tabs = [{ k: 'new', l: '最新' }, { k: 'hot', l: '最热' }, { k: 'author', l: '只看作者' }] as const
 const n = (v: number) => (v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v))
 const over = computed(() => draft.text.length > MAX_LEN)
 const composing = (event?: KeyboardEvent) => event?.isComposing || event?.keyCode === 229
+function closeEmojiPicker() {
+  emojiOpen.value = false
+  emojiTrigger.value?.focus()
+}
+async function toggleEmojiPicker() {
+  if (emojiOpen.value) {
+    closeEmojiPicker()
+    return
+  }
+  emojiOpen.value = true
+  await nextTick()
+  if (emojiOpen.value) emojiChoices.value?.querySelector('button')?.focus()
+}
+async function insertEmoji(value: string) {
+  const input = editor.value
+  if (!input || editorComposing.value || c.draftForEpisode() !== draft) return
+  const { selectionStart: start, selectionEnd: end } = input
+  const updated = draft.text.slice(0, start) + value + draft.text.slice(end)
+  const fits = updated.length <= MAX_LEN
+  if (fits) draft.text = updated
+  err.value = fits ? '' : `评论不能超过 ${MAX_LEN} 字`
+  emojiOpen.value = false
+  await nextTick()
+  editor.value?.focus()
+  if (fits) editor.value?.setSelectionRange(start + value.length, start + value.length)
+}
+function closePickerOnFocusExit(event: FocusEvent) {
+  const panel = event.currentTarget
+  const next = event.relatedTarget
+  if (panel instanceof HTMLElement && (!(next instanceof Node) || !panel.contains(next))) {
+    emojiOpen.value = false
+  }
+}
 function closeOnEscape(event: KeyboardEvent) {
-  if (!composing(event)) emit('close')
+  if (composing(event)) return
+  if (emojiOpen.value) {
+    event.stopPropagation()
+    closeEmojiPicker()
+    return
+  }
+  emit('close')
 }
 function submit(event?: KeyboardEvent) {
   if (composing(event) || c.draftForEpisode() !== draft) return
@@ -41,13 +95,19 @@ function del(id: string) { c.remove(id); menuFor.value = null; toast.push('评�
 const dummy = () => toast.push('该功能在演示模式下暂不可用')
 </script>
 <template>
-  <aside class="cp" role="complementary" aria-label="本集评论" data-testid="comment-panel" @keydown.esc="closeOnEscape">
+  <aside class="cp on-dark" role="complementary" aria-label="本集评论" data-testid="comment-panel"
+    @keydown.esc="closeOnEscape" @focusout="closePickerOnFocusExit">
     <header><h2>本集评论 <small data-testid="comment-total">({{ c.total.toLocaleString() }})</small></h2><button aria-label="关闭评论" data-testid="comment-close" @click="emit('close')"><X :size="24" /></button></header>
     <div class="sorts"><button v-for="t in tabs" :key="t.k" :class="{ on: c.sort === t.k }" :data-testid="`csort-${t.k}`" @click="c.sort = t.k">{{ t.l }}</button></div>
     <div class="editor"><i class="av" />
-      <div class="box"><textarea v-model="draft.text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
-    <div class="tools"><button aria-label="表情" @click="dummy"><Smile :size="22" /></button><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button>
+      <div class="box"><textarea ref="editor" v-model="draft.text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input"
+        @input="err = ''" @compositionstart="editorComposing = true" @compositionend="editorComposing = false"
+        @change="editorComposing = false" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
+    <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button>
       <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError" data-testid="comment-post" @click="submit()">发表评论</button></div>
+    <div v-show="emojiOpen" id="comment-emoji-choices" ref="emojiChoices" class="emoji-choices" role="group" aria-label="选择表情">
+      <button v-for="emoji in emojis" :key="emoji.value" type="button" :aria-label="emoji.label" @mousedown.prevent @click="insertEmoji(emoji.value)">{{ emoji.value }}</button>
+    </div>
     <p v-if="err" class="err" role="alert">{{ err }}</p>
     <p v-if="c.saveError" class="err" role="alert">本地评论保存失败 <button @click="c.persist()">重试</button></p>
     <div class="list">
@@ -77,6 +137,23 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 .editor { display: flex; gap: 14px; padding: 0 20px; .box { flex: 1; } textarea { width: 100%; resize: none; padding: 12px 16px; border-radius: 12px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border); outline: 0; font-size: 15px; &:focus { border-color: var(--c-accent); } } }
 .av { flex: none; width: 40px; height: 40px; border-radius: 50%; background: radial-gradient(circle at 50% 38%, #cfc4d6 22%, transparent 24%), linear-gradient(#8c8097, #6c6178); &.a2 { background: radial-gradient(circle at 50% 38%, #f1d2c2 24%, transparent 26%), linear-gradient(#b97c86, #6e3d4c); } &.a3 { width: 30px; height: 30px; background: radial-gradient(circle at 50% 38%, #f1d2c2 24%, transparent 26%), linear-gradient(#7d8fb9, #3d4d6e); } }
 .tools { display: flex; align-items: center; gap: 22px; padding: 8px 22px 6px 76px; button:not(.post) { color: var(--c-text); } .cnt { margin-left: auto; font-size: 13px; color: var(--c-text-2); &.over { color: var(--c-danger); } } .post { height: 36px; padding: 0 20px; border-radius: 18px; background: var(--g-accent); font-weight: 600; font-size: 14px; &:disabled { opacity: .5; cursor: not-allowed; } } }
+.emoji-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 22px 8px 76px;
+
+  button {
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--c-border);
+    border-radius: 8px;
+    background: var(--c-surface);
+    font-size: 19px;
+
+    &:hover, &:focus-visible { background: var(--c-surface-hover); }
+  }
+}
 .err { padding: 0 22px 6px 76px; color: var(--c-danger); font-size: 13px; }
 .list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 0; border-top: 1px solid var(--c-border); margin-top: 10px; }
 .cm { display: flex; gap: 14px; padding: 16px 0 10px; border-bottom: 1px solid var(--c-border); }
