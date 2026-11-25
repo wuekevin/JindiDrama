@@ -78,7 +78,7 @@ func (p *DemoProvider) load() error {
 	if err != nil || !info.Mode().IsRegular() {
 		return errors.New("授权片库缺少 catalog.json")
 	}
-	file, err := p.root.Open("catalog.json")
+	file, _, err := p.openRegularFile("catalog.json")
 	if err != nil {
 		return errors.New("无法读取授权片库清单")
 	}
@@ -308,14 +308,31 @@ func (p *DemoProvider) openMedia(name string) (*os.File, os.FileInfo, error) {
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
 		return nil, nil, errors.New(unavailable)
 	}
-	file, err := p.root.Open(name)
+	file, info, err := p.openRegularFile(name)
 	if err != nil {
 		return nil, nil, errors.New(unavailable)
 	}
-	info, err = file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+	if info.Size() == 0 {
 		_ = file.Close()
 		return nil, nil, errors.New(unavailable)
+	}
+	return file, info, nil
+}
+
+// Validate the opened descriptor because the directory entry can change after Stat.
+func (p *DemoProvider) openRegularFile(name string) (*os.File, os.FileInfo, error) {
+	file, err := p.root.OpenFile(name, regularReadFlags, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		_ = file.Close()
+		return nil, nil, fs.ErrInvalid
 	}
 	return file, info, nil
 }
