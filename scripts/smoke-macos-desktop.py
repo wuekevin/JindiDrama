@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Run the app extracted from a macOS packaging artifact in a smoke profile."""
+"""Smoke-test a macOS packaging artifact using a Go toolchain for SQLite verification."""
 
 import argparse
-from contextlib import closing, contextmanager
+from contextlib import contextmanager
 import hashlib
 import json
 import os
 import pathlib
 import plistlib
 import re
-import sqlite3
 import subprocess
 import tempfile
 import time
 import zipfile
+
+
+SOURCE_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 WINDOW_HELPER = """
@@ -104,25 +106,15 @@ def ready(profile, expected_version, expected_arch):
             return True
     return False
 
-def verify_database(profile):
-    database = (profile / "jindi.db").resolve(strict=True)
-    # The isolated profile may have a WAL header but no shared-memory file
-    # after shutdown. Open existing data with recovery allowed, never create it.
-    with closing(sqlite3.connect(database.as_uri() + "?mode=rw", uri=True)) as connection:
-        if connection.execute("PRAGMA quick_check").fetchone() != ("ok",):
-            raise RuntimeError("SQLite quick_check failed after normal shutdown")
-        tables = connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        if not {"favorites", "history", "search_history", "settings", "local_comments",
-                "local_danmaku", "library_receipts"} <= {row[0] for row in tables}:
-            raise RuntimeError("App did not initialize the tables required by the current desktop features")
-        connection.execute("SELECT sort_order FROM favorites LIMIT 1").fetchall()
-        connection.execute("SELECT episode_count_at_watch FROM history LIMIT 1").fetchall()
+def verify_database(profile, probe, output):
+    subprocess.run([probe, "verify-db", profile / "jindi.db"], check=True, timeout=30,
+                   stdout=output, stderr=subprocess.STDOUT)
 
 
-def run_app(executable, helper, profile, output, timeout, version, arch):
+def run_app(executable, helper, database_probe, profile, output, timeout, version, arch):
     env = dict(os.environ, JINDIDRAMA_DATA_DIR=str(profile))
     env.pop("JINDIDRAMA_LICENSED_MEDIA_DIR", None)
-    with output.open("wb") as stream:
+    with output.open("ab") as stream:
         process = subprocess.Popen([str(executable)], env=env, stdout=stream, stderr=subprocess.STDOUT)
         try:
             deadline = time.monotonic() + timeout
@@ -143,7 +135,7 @@ def run_app(executable, helper, profile, output, timeout, version, arch):
                 raise RuntimeError(f"App exit code: {process.returncode}")
             if list((profile / "logs" / "sessions").glob("run-*.session")):
                 raise RuntimeError("Normal exit left a running-session marker")
-            verify_database(profile)
+            verify_database(profile, database_probe, stream)
         finally:
             if process.poll() is None:
                 process.kill()
@@ -220,8 +212,16 @@ def main():
                 source.write_text(WINDOW_HELPER)
                 helper = work / "window"
                 subprocess.run(["xcrun", "swiftc", source, "-o", helper], check=True)
-                run_app(app / "Contents" / "MacOS" / "JindiDrama", helper, profile, output,
-                        args.startup_timeout, args.version, arch)
+                database_probe = work / "database-probe"
+                # The existing Windows probe exposes a platform-independent verify-db command.
+                probe_env = dict(os.environ, GOOS="darwin", GOARCH=arch, CGO_ENABLED="0")
+                with output.open("wb") as stream:
+                    subprocess.run(
+                        ["go", "build", "-mod=readonly", "-o", database_probe, "./cmd/windows-desktop-smoke"],
+                        cwd=SOURCE_ROOT, env=probe_env, check=True, stdout=stream, stderr=subprocess.STDOUT,
+                    )
+                run_app(app / "Contents" / "MacOS" / "JindiDrama", helper, database_probe,
+                        profile, output, args.startup_timeout, args.version, arch)
         except Exception as error:
             report_failure(error, output, profile, args.diagnostics_dir)
             raise

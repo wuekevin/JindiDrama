@@ -1,11 +1,14 @@
 import json
 from pathlib import Path
 import runpy
+import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
-ready = runpy.run_path(str(Path(__file__).with_name("smoke-macos-desktop.py")))["ready"]
+smoke = runpy.run_path(str(Path(__file__).with_name("smoke-macos-desktop.py")))
+ready = smoke["ready"]
 
 
 class ReadyMarkerTests(unittest.TestCase):
@@ -48,3 +51,17 @@ class ReadyMarkerTests(unittest.TestCase):
         self.write_marker(version=version[:125] + "...")
         with self.assertRaisesRegex(ValueError, "marker limit"):
             ready(self.profile, version, "arm64")
+
+
+class DatabaseProbeTests(unittest.TestCase):
+    def test_captures_probe_failure_for_smoke_diagnostics(self):
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            probe = profile / "database-probe"
+            command = [probe, "verify-db", profile / "jindi.db"]
+            with (profile / "native-output.log").open("wb") as output:
+                with patch("subprocess.run", side_effect=subprocess.CalledProcessError(1, command)) as run:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        smoke["verify_database"](profile, probe, output)
+                    run.assert_called_once_with(command, check=True, timeout=30,
+                                                stdout=output, stderr=subprocess.STDOUT)
