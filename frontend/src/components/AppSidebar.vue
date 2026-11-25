@@ -55,14 +55,15 @@ function go(to: string) { router.push(to) }
 </template>
 <style scoped lang="scss">
 .sidebar { position: relative; width: var(--sidebar-w); flex: none; background: linear-gradient(180deg, #1c1011 0%, #170c0d 55%, #2a100e 100%); display: flex; flex-direction: column; overflow: hidden; }
-.logo { padding: 52px 0 0 26px; height: 142px; }
-nav { padding: 0 8px; }
+.logo { flex: none; padding: 52px 0 0 26px; height: 142px; }
+nav { min-height: 0; overflow-y: auto; padding: 0 8px; }
 .group { display: flex; flex-direction: column; gap: 5px; }
 hr { border: 0; border-top: 1px solid var(--c-border); margin: 20px 14px; }
 .item { width: 100%; height: 52px; display: flex; align-items: center; gap: 14px; padding-left: 22px; border-radius: 14px; font-size: 17px; font-weight: 500; color: var(--c-text); transition: background 0.18s var(--ease);
+  &:focus-visible { outline-offset: -4px; }
   &:hover { background: var(--c-surface-hover); }
   &.active { background: var(--g-nav-active); box-shadow: inset 0 0 0 1px rgba(255, 140, 110, 0.25); font-weight: 700; }
   svg { opacity: 0.92; flex: none; }
 }
-.deco { position: absolute; left: 0; bottom: 0; width: 200px; height: 220px; pointer-events: none; }
+.deco { flex: 1 0 0px; min-height: 0; max-height: 220px; margin-top: auto; width: 200px; pointer-events: none; }
 </style>

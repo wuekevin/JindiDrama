@@ -43,6 +43,72 @@ test.describe('01 首页推荐', () => {
     const m = await page.evaluate(() => ({ z: Number(getComputedStyle(document.documentElement).getPropertyValue('--app-zoom')), sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth, sh: document.documentElement.scrollHeight, ch: document.documentElement.clientHeight }))
     expect(m.z).toBeLessThan(1); expect(m.sw).toBeLessThanOrEqual(m.cw); expect(m.sh).toBeLessThanOrEqual(m.ch)
   })
+  test('sidebar preserves default positions and separates decoration at 150% zoom', async ({ page }, testInfo) => {
+    const sidebar = page.getByRole('complementary', { name: '主导航' })
+    const nav = sidebar.getByRole('navigation')
+    const settings = nav.getByRole('button', { name: '设置' })
+    const decoration = sidebar.locator('.deco')
+    await page.evaluate(() => document.fonts.ready)
+    const defaultNav = (await nav.boundingBox())!
+    const defaultDeco = (await decoration.boundingBox())!
+    const defaultSidebar = (await sidebar.boundingBox())!
+    expect(defaultDeco.y).toBeGreaterThan(defaultNav.y + defaultNav.height)
+    expect(defaultDeco.y + defaultDeco.height).toBeCloseTo(defaultSidebar.height, 0)
+    await sidebar.screenshot({ path: testInfo.outputPath('sidebar-default.png') })
+
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 150, theme: 'light' })))
+    await page.reload()
+    await expect(page.locator('html')).toHaveCSS('--user-zoom', '1.5')
+    await expect(settings).toBeInViewport({ ratio: 1 })
+    await sidebar.screenshot({ path: testInfo.outputPath('sidebar-150.png') })
+    const scaledNav = (await nav.boundingBox())!
+    const scaledDeco = (await decoration.boundingBox())!
+    expect(scaledDeco.y).toBeGreaterThanOrEqual(scaledNav.y + scaledNav.height - 1)
+    await settings.click()
+    await expect(settings).toHaveAttribute('aria-current', 'page')
+  })
+
+  test('sidebar can scroll by keyboard and mouse with an older 220% setting', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 })))
+    await page.reload()
+    await expect(page.locator('html')).toHaveCSS('--user-zoom', '2.2')
+    const documentOverflows = await page.evaluate(() => {
+      const root = document.documentElement
+      return root.scrollWidth > root.clientWidth || root.scrollHeight > root.clientHeight
+    })
+    expect(documentOverflows).toBe(false)
+    const sidebar = page.getByRole('complementary', { name: '主导航' })
+    const nav = sidebar.getByRole('navigation')
+    const settings = nav.getByRole('button', { name: '设置' })
+    const scrollTop = () => nav.evaluate((element) => element.scrollTop)
+    await expect(nav.getByRole('button', { name: '推荐' })).toBeInViewport({ ratio: 1 })
+    await expect(settings).not.toBeInViewport()
+    for (const name of ['推荐', '热门', '漫剧', '真人剧', 'AI剧', '排行榜', '收藏', '历史', '设置']) {
+      await page.keyboard.press('Tab')
+      await expect(nav.getByRole('button', { name, exact: true })).toBeFocused()
+    }
+    await expect.poll(scrollTop).toBeGreaterThan(0)
+    await expect(settings).toBeInViewport({ ratio: 0.99 })
+    await expect(settings).toHaveCSS('outline-style', 'solid')
+    expect(await settings.evaluate((element) => parseFloat(getComputedStyle(element).outlineOffset))).toBeLessThan(0)
+    await sidebar.screenshot({ path: testInfo.outputPath('sidebar-220-keyboard.png') })
+    await page.keyboard.press('Enter')
+    await expect(settings).toHaveAttribute('aria-current', 'page')
+
+    await page.goto('/#/home?static')
+    await page.reload()
+    await expect.poll(scrollTop).toBe(0)
+    const { x, y, width, height } = (await nav.boundingBox())!
+    await page.mouse.move(x + width / 2, y + height / 2)
+    await page.mouse.wheel(0, 1000)
+    await expect.poll(scrollTop).toBeGreaterThan(0)
+    await expect(settings).toBeInViewport({ ratio: 0.99 })
+    await settings.click()
+    await expect(settings).toHaveAttribute('aria-current', 'page')
+  })
+
   test('home topics reflow without clipping at 150% zoom', async ({ page }, testInfo) => {
     const topics = page.getByRole('region', { name: '题材精选' })
     async function measure() {
