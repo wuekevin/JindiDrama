@@ -23,6 +23,7 @@ describe('HomeView', () => {
     const { w } = await setup()
     const first = w.find('[data-testid=rank-item]').text()
     await w.find('[data-testid=rank-rise]').trigger('click')
+    await flushPromises()
     expect(w.find('[data-testid=rank-item]').text()).not.toBe(first)
   })
   it('shows error state with retry', async () => { const { w } = await setup('/home?state=error'); expect(w.find('[data-testid=error]').exists()).toBe(true) })

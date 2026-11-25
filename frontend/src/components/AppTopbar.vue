@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray, searchProvider } from '@/bindings'
 import { CLOSE_TO_TRAY, TRAY_UNAVAILABLE_MESSAGE, useAppSettings } from '@/stores/appSettings'
 import { useToastStore } from '@/stores/toast'
+import { searchDiscovery } from '@/router/searchDiscovery'
 import { Search, Minus, Square, X, CornerUpLeft } from 'lucide-vue-next'
 import UpdateNotifications from './UpdateNotifications.vue'
 import { suggestDemoSearch } from '@/mocks/provider'
@@ -30,8 +31,11 @@ watch([q, focused], async ([text, active], _, onCleanup) => {
 })
 const onBlur = () => { window.setTimeout(() => (focused.value = false), 150) }
 function submit(text = q.value) { const t = text.trim(); if (!t) return; q.value = t; focused.value = false; router.push({ name: 'search', query: { q: t } }) }
-const tabs = [{ k: 'discover', label: '发现', to: '/home' }, { k: 'library', label: '片库', to: hasLicensedLibrary() ? '/licensed' : '/search' }, { k: 'category', label: '分类', to: '/home#categories' }]
+const tabs = [{ k: 'discover', label: '发现', to: '/home' }, { k: 'library', label: '片库', to: hasLicensedLibrary() ? '/licensed' : '/search' }, { k: 'category', label: '分类', to: { name: 'search', query: { browse: 'topics' } } }]
 const tabActive = (k: string) => {
+  const discovery = route.name === 'search' ? searchDiscovery(route.query) : undefined
+  if (discovery === 'topics') return k === 'category'
+  if (discovery) return k === 'discover'
   const inLibrary = route.name === 'search' || route.name === 'licensed'
   return k === 'discover' ? !inLibrary : k === 'library' && inLibrary
 }
@@ -71,7 +75,7 @@ async function win(op: 'min' | 'max' | 'close') {
 <template>
   <header class="topbar" style="--wails-draggable: drag">
     <nav class="tabs" aria-label="一级栏目">
-      <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: tabActive(t.k) }" :data-testid="`tab-${t.k}`" @click="router.push(t.to)">{{ t.label }}</button>
+      <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: tabActive(t.k) }" :aria-current="tabActive(t.k) ? 'page' : undefined" :data-testid="`tab-${t.k}`" @click="router.push(t.to)">{{ t.label }}</button>
     </nav>
     <div class="search" :class="{ focus: focused }" role="search">
       <Search :size="20" />

@@ -18,7 +18,7 @@ export const mockProvider = {
     const feed = await loadHomeFeed()
     const pick = (ids: string[]) => ids.map(byId).filter((drama): drama is Drama => drama !== undefined)
     const rankings = feed?.rankings ?? RANKINGS
-    const todayNew = feed ? pick(feed.todayNew) : DRAMAS.filter((d) => d.isNewToday).slice(0, 6)
+    const todayNew = feed ? pick(feed.todayNew) : DRAMAS.filter((d) => d.isNewToday)
     return { banners: BANNERS, categories: CATEGORIES, todayNew, rankings: { hot: pick(rankings.hot), rise: pick(rankings.rise), new: pick(rankings.new) } }
   },
 }

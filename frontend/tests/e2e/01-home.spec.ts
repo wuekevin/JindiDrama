@@ -44,3 +44,116 @@ test.describe('01 首页推荐', () => {
     expect(m.z).toBeLessThan(1); expect(m.sw).toBeLessThanOrEqual(m.cw); expect(m.sh).toBeLessThanOrEqual(m.ch)
   })
 })
+
+test('today new shows the full Provider feed while keeping six previews', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      Drama: async () => ({}),
+      Episodes: async () => [],
+      HomeFeed: async () => {
+        const reads = Number(sessionStorage.getItem('home-feed-reads') ?? '0')
+        sessionStorage.setItem('home-feed-reads', String(reads + 1))
+        return {
+          todayNew: ['d7', 'd6', 'd5', 'd4', 'd3', 'd2', 'd1'],
+          rankings: { hot: [], rise: ['d4', 'd7', 'd1', 'd2', 'd3', 'd6', 'd5'], new: [] },
+        }
+      },
+    } } } })
+  })
+  await page.goto('/#/home?static')
+  const section = page.getByRole('region', { name: '今日上新' })
+  await expect(section).toContainText('共 7 部')
+  await expect(section.getByTestId('drama-card')).toHaveCount(6)
+  await section.getByTestId('all-today-new').click()
+  await expect(page.getByRole('heading', { name: '今日上新' })).toBeVisible()
+  await expect(page.getByTestId('result-count')).toContainText('7 部')
+  await expect(page.getByTestId('result-card').first()).toContainText('天命之子')
+  const feedReads = () => page.evaluate(() => sessionStorage.getItem('home-feed-reads'))
+  const readsBeforePaging = await feedReads()
+  await page.getByRole('navigation', { name: '分页' }).getByRole('button', { name: '2' }).click()
+  await expect(page.getByTestId('result-card')).toHaveCount(2)
+  expect(await feedReads()).toBe(readsBeforePaging)
+  await expect(page.getByTestId('result-card').last()).toContainText('替嫁成了千亿总裁的心尖宠')
+  await page.reload()
+  await expect(page.getByTestId('result-card')).toHaveCount(2)
+  await page.getByTestId('view-detail').last().click()
+  await expect(page).toHaveURL(/#\/drama\/d1/)
+  await page.goBack()
+  await expect(page.getByTestId('result-card').last()).toContainText('替嫁成了千亿总裁的心尖宠')
+
+  await page.goto('/#/home?static&rank=rise')
+  await expect(page.getByTestId('rank-item')).toHaveCount(5)
+  await expect(page.getByTestId('rank-item').first()).toContainText('重回高三')
+  await page.getByTestId('full-ranking').click()
+  await expect(page.getByTestId('result-count')).toContainText('7 部')
+  const rankedTitles = page.getByTestId('result-card').getByRole('heading', { level: 3 })
+  await expect(rankedTitles).toHaveText([
+    '重回高三：我把学霸追到手了',
+    '天命之子：从废柴到神尊',
+    '替嫁成了千亿总裁的心尖宠',
+    '暴君的替身医妃',
+    '雨夜逢君',
+  ])
+  await page.getByRole('navigation', { name: '分页' }).getByRole('button', { name: '2' }).click()
+  await expect(page.getByTestId('result-card')).toHaveCount(2)
+  await expect(rankedTitles).toHaveText(['离婚后，我成了顶流导演', '仙门小师妹今天也在逆天'])
+})
+
+test('full ranking keeps the selected Provider ranking across navigation and reload', async ({ page }) => {
+  await page.goto('/#/home?static')
+  await page.getByTestId('rank-rise').click()
+  await expect(page.getByTestId('rank-item').first()).toContainText('离婚后')
+  await page.getByTestId('full-ranking').click()
+  await expect(page).toHaveURL(/feed=rise/)
+  await expect(page.getByRole('heading', { name: '飙升榜' })).toBeVisible()
+  await expect(page.getByTestId('sort-hot')).toHaveCount(0)
+  await expect(page.getByTestId('result-card')).toHaveCount(5)
+  await expect(page.getByTestId('result-card').first()).toContainText('离婚后')
+  await page.reload()
+  await expect(page.getByTestId('result-card').first()).toContainText('离婚后')
+  await page.goBack()
+  await expect(page.getByTestId('rank-rise')).toHaveAttribute('aria-selected', 'true')
+  await page.getByTestId('rank-new').click()
+  await page.getByTestId('full-ranking').click()
+  await expect(page.getByRole('heading', { name: '新剧榜' })).toBeVisible()
+  await expect(page.getByTestId('result-card').first()).toContainText('暴君的替身医妃')
+})
+
+test('more topics browses exact catalog tags and preserves the selected topic on back', async ({ page }) => {
+  await page.goto('/#/home?static')
+  await page.getByTestId('more-topics').click()
+  await expect(page.getByRole('heading', { name: '按题材浏览' })).toBeVisible()
+  const topic = page.getByTestId('topic-select')
+  await topic.focus()
+  await topic.selectOption('先婚后爱')
+  await expect(topic).toHaveValue('先婚后爱')
+  await expect(topic).toBeFocused()
+  await expect(page.getByTestId('result-card')).toHaveCount(1)
+  await expect(page.getByTestId('result-card').first()).toContainText('替嫁成了千亿总裁的心尖宠')
+  await page.getByTestId('view-detail').first().click()
+  await expect(page).toHaveURL(/#\/drama\//)
+  await page.goBack()
+  await expect(topic).toHaveValue('先婚后爱')
+  await expect(page.getByTestId('result-card')).toHaveCount(1)
+  await page.getByTestId('search-input').fill('替嫁')
+  await page.getByTestId('search-input').press('Enter')
+  await expect(page.getByRole('heading', { name: /“替嫁”\s*的搜索结果/ })).toBeVisible()
+  await expect(topic).toHaveCount(0)
+  await page.getByTestId('tab-category').click()
+  await expect(topic).toHaveValue('')
+  await expect(page.getByTestId('tab-category')).toHaveAttribute('aria-current', 'page')
+})
+
+test('a missing topic links back to the available tags and home keywords still match the catalog', async ({ page }) => {
+  await page.goto('/#/search?browse=topics&topic=战神')
+  await expect(page.getByText('目录没有这个题材')).toBeVisible()
+  const topic = page.getByTestId('topic-select')
+  await expect(topic).toHaveValue('')
+  await expect(topic.getByRole('option', { name: '战神' })).toHaveCount(0)
+  await page.getByRole('button', { name: '清除筛选' }).click()
+  await expect(page.getByTestId('result-card').first()).toBeVisible()
+  await page.goto('/#/home?static')
+  await page.getByTestId('cat-chongsheng').click()
+  await expect(page.getByTestId('result-card').first()).toContainText('重生')
+})

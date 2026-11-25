@@ -3,6 +3,7 @@ package provider_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"jindi-drama/internal/app"
@@ -138,8 +139,18 @@ func TestDesktopHomeFeed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(feed.TodayNew) != 6 || feed.TodayNew[0] != "d2" {
-		t.Fatalf("unexpected new releases: %v", feed.TodayNew)
+	dramas, err := a.Home()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var expected []string
+	for _, drama := range dramas {
+		if drama.IsNewToday {
+			expected = append(expected, drama.ID)
+		}
+	}
+	if !slices.Equal(feed.TodayNew, expected) {
+		t.Fatalf("new releases = %v, want %v", feed.TodayNew, expected)
 	}
 	for _, ranking := range [][]string{feed.Rankings.Hot, feed.Rankings.Rise, feed.Rankings.New} {
 		if len(ranking) != 5 {

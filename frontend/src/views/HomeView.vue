@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity as InfinityIcon, Building2, Medal, Clock, Play } from 'lucide-vue-next'
 import { useCatalogStore } from '@/stores/catalog'
@@ -14,14 +14,16 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 const route = useRoute(); const router = useRouter()
 const catalog = useCatalogStore(); const lib = useLibraryStore()
 const icons: Record<string, unknown> = { Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity: InfinityIcon, Building2 }
-const tab = ref<'hot'|'rise'|'new'>('hot')
+const tab = computed(() => route.query.rank === 'rise' || route.query.rank === 'new' ? route.query.rank : 'hot')
+const selectRank = (rank: 'hot' | 'rise' | 'new') =>
+  router.replace({ query: { ...route.query, rank: rank === 'hot' ? undefined : rank } })
 const tabs = [{ k: 'hot', l: '热门榜' }, { k: 'rise', l: '飙升榜' }, { k: 'new', l: '新剧榜' }] as const
 const mode = () => (['empty', 'error', 'loading'].includes(String(route.query.state)) ? (route.query.state as 'empty'|'error'|'loading') : 'normal')
 const load = () => catalog.loadHome(mode())
 onMounted(load); watch(() => route.query.state, load)
 const home = computed(() => catalog.home)
 const { card } = useLicensedCatalog()
-const ranking = computed(() => home.value?.rankings[tab.value] ?? [])
+const ranking = computed(() => home.value?.rankings[tab.value].slice(0, 5) ?? [])
 const resume = computed(() => lib.history.flatMap((h) => { const d = card(h.dramaId); return d && h.episode <= d.updatedTo ? [{ h, d }] : [] }).slice(0, 3))
 const openDrama = (id: string) => router.push(detailRoute(id))
 const watchNow = (id: string) => { const h = lib.history.find((x) => x.dramaId === id); router.push(playbackRoute(id, h?.episode ?? 1)) }
@@ -45,18 +47,18 @@ const autoplay = computed(() => route.query.static === undefined)
         <button v-for="c in home.categories" :key="c.key" class="chip" :data-testid="`cat-${c.key}`" @click="router.push({ name: 'search', query: { q: c.label } })">
           <component :is="icons[c.icon]" :size="18" :color="c.color" :fill="['Flame','Heart','Crown','Zap','Ghost'].includes(c.icon) ? c.color : 'none'" />{{ c.label }}
         </button>
-        <button class="more">更多<ChevronRight :size="14" /></button>
+        <button class="more" data-testid="more-topics" @click="router.push({ name: 'search', query: { browse: 'topics' } })">更多<ChevronRight :size="14" /></button>
       </section>
 
       <section class="block" aria-label="今日上新">
-        <div class="sec-h"><h2>今日上新</h2><span class="muted">共 12 部</span><span class="new">NEW</span><button class="link" @click="router.push('/search')">查看更多<ChevronRight :size="15" /></button></div>
-        <div class="grid6"><NewDramaCard v-for="d in home.todayNew" :key="d.id" :drama="d" badge="今日上新" @open="openDrama" /></div>
+        <div class="sec-h"><h2>今日上新</h2><span class="muted">共 {{ home.todayNew.length }} 部</span><span class="new">NEW</span><button class="link" data-testid="all-today-new" @click="router.push({ name: 'search', query: { feed: 'today' } })">查看更多<ChevronRight :size="15" /></button></div>
+        <div class="grid6"><NewDramaCard v-for="d in home.todayNew.slice(0, 6)" :key="d.id" :drama="d" badge="今日上新" @open="openDrama" /></div>
       </section>
 
       <section id="rank" class="block rank" aria-label="排行榜">
         <div class="sec-h"><Medal :size="26" color="#f4b740" /><h2>排行榜</h2>
-          <div class="seg" role="tablist"><button v-for="t in tabs" :key="t.k" role="tab" :aria-selected="tab === t.k" :class="{ on: tab === t.k }" :data-testid="`rank-${t.k}`" @click="tab = t.k">{{ t.l }}</button></div>
-          <button class="link" @click="router.push('/search?sort=hot')">完整榜单<ChevronRight :size="15" /></button></div>
+          <div class="seg" role="tablist"><button v-for="t in tabs" :key="t.k" role="tab" :aria-selected="tab === t.k" :class="{ on: tab === t.k }" :data-testid="`rank-${t.k}`" @click="selectRank(t.k)">{{ t.l }}</button></div>
+          <button class="link" data-testid="full-ranking" @click="router.push({ name: 'search', query: { feed: tab } })">完整榜单<ChevronRight :size="15" /></button></div>
         <ol class="rank-list">
           <li v-for="(d, i) in ranking" :key="d.id"><button class="ri" data-testid="rank-item" @click="openDrama(d.id)">
             <span class="cov"><img :src="d.cover" :alt="d.title" /><b class="no" :class="rankClass(i)">{{ i + 1 }}</b></span>

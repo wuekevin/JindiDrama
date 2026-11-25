@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
-import { searchDramas, HOT_WORDS, type SearchFilters } from '@/mocks/provider'
+import { mockProvider, searchDramas, HOT_WORDS, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
+import { feedLabels, searchDiscovery } from '@/router/searchDiscovery'
 import type { Drama } from '@/types'
 import { BaseButton, EmptyState, ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
@@ -15,6 +16,13 @@ const catalog = useLicensedCatalog()
 const PAGE = 5
 const q = computed(() => String(route.query.q ?? ''))
 const castOnly = computed(() => route.query.cast === '1')
+const discovery = computed(() => searchDiscovery(route.query))
+const browseTopics = computed(() => discovery.value === 'topics')
+const feed = computed(() => discovery.value === 'topics' ? undefined : discovery.value)
+const topic = computed(() => typeof route.query.topic === 'string' ? route.query.topic.trim() : '')
+const discoveryTitle = computed(() => feed.value ? feedLabels[feed.value] : browseTopics.value ? '按题材浏览' : '')
+const topics = ref<string[]>([])
+const knownTopic = computed(() => topics.value.includes(topic.value))
 const kind = computed(() => String(route.query.kind ?? ''))
 const status = computed(() => String(route.query.status ?? '') as SearchFilters['status'])
 const sort = computed(() => String(route.query.sort ?? 'comprehensive') as NonNullable<SearchFilters['sort']>)
@@ -27,15 +35,55 @@ async function run() {
   if (q.value) hist.add(q.value)
   if (route.query.state === 'loading') return
   try {
-    const r = await searchDramas(q.value, { kind: kind.value, status: status.value, sort: sort.value, castOnly: castOnly.value }, route.query.state === 'error' ? 'error' : 'normal', catalog.card)
+    const mode = route.query.state === 'error' ? 'error' : 'normal'
+    const section = feed.value
+    const topicBrowse = browseTopics.value
+    const selectedTopic = topic.value
+    let results: Drama[]
+    let tags: string[] = []
+    if (section) {
+      const home = await mockProvider.home(mode)
+      results = section === 'today' ? home.todayNew : home.rankings[section]
+    } else if (topicBrowse) {
+      const dramas = await searchDramas('', {}, mode, catalog.card)
+      tags = [...new Set(dramas.flatMap((drama) => drama.tags.map((tag) => tag.trim()).filter(Boolean)))]
+        .sort((a, b) => a.localeCompare(b, 'zh-CN'))
+      results = selectedTopic ? dramas.filter((drama) => drama.tags.some((tag) => tag.trim() === selectedTopic)) : dramas
+    } else {
+      results = await searchDramas(q.value, { kind: kind.value, status: status.value, sort: sort.value, castOnly: castOnly.value }, mode, catalog.card)
+    }
     if (my !== token) return
-    items.value = r; state.value = r.length ? 'ready' : 'empty'
-  } catch (e) { if (my !== token) return; err.value = (e as Error).message; state.value = 'error' }
+    topics.value = tags
+    items.value = results
+    state.value = results.length ? 'ready' : 'empty'
+  } catch (cause) {
+    if (my !== token) return
+    err.value = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : '搜索服务暂时不可用'
+    state.value = 'error'
+  }
 }
-watch(() => route.fullPath, run, { immediate: true })
+watch([
+  () => discovery.value ?? route.fullPath,
+  () => browseTopics.value ? topic.value : '',
+  () => route.query.state,
+], run, { immediate: true })
 const pages = computed(() => Math.max(1, Math.ceil(items.value.length / PAGE)))
-const shown = computed(() => items.value.slice((page.value - 1) * PAGE, page.value * PAGE))
+const currentPage = computed(() => {
+  if (!discovery.value) return page.value
+  const raw = route.query.page
+  const value = typeof raw === 'string' ? Number(raw) : 1
+  return Number.isSafeInteger(value) && value > 0 ? Math.min(value, pages.value) : 1
+})
+const shown = computed(() => items.value.slice((currentPage.value - 1) * PAGE, currentPage.value * PAGE))
 const patch = (o: Record<string, string | undefined>) => router.replace({ query: { ...route.query, ...o } })
+function selectPage(value: number) {
+  if (discovery.value) void patch({ page: value === 1 ? undefined : String(value) })
+  else page.value = value
+}
+const selectTopic = (event: Event) => {
+  const value = (event.target as HTMLSelectElement).value
+  return patch({ topic: value || undefined, page: undefined })
+}
 const selectKind = (value: string) => patch(value === '本地片库' ? { kind: value, status: undefined } : { kind: value || undefined })
 const kinds = computed(() => [
   { k: '', l: '全部', i: null }, { k: '真人剧', l: '真人剧', i: Video }, { k: '漫剧', l: '漫剧', i: Cat }, { k: 'AI剧', l: 'AI剧', i: Bot },
@@ -47,23 +95,32 @@ const go = (t: string) => router.push({ name: 'search', query: { q: t } })
 const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 </script>
 <template>
-  <div class="search" data-testid="page-search">
+  <div class="search" :class="{ discovery: discoveryTitle }" data-testid="page-search">
     <div class="main">
       <header class="head">
-        <h1><Search :size="38" :stroke-width="2.2" /><template v-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></h1>
+        <h1><Search :size="38" :stroke-width="2.2" /><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></h1>
         <p v-if="state === 'ready' || state === 'empty'" class="count" data-testid="result-count">共找到 {{ items.length }} 部相关内容</p>
       </header>
-      <div class="filters" :class="{ 'filters-last': kind === '本地片库' }" role="group" aria-label="筛选">
+      <label v-if="browseTopics" class="topic-filter">
+        题材
+        <select :value="knownTopic ? topic : ''" data-testid="topic-select" @change="selectTopic">
+          <option value="">全部题材</option>
+          <option v-for="tag in topics" :key="tag" :value="tag">{{ tag }}</option>
+        </select>
+      </label>
+      <div v-if="!discoveryTitle" class="filters" :class="{ 'filters-last': kind === '本地片库' }" role="group" aria-label="筛选">
         <button v-for="k in kinds" :key="k.l" class="pill" :class="{ on: kind === k.k }" :data-testid="`kind-${k.l}`" @click="selectKind(k.k)"><component :is="k.i" v-if="k.i" :size="17" />{{ k.l }}</button>
         <button v-if="kind !== '本地片库'" class="pill" :class="{ on: status === 'finished' }" data-testid="status-finished" @click="patch({ status: status === 'finished' ? undefined : 'finished' })"><CircleCheck :size="17" />已完结</button>
         <button v-if="kind !== '本地片库'" class="pill" :class="{ on: status === 'ongoing' }" data-testid="status-ongoing" @click="patch({ status: status === 'ongoing' ? undefined : 'ongoing' })"><RefreshCw :size="17" />连载中</button>
       </div>
-      <div v-if="kind !== '本地片库'" class="sorts"><span class="comp">综合排序<ChevronDown :size="14" /></span>
+      <div v-if="!discoveryTitle && kind !== '本地片库'" class="sorts"><span class="comp">综合排序<ChevronDown :size="14" /></span>
         <button v-for="s in sorts" :key="s.k" :class="{ on: sort === s.k }" :data-testid="`sort-${s.k}`" @click="patch({ sort: s.k })">{{ s.l }}</button></div>
 
       <div v-if="state === 'loading'" class="list"><Skeleton v-for="i in 4" :key="i" style="height: 138px" /></div>
       <ErrorState v-else-if="state === 'error'" :message="err" @retry="run" />
-      <EmptyState v-else-if="state === 'empty'" title="没有找到相关短剧" hint="换个关键词，或查看右侧热搜"><BaseButton variant="outline" @click="router.push({ name: 'search' })">清除筛选</BaseButton></EmptyState>
+      <EmptyState v-else-if="state === 'empty'" :title="feed ? '暂无短剧' : browseTopics && topic && !knownTopic ? '目录没有这个题材' : '没有找到相关短剧'" :hint="discoveryTitle ? undefined : '换个关键词，或查看右侧热搜'">
+        <BaseButton v-if="!discoveryTitle || browseTopics && topic" variant="outline" @click="browseTopics ? patch({ topic: undefined, page: undefined }) : router.push({ name: 'search' })">清除筛选</BaseButton>
+      </EmptyState>
       <ul v-else class="list">
         <li v-for="d in shown" :key="d.id" class="item" data-testid="result-card">
           <button class="cover" :aria-label="`播放${d.title}`" @click="watchIt(d.id)"><img :src="d.cover" :alt="d.title" /><i class="pb"><Play :size="12" fill="currentColor" /></i></button>
@@ -77,7 +134,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
             <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id))">查看详情</BaseButton></div>
         </li>
       </ul>
-      <nav v-if="pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === page }" @click="page = p">{{ p }}</button></nav>
+      <nav v-if="state === 'ready' && pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === currentPage }" :aria-current="p === currentPage ? 'page' : undefined" @click="selectPage(p)">{{ p }}</button></nav>
     </div>
 
     <aside class="side">
@@ -94,6 +151,9 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 .main { flex: 1; min-width: 0; }
 .head { padding-top: 38px; padding-left: 10px; h1 { display: flex; align-items: center; gap: 12px; font-size: 34px; font-weight: 700; em { font-style: normal; color: var(--c-accent-2); } } .count { margin-top: 18px; font-size: 15px; color: var(--c-text-2); } }
 .filters { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; padding-left: 0; }
+.discovery .list { margin-top: 18px; }
+.topic-filter { display: flex; align-items: center; gap: 12px; margin: 22px 0 16px 10px; }
+.topic-filter select { background: var(--c-surface); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 6px 10px; }
 .filters-last { margin-bottom: 16px; }
 .pill { height: 36px; padding: 0 22px; display: inline-flex; align-items: center; gap: 8px; border-radius: 18px; background: var(--c-surface); border: 1px solid var(--c-border-strong); font-size: 15px; &:hover { background: var(--c-surface-hover); } &.on { background: var(--g-accent); border-color: transparent; box-shadow: 0 4px 14px rgba(220,58,42,.35); } }
 .sorts { display: flex; align-items: center; gap: 0; margin: 18px 0 16px 0; font-size: 16px; .comp { display: inline-flex; align-items: center; gap: 6px; padding-right: 20px; } button { padding: 0 24px; border-left: 1px solid var(--c-border-strong); color: var(--c-text); line-height: 1; &.on { color: var(--c-accent-2); } &:first-of-type { border-left: 0; padding-left: 12px; } } }

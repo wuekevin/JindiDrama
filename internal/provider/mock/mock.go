@@ -65,16 +65,13 @@ func (p *Provider) HomeFeed(ctx context.Context) (provider.HomeFeed, error) {
 	if err := ctx.Err(); err != nil {
 		return provider.HomeFeed{}, err
 	}
-	feed := provider.HomeFeed{TodayNew: make([]string, 0, 6)}
+	feed := provider.HomeFeed{TodayNew: make([]string, 0)}
 	if err := json.Unmarshal(rankings, &feed.Rankings); err != nil {
 		return provider.HomeFeed{}, fmt.Errorf("mock: invalid bundled rankings: %w", err)
 	}
 	for _, drama := range p.dramas {
 		if drama.IsNewToday {
 			feed.TodayNew = append(feed.TodayNew, drama.ID)
-			if len(feed.TodayNew) == cap(feed.TodayNew) {
-				break
-			}
 		}
 	}
 	return feed, nil
