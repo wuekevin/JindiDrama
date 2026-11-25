@@ -130,29 +130,14 @@ jobs:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
           MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-        run: |
-          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
-          security create-keychain -p ci ci.keychain
-          security default-keychain -s ci.keychain
-          security unlock-keychain -p ci ci.keychain
-          security import cert.p12 -k ci.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          security set-key-partition-list -S apple-tool:,apple: -s -k ci ci.keychain
-          codesign --force --deep --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" build/bin/JindiDrama.app
-          codesign --verify --deep --strict build/bin/JindiDrama.app
-          rm -f cert.p12
+        run: exec bash scripts/sign-macos-release.sh sign build/bin/JindiDrama.app
       - name: notarize application (macos release)
         if: runner.os == 'macOS' && inputs.mode == 'release'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          ditto -c -k --keepParent build/bin/JindiDrama.app notarize.zip
-          xcrun notarytool submit notarize.zip --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --wait
-          xcrun stapler staple build/bin/JindiDrama.app
-          xcrun stapler validate build/bin/JindiDrama.app
-          codesign --verify --deep --strict build/bin/JindiDrama.app
-          rm -f notarize.zip
+        run: exec bash scripts/sign-macos-release.sh notarize build/bin/JindiDrama.app
       - name: zip (macos)
         if: runner.os == 'macOS'
         working-directory: build/bin

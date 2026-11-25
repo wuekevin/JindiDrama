@@ -18,7 +18,7 @@ jobs:
       - shell: bash
         run: bash scripts/test-verify-distribution-source.sh
       - if: runner.os == 'macOS'
-        run: python3 -m unittest discover -s scripts -p test_macos_desktop_smoke.py
+        run: python3 -m unittest discover -s scripts -p 'test_macos_*.py'
       - if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-windows-smoke-session.ps1
