@@ -29,14 +29,22 @@ func (s *Store) RestoreMissingLibrary(backup *LibraryState) (*LibraryRestore, er
 	if err != nil {
 		return nil, err
 	}
-	added := []string{}
-	for _, id := range backup.Favorites {
-		if !slices.Contains(favorites, id) && !slices.Contains(added, id) {
+	var added []string
+	if len(backup.Favorites) != 0 {
+		knownFavorites := make(map[string]struct{}, len(favorites))
+		for _, id := range favorites {
+			knownFavorites[id] = struct{}{}
+		}
+		for _, id := range backup.Favorites {
+			if _, exists := knownFavorites[id]; exists {
+				continue
+			}
+			knownFavorites[id] = struct{}{}
 			added = append(added, id)
 		}
 	}
 	if len(added) > 0 {
-		if err := applyFavoriteIntent(tx, added, nil, slices.Concat(favorites, added)); err != nil {
+		if err := writeFavoriteOrder(tx, added, nil, slices.Concat(favorites, added)); err != nil {
 			return nil, err
 		}
 	}

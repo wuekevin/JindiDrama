@@ -132,6 +132,10 @@ func applyFavoriteIntent(tx *sql.Tx, added, removed, order []string) error {
 	if slices.Equal(current, next) {
 		return nil
 	}
+	return writeFavoriteOrder(tx, added, removed, next)
+}
+
+func writeFavoriteOrder(tx *sql.Tx, added, removed, next []string) error {
 	// Sparse recovery keeps the identity, creation time, and dirty flag of retained rows.
 	for _, id := range removed {
 		if _, err := tx.Exec(`DELETE FROM favorites WHERE account_scope=? AND drama_id=?`, scope, id); err != nil {

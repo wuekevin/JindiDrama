@@ -89,6 +89,68 @@ func TestReadLibraryBackupAndRestoreMissing(t *testing.T) {
 	}
 }
 
+func TestRestoreMissingLibraryPreservesMixedFavoriteOrderAndRollsBack(t *testing.T) {
+	store, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, err := store.db.Exec(`INSERT INTO favorites(id, drama_id, created_at, sort_order, dirty) VALUES
+(11, 'ranked-first', 20, 120, 1), (12, 'legacy', 100, NULL, 0), (13, 'ranked-last', 200, 5, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	existing := HistoryEntry{DramaID: "legacy", Episode: 2, WatchedAt: 30}
+	if err := store.RecordHistory(existing); err != nil {
+		t.Fatal(err)
+	}
+	incoming := HistoryEntry{DramaID: "new-first", Episode: 3, WatchedAt: 20}
+	backup := &LibraryState{
+		Favorites: []string{"ranked-last", "new-first", "legacy", "new-second", "new-first", "ranked-first"},
+		History:   []HistoryEntry{{DramaID: "legacy", Episode: 4, WatchedAt: 40}, incoming},
+	}
+	if _, err := store.db.Exec(`CREATE TRIGGER reject_restore BEFORE INSERT ON history
+BEGIN SELECT RAISE(ABORT, 'fixture write failure'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := store.RestoreMissingLibrary(backup); err == nil || result != nil {
+		t.Fatalf("failed merge produced a result: %+v, %v", result, err)
+	}
+	originalOrder := []string{"ranked-first", "legacy", "ranked-last"}
+	if favorites, err := store.Favorites(); err != nil || !slices.Equal(favorites, originalOrder) {
+		t.Fatalf("failed merge changed favorites: %v, %v", favorites, err)
+	}
+	var originalRank int
+	if err := store.db.QueryRow("SELECT sort_order FROM favorites WHERE id=11").Scan(&originalRank); err != nil || originalRank != 120 {
+		t.Fatalf("failed merge changed the original rank: %d, %v", originalRank, err)
+	}
+	if history, err := store.History(); err != nil || !slices.Equal(history, []HistoryEntry{existing}) {
+		t.Fatalf("failed merge changed history: %+v, %v", history, err)
+	}
+	if _, err := store.db.Exec("DROP TRIGGER reject_restore"); err != nil {
+		t.Fatal(err)
+	}
+	wantFavorites := append(originalOrder, "new-first", "new-second")
+	wantHistory := []HistoryEntry{existing, incoming}
+	for _, want := range []struct{ favorites, history int }{{2, 1}, {0, 0}} {
+		result, err := store.RestoreMissingLibrary(backup)
+		if err != nil || result == nil || result.FavoritesAdded != want.favorites || result.HistoryAdded != want.history ||
+			!slices.Equal(result.State.Favorites, wantFavorites) || !slices.Equal(result.State.History, wantHistory) {
+			t.Fatalf("unexpected merge: %+v, %v", result, err)
+		}
+	}
+	historyOnly := HistoryEntry{DramaID: "history-only", Episode: 1, WatchedAt: 10}
+	result, err := store.RestoreMissingLibrary(&LibraryState{History: []HistoryEntry{historyOnly}})
+	if err != nil || result == nil || result.FavoritesAdded != 0 || result.HistoryAdded != 1 ||
+		!slices.Equal(result.State.Favorites, wantFavorites) || !slices.Equal(result.State.History, append(wantHistory, historyOnly)) {
+		t.Fatalf("unexpected history-only merge: %+v, %v", result, err)
+	}
+	var id, createdAt, dirty int
+	if err := store.db.QueryRow("SELECT id, created_at, dirty FROM favorites WHERE drama_id='ranked-first'").Scan(&id, &createdAt, &dirty); err != nil ||
+		id != 11 || createdAt != 20 || dirty != 1 {
+		t.Fatalf("existing favorite changed: id=%d createdAt=%d dirty=%d, %v", id, createdAt, dirty, err)
+	}
+}
+
 func TestReadLibraryBackupRejectsInvalidFiles(t *testing.T) {
 	root := t.TempDir()
 	plain := filepath.Join(root, "plain.db")
