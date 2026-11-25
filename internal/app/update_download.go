@@ -81,7 +81,11 @@ type stagedUpdate struct {
 	cleanup func()
 }
 
-var errUpdateOrigin = errors.New("当前保存位置无法标记文件来源，请选择其他位置或前往发布页下载")
+var (
+	errUpdateOrigin                       = errors.New("当前保存位置无法标记文件来源，请选择其他位置或前往发布页下载")
+	errUpdateDestinationMoved             = errors.New("安装包保存目录已移动或替换，请重新选择保存位置")
+	errUpdateDestinationMovedAfterPublish = errors.New("安装包已保存到原目录，但该目录已移动或替换，请在原目录查找安装包")
+)
 
 func saveUpdate(ctx context.Context, path string, download func(context.Context, io.Writer) error, commit func(func() error) error) (bool, error) {
 	const saveError = "无法保存安装包，请检查保存位置和可用空间"
@@ -118,6 +122,9 @@ func saveUpdate(ctx context.Context, path string, download func(context.Context,
 	}
 	if errors.Is(err, fs.ErrExist) {
 		return false, errors.New("目标文件已存在，请使用其他文件名")
+	}
+	if errors.Is(err, errUpdateDestinationMoved) || errors.Is(err, errUpdateDestinationMovedAfterPublish) {
+		return false, err
 	}
 	if err != nil {
 		return false, errors.New(saveError)
