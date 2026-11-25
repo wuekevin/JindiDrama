@@ -172,3 +172,79 @@ test('a detail route change resets the recommendation batch even when the next d
   await expect(page).toHaveURL(/#\/drama\/d1$/)
   await expect.poll(() => cards.allInnerTexts()).toEqual(firstBatch)
 })
+
+for (const [width, dpi] of [[1280, 150], [1280, 220], [2560, 220]]) {
+  test(`detail keeps actions, seasons and clip controls reachable at ${width}px and ${dpi}% zoom`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 860 })
+    await page.addInitScript((zoom) => {
+      localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: zoom }))
+      localStorage.setItem('jindi.library.v1', JSON.stringify({
+        favorites: [], history: [{ dramaId: 'd1', episode: 32, percent: 40, watchedAt: 1 }],
+      }))
+      Object.defineProperty(navigator, 'clipboard', { value: { writeText: async (text: string) => {
+        sessionStorage.setItem('detail-test-share', text)
+      } } })
+    }, dpi)
+    await page.goto('/#/drama/d1')
+    const detail = page.getByTestId('page-detail')
+    const readBounds = async () => (await detail.boundingBox())!
+    const containsX = async (locator: ReturnType<typeof page.getByTestId>) => {
+      const outer = await readBounds()
+      const box = (await locator.boundingBox())!
+      expect(box.width).toBeGreaterThan(0)
+      expect(box.x).toBeGreaterThanOrEqual(outer.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(outer.x + outer.width + 1)
+    }
+    const share = detail.getByTestId('share')
+    await expect(share).toBeVisible()
+    for (const control of [
+      share, detail.getByTestId('watch-now'), detail.getByTestId('continue'), detail.getByTestId('fav'),
+      detail.getByTestId('ep').last(), detail.getByTestId('season').last(),
+    ]) await containsX(control)
+    if (width === 1280) {
+      const episodePanel = (await detail.locator('.eps').boundingBox())!
+      const seriesPanel = (await detail.locator('.rel').boundingBox())!
+      expect(seriesPanel.y).toBeGreaterThanOrEqual(episodePanel.y + episodePanel.height)
+    }
+
+    await share.click()
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem('detail-test-share')))
+      .toBe(new URL('/#/drama/d1', page.url()).href)
+    const favorite = detail.getByTestId('fav')
+    await favorite.press('Enter')
+    await expect(favorite).toHaveText('已收藏')
+    await favorite.press('Enter')
+    await expect(favorite).toHaveText('收藏')
+    await page.screenshot({ path: testInfo.outputPath('detail-actions.png') })
+    await detail.getByTestId('watch-now').click()
+    await expect(page).toHaveURL(/#\/watch\/d1\/1$/)
+    await page.goBack()
+    await detail.getByTestId('continue').press('Enter')
+    await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+    await page.goBack()
+    await detail.getByTestId('ep-group').first().press('Enter')
+    await detail.getByRole('button', { name: '第5集', exact: true }).press('Enter')
+    await expect(page).toHaveURL(/#\/watch\/d1\/5$/)
+    await page.goBack()
+
+    await detail.getByTestId('tab-clips').click()
+    const clip = detail.getByTestId('clip').first()
+    await clip.click()
+    const dialog = detail.getByRole('dialog')
+    const close = dialog.getByRole('button', { name: '关闭', exact: true })
+    await expect(close).toBeFocused()
+    for (const modalPart of [dialog, close]) {
+      const box = (await modalPart.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(-1)
+      expect(box.y).toBeGreaterThanOrEqual(-1)
+      expect(box.x + box.width).toBeLessThanOrEqual(width + 1)
+      expect(box.y + box.height).toBeLessThanOrEqual(861)
+    }
+    await page.keyboard.press('Escape')
+    await expect(dialog).not.toBeVisible()
+    await expect(clip).toBeFocused()
+    await detail.getByRole('link', { name: /第2季/ }).press('Enter')
+    await expect(page).toHaveURL(/#\/drama\/d17$/)
+    await expect(detail.getByRole('heading', { level: 1 })).toBeFocused()
+  })
+}

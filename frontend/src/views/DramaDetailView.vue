@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ChevronLeft, ChevronDown, ChevronUp, ChevronRight, Star, CirclePlay, Heart, Play, Plus, Check, Share2, Flame, Crown, RefreshCw, Landmark, Swords, Sprout, Sparkles } from 'lucide-vue-next'
 import { getDetail, groupEpisodes, epHot, type DemoHighlight, type DramaDetail } from '@/mocks/provider'
@@ -14,6 +14,19 @@ import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
 const route = useRoute(); const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
+const root = ref<HTMLElement>()
+const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
+let layoutObserver: ResizeObserver | undefined
+onMounted(() => {
+  if (!root.value) return
+  // Use local CSS width so page zoom behaves consistently in Chromium and WKWebView.
+  layoutObserver = new ResizeObserver(([entry]) => {
+    const width = entry.contentRect.width
+    layout.value = width <= 660 ? 'compact' : width <= 1080 ? 'stacked' : 'wide'
+  })
+  layoutObserver.observe(root.value)
+})
+onBeforeUnmount(() => layoutObserver?.disconnect())
 const id = computed(() => String(route.params.id))
 const state = ref<'loading'|'ready'|'notfound'|'error'>('loading'); const err = ref('')
 const detail = ref<DramaDetail | null>(null)
@@ -95,7 +108,7 @@ const recommendationSource = computed(() => {
 const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSource, 6)
 </script>
 <template>
-  <div class="detail" data-testid="page-detail">
+  <div ref="root" class="detail" :class="layout" data-testid="page-detail">
     <button class="back" data-testid="back" @click="router.back()"><ChevronLeft :size="18" />返回</button>
     <div v-if="state === 'loading'" class="sk"><Skeleton style="width: 286px; height: 415px" /><Skeleton style="flex: 1; height: 415px" /></div>
     <ErrorState v-else-if="state === 'error'" :message="err" @retry="load()" />
@@ -186,14 +199,44 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
 .grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 10px 9px; }
 .ep { position: relative; height: 46px; display: flex; align-items: center; justify-content: center; gap: 3px; border-radius: 10px; background: rgba(255,255,255,.08); font-size: 17px; overflow: hidden; &:hover { background: rgba(255,255,255,.16); } &.cur { box-shadow: inset 0 0 0 2px var(--c-accent); } &.lock { opacity: .5; } .pg { position: absolute; left: 10px; bottom: 5px; height: 3px; border-radius: 3px; background: var(--c-accent); max-width: calc(100% - 20px); } }
 .clips li button { display: flex; align-items: center; gap: 10px; width: 100%; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--c-border); font-size: 15px; em { margin-left: auto; font-style: normal; color: var(--c-text-2); } }
-.clip-dialog { margin: auto; padding: 22px; width: min(420px, calc(100vw - 32px)); max-height: calc(100vh - 32px); text-align: center; color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 18px; background: #261719;
+.clip-dialog { margin: auto; padding: 22px;
+  width: min(420px, calc(100vw - 32px), calc(100vw / var(--z) - 24px));
+  max-height: min(calc(100vh - 32px), calc(100vh / var(--z) - 24px));
+  overflow: auto;
+  text-align: center; color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 18px; background: #261719;
   &::backdrop { background: rgba(0,0,0,.65); }
   h2 { margin-bottom: 14px; font-size: 20px; }
-  video { display: block; margin: 0 auto 14px; width: 100%; height: min(58vh, 500px); background: #0f0b0c; }
+  video { display: block; margin: 0 auto 14px; width: 100%; height: min(58vh, 500px, calc(58vh / var(--z))); background: #0f0b0c; }
   p { margin-bottom: 14px; }
 }
 .rel { width: 390px; flex: none; header h3 { font-size: 20px; margin-bottom: 8px; } }
 .sea { position: relative; display: flex; gap: 12px; align-items: center; width: 100%; padding: 8px 40px 8px 8px; margin-bottom: 8px; border-radius: 12px; border: 1px solid transparent; text-align: left; &.on { background: rgba(238,75,57,.18); border-color: var(--c-accent); } img { width: 86px; height: 62px; object-fit: cover; border-radius: 8px; } b { display: block; font-size: 14.5px; line-height: 1.3; } em { display: block; margin-top: 6px; font-style: normal; font-size: 12px; color: var(--c-text-2); } .ck, .pl { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; } .ck { background: rgba(238,75,57,.35); color: #ff9a86; } .pl { background: rgba(255,255,255,.16); } }
 .guess { margin-top: 18px; padding-left: 8px; header { display: flex; justify-content: space-between; align-items: center; h2 { display: flex; align-items: center; gap: 6px; font-size: 22px; } button { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; } } .row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-top: 12px; } }
 .gc { position: relative; height: 198px; border-radius: 14px; overflow: hidden; text-align: left; padding: 0; img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; } &::after { content: ''; position: absolute; inset: 50% 0 0; background: linear-gradient(transparent, rgba(0,0,0,.85)); } .bd { position: absolute; left: 0; top: 0; z-index: 1; padding: 2px 8px; border-radius: 0 0 8px 0; background: var(--g-accent-h); font-size: 11px; } b, em { position: absolute; left: 12px; right: 8px; z-index: 1; } b { bottom: 30px; font-size: 16px; } em { bottom: 10px; font-style: normal; font-size: 12px; color: var(--c-text-2); display: flex; align-items: center; gap: 3px; } }
+
+.detail:is(.stacked, .compact) {
+  .top { gap: 22px; padding-left: 0; }
+  .poster {
+    width: min(210px, 100%);
+    height: auto;
+    aspect-ratio: 286 / 415;
+    align-self: start;
+    .pt { font-size: 26px; overflow-wrap: anywhere; }
+  }
+  .meta h1 { flex-wrap: wrap; gap: 6px 16px; overflow-wrap: anywhere; }
+  .heat { white-space: nowrap; }
+  .tags, .cast, .cta, .groups { flex-wrap: wrap; }
+  .mid { flex-direction: column; }
+  .rel { width: auto; }
+  .guess .row { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+.detail.compact {
+  .top { flex-direction: column; gap: 14px; }
+  .poster { width: min(145px, 100%); .pt { font-size: 21px; bottom: 14px; } }
+  .stats { flex-wrap: wrap; gap: 8px 16px; i { display: none; } }
+  .cta { gap: 10px; :deep(.btn.lg) { min-width: 142px; } }
+  .cast h4 { flex-basis: 100%; }
+  .grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .guess .row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 </style>
