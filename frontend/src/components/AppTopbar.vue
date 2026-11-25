@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray, searchProvider } from '@/bindings'
 import { CLOSE_TO_TRAY, TRAY_UNAVAILABLE_MESSAGE, useAppSettings } from '@/stores/appSettings'
@@ -10,6 +10,19 @@ import UpdateNotifications from './UpdateNotifications.vue'
 import { suggestDemoSearch } from '@/mocks/provider'
 
 const route = useRoute(); const router = useRouter()
+const topbar = ref<HTMLElement>()
+const compact = ref(false)
+let layoutObserver: ResizeObserver | undefined
+onMounted(() => {
+  if (!topbar.value) return
+  // Use layout width including padding, so the compact padding cannot change the breakpoint.
+  layoutObserver = new ResizeObserver(([{ target }]) => {
+    compact.value = target.clientWidth <= 760
+  })
+  layoutObserver.observe(topbar.value)
+})
+onBeforeUnmount(() => layoutObserver?.disconnect())
+
 const q = ref('')
 const focused = ref(false)
 const suggestionsOpen = ref(false)
@@ -119,7 +132,7 @@ async function win(op: 'min' | 'max' | 'close') {
 }
 </script>
 <template>
-  <header class="topbar" style="--wails-draggable: drag">
+  <header ref="topbar" class="topbar" :class="{ compact }" style="--wails-draggable: drag">
     <nav class="tabs" aria-label="一级栏目">
       <button v-for="t in tabs" :key="t.k" class="tab" :class="{ on: tabActive(t.k) }" :aria-current="tabActive(t.k) ? 'page' : undefined" :data-testid="`tab-${t.k}`" @click="router.push(t.to)">{{ t.label }}</button>
     </nav>
@@ -168,4 +181,22 @@ async function win(op: 'min' | 'max' | 'close') {
 .right { display: flex; align-items: center; gap: 22px; }
 .avatar { width: 36px; height: 36px; border-radius: 50%; background: #6f6578; overflow: hidden; }
 .win { display: flex; gap: 6px; margin-left: 4px; button { width: 36px; height: 32px; display: grid; place-items: center; color: var(--c-text); border-radius: 8px; &:hover { background: var(--c-surface-hover); } } }
+
+
+.topbar.compact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  height: auto;
+  gap: 4px 12px;
+  padding: 6px 12px 8px;
+
+  .tabs { grid-column: 1 / -1; }
+  .tab {
+    height: 36px;
+    padding-inline: 16px;
+    &:focus-visible { outline-offset: -3px; }
+  }
+  .search { margin-inline-start: 0; }
+  .right { gap: 12px; }
+}
 </style>
