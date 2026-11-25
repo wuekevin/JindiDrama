@@ -22,6 +22,9 @@ jobs:
       - if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/test-windows-smoke-session.ps1
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/test-sign-windows-release.ps1
       - run: npm ci
         working-directory: frontend
       - run: npm run typecheck && npm run test && npm run build

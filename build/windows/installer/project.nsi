@@ -35,7 +35,7 @@
 !include "wails_tools.nsh"
 
 !ifdef JINDI_SIGN_UNINSTALLER
-  !uninstfinalize 'pwsh -NoProfile -NonInteractive -File "..\..\..\scripts\sign-windows-release.ps1" "%1"' = 0
+  !uninstfinalize 'pwsh -NoProfile -NonInteractive -File "..\..\..\scripts\sign-windows-release.ps1" "%1" -Uninstaller' = 0
 !endif
 
 # The version information for this two must consist of 4 parts

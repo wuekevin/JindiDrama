@@ -27,6 +27,7 @@ jobs:
     env:
       PACKAGE_MODE: ${{ inputs.mode }}
       PACKAGE_VERSION: ${{ inputs.version }}
+      PACKAGE_DIR: build/bin
       LDFLAGS: -X jindi-drama/internal/app.Version=${{ inputs.version }}
       GOFLAGS: -mod=readonly
     steps:
@@ -179,29 +180,66 @@ jobs:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          $env:JD_SIGN_CERT = Join-Path $env:RUNNER_TEMP "jindidrama-signing.pfx"
-          $env:JD_SIGNTOOL = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          $work = Join-Path $env:RUNNER_TEMP ('jindidrama-sign-' + [Guid]::NewGuid().ToString('N'))
+          $null = [IO.Directory]::CreateDirectory($work)
+          $pfx = Join-Path $work 'certificate.pfx'
+          $signed = 'build/bin/release-signed'
+          $store = 'Cert:\CurrentUser\My'
+          $signTool = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          $newThumbprints = @()
+          $importStarted = $false
           try {
-            [IO.File]::WriteAllBytes($env:JD_SIGN_CERT, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
-            & ./scripts/sign-windows-release.ps1 build/bin/JindiDrama.exe
-            Push-Location build/windows/installer
-            try {
-              makensis '-DARG_WAILS_AMD64_BINARY=..\..\bin\JindiDrama.exe' -DJINDI_SIGN_UNINSTALLER project.nsi
-              if ($LASTEXITCODE -ne 0) { throw "NSIS rebuild failed" }
-            } finally {
-              Pop-Location
+            if (-not $signTool) { throw 'The Windows SDK SignTool was not found' }
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+            $password = ConvertTo-SecureString $env:WINDOWS_CERT_PASSWORD -AsPlainText -Force
+            Remove-Item Env:WINDOWS_CERT_PFX, Env:WINDOWS_CERT_PASSWORD
+            $pfxData = Get-PfxData -FilePath $pfx -Password $password
+            $leaf = @($pfxData.EndEntityCertificates)
+            if ($leaf.Count -ne 1 -or $leaf[0].Thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
+              throw 'The Windows signing PFX must contain a single end-entity certificate'
             }
-            & ./scripts/sign-windows-release.ps1 build/bin/JindiDrama-amd64-installer.exe
+            $thumbprint = $leaf[0].Thumbprint
+            $existing = @(Get-ChildItem -LiteralPath $store | ForEach-Object Thumbprint)
+            if ($thumbprint -in $existing) { throw 'The Windows signing certificate already exists in the runner store' }
+            $known = $leaf + @($pfxData.OtherCertificates)
+            $newThumbprints = @($known | ForEach-Object Thumbprint | Where-Object { $_ -and $_ -notin $existing } | Select-Object -Unique)
+            $importStarted = $true
+            $null = Import-PfxCertificate -FilePath $pfx -CertStoreLocation $store -Password $password
+            if (-not (Get-Item -LiteralPath (Join-Path $store $thumbprint)).HasPrivateKey) {
+              throw 'The selected certificate has no accessible private key'
+            }
+            Remove-Item -LiteralPath $pfx -Force
+            & ./scripts/sign-windows-package.ps1 -SigningThumbprint $thumbprint -SignTool $signTool -OutputDirectory $signed
+            "PACKAGE_DIR=$signed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "JD_SIGNTOOL=$signTool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "JD_SIGN_THUMBPRINT=$thumbprint" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           } finally {
-            if (Test-Path $env:JD_SIGN_CERT) { Remove-Item $env:JD_SIGN_CERT }
+            try {
+              if ($importStarted) {
+                foreach ($imported in $newThumbprints) {
+                  $entry = Join-Path $store $imported
+                  if (Test-Path -LiteralPath $entry) {
+                    if ((Get-Item -LiteralPath $entry).HasPrivateKey) {
+                      Remove-Item -LiteralPath $entry -DeleteKey
+                    } else {
+                      Remove-Item -LiteralPath $entry
+                    }
+                  }
+                }
+              }
+            } finally {
+              Remove-Item Env:WINDOWS_CERT_PFX, Env:WINDOWS_CERT_PASSWORD -ErrorAction SilentlyContinue
+              Remove-Item -LiteralPath $work -Recurse -Force
+            }
           }
       - name: verify installer and WebView2 startup (windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $inst = (Get-ChildItem build/bin/*installer*.exe | Select-Object -First 1).FullName
+          $inst = (Get-Item -LiteralPath (Join-Path $env:PACKAGE_DIR 'JindiDrama-amd64-installer.exe')).FullName
+          $portable = (Get-Item -LiteralPath (Join-Path $env:PACKAGE_DIR 'JindiDrama.exe')).FullName
           $expected = "${env:PACKAGE_CORE_VERSION}.0"
-          foreach ($binary in @("build/bin/JindiDrama.exe", $inst)) {
+          foreach ($binary in @($portable, $inst)) {
             $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $binary).Path)
             $product = "$($info.ProductMajorPart).$($info.ProductMinorPart).$($info.ProductBuildPart).$($info.ProductPrivatePart)"
             $file = "$($info.FileMajorPart).$($info.FileMinorPart).$($info.FileBuildPart).$($info.FilePrivatePart)"
@@ -222,19 +260,19 @@ jobs:
             if (Test-Path "C:\Program Files\JindiDrama\JindiDrama\JindiDrama.exe") { throw "安装目录多了一层 JindiDrama" }
             $desk = @("C:\Users\Public\Desktop", [Environment]::GetFolderPath("Desktop")) | ForEach-Object { Join-Path $_ "金帝短剧.lnk" }
             if (-not ($desk | Where-Object { Test-Path $_ })) { throw "桌面快捷方式「金帝短剧」不存在" }
-            $packaged = (Get-FileHash build/bin/JindiDrama.exe).Hash
+            $packaged = (Get-FileHash -LiteralPath $portable).Hash
             if ((Get-FileHash $exe).Hash -ne $packaged) { throw "Installed application differs from packaged executable" }
             Write-Host "安装目录与中文桌面快捷方式验证通过"
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
-            & ./scripts/smoke-windows-desktop.ps1 -Application "build/bin/JindiDrama.exe" -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe
-            & ./scripts/smoke-windows-desktop.ps1 -Application "build/bin/JindiDrama.exe" -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Tray -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Tray -NativeProbe $nativeProbe
           } catch {
             $checkFailure = $_
           } finally {
             try {
-              if ($env:PACKAGE_MODE -eq "release" -and (Get-AuthenticodeSignature $uninstaller).Status -ne "Valid") {
-                throw "Installed uninstaller signature is invalid"
+              if ($env:PACKAGE_MODE -eq "release") {
+                & ./scripts/sign-windows-release.ps1 -File $uninstaller -VerifyOnly
               }
               $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
               if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
@@ -246,27 +284,30 @@ jobs:
           }
           if ($checkFailure) { throw $checkFailure }
       - name: collect privacy and license notices
-        run: node scripts/package-notices.mjs build/bin
+        shell: bash
+        run: node scripts/package-notices.mjs "$PACKAGE_DIR"
       - name: generate release notes
-        run: node scripts/package-release-notes.mjs build/bin
+        shell: bash
+        run: node scripts/package-release-notes.mjs "$PACKAGE_DIR"
       - name: generate SHA-256 checksums
-        run: node scripts/package-checksums.mjs build/bin
+        shell: bash
+        run: node scripts/package-checksums.mjs "$PACKAGE_DIR"
       - name: list output
         shell: bash
-        run: ls -la build/bin
+        run: ls -la "$PACKAGE_DIR"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ inputs.mode == 'release' && format('release-{0}-attempt-{1}', matrix.os, github.run_attempt) || format('package-{0}', matrix.os) }}
           if-no-files-found: error
           path: |
-            build/bin/*.exe
-            build/bin/*.zip
-            build/bin/RELEASE-NOTES.md
-            build/bin/RELEASE-ROLLBACK.md
-            build/bin/PRIVACY.md
-            build/bin/FRONTEND-LICENSES.md
-            build/bin/GO-LICENSES.md
-            build/bin/SHA256SUMS.txt
+            ${{ env.PACKAGE_DIR }}/*.exe
+            ${{ env.PACKAGE_DIR }}/*.zip
+            ${{ env.PACKAGE_DIR }}/RELEASE-NOTES.md
+            ${{ env.PACKAGE_DIR }}/RELEASE-ROLLBACK.md
+            ${{ env.PACKAGE_DIR }}/PRIVACY.md
+            ${{ env.PACKAGE_DIR }}/FRONTEND-LICENSES.md
+            ${{ env.PACKAGE_DIR }}/GO-LICENSES.md
+            ${{ env.PACKAGE_DIR }}/SHA256SUMS.txt
   verify-windows-download:
     needs: package
     if: ${{ !cancelled() }}

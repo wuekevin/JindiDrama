@@ -80,6 +80,16 @@ macOS 打包会解压最终 Universal ZIP，在 Apple Silicon 上启动归档中
 2. 在仓库中运行 `node scripts/package-checksums.mjs --verify release "<解压目录>"`。核对 `RELEASE-NOTES.md` 中的版本、提交、打包运行和轮次。发行标签应指向说明中的同一个提交。
 3. 用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。确认草稿的资产名称和 SHA-256 后，由维护者发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 
+#### Windows 证书库签名
+
+GitHub 托管版使用已配置的 PFX 凭据临时导入证书库，签名时按指纹选择证书。使用已有硬件密钥或不可导出私钥的维护者，可在对应 Windows 环境先执行 Wails Windows NSIS 构建，再从项目根目录运行下列命令。需要 PowerShell 7、Windows SDK 的 SignTool、命令路径中支持 `!uninstfinalize` 的 NSIS 3，以及当前用户 `My` 证书库中具有可访问密钥的签名证书。若证书位于本机 `My` 库，添加 `-MachineStore`。
+
+```powershell
+pwsh -NoProfile -File scripts/sign-windows-package.ps1 -SigningThumbprint $thumbprint -SignTool $signtool -OutputDirectory build/bin/store-signed
+```
+
+脚本在独立目录签署便携程序、卸载器和安装器，校验发布者指纹和时间戳后，将签名的便携程序及安装器一起交付到新目录。原始构建可继续用于测试。[Microsoft SignTool](https://learn.microsoft.com/windows/win32/seccrypto/signtool)
+
 ## 短剧分享
 
 详情页可复制短剧链接，播放页和评论页可复制当前分集链接。桌面安装版通过 `jindi:` 协议打开演示目录的短剧和分集，外部打开的分集默认暂停。Windows 便携版可用命令 `JindiDrama.exe "jindi://watch/d1/2"` 打开分集。浏览器预览复制当前站点的可访问地址。
