@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Heart, Play, CircleCheck, Clapperboard, Video, SquarePen, LayoutGrid, List, ListChecks, Ellipsis, ChevronDown } from 'lucide-vue-next'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
+import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { isFinished } from '@/composables'
@@ -16,7 +16,8 @@ const batch = ref(false); const picked = ref<Set<string>>(new Set()); const conf
 const { savedCard } = useLicensedCatalog()
 const rows = computed(() => lib.favorites.map((id) => savedCard(id)).filter((d): d is Drama => !!d).map((d) => {
   const h = lib.history.find((x) => x.dramaId === d.id); const done = isFinished(h, d)
-  return { d, h, done, status: done ? '已看过' : h ? '在追' : '未看', pct: h?.percent ?? 0, last: h?.episode }
+  const issue = savedLocalMediaIssue(d, h?.episode ?? 1)
+  return { d, h, done, issue, status: done ? '已看过' : h ? '在追' : '未看', pct: h?.percent ?? 0, last: h?.episode }
 }))
 const counts = computed(() => ({ all: rows.value.length, watching: rows.value.filter((r) => r.status === '在追').length, done: rows.value.filter((r) => r.done).length, manju: rows.value.filter((r) => r.d.kind === '漫剧').length, real: rows.value.filter((r) => r.d.kind === '真人剧').length }))
 const genres = computed(() => [...new Set(rows.value.flatMap((r) => r.d.tags))])
@@ -35,12 +36,12 @@ function pick(id: string) { const s = new Set(picked.value); s.has(id) ? s.delet
 const allPicked = computed(() => list.value.length > 0 && list.value.every((r) => picked.value.has(r.d.id)))
 const selectAll = () => { picked.value = allPicked.value ? new Set() : new Set(list.value.map((r) => r.d.id)) }
 function doBatch() { const ids = [...picked.value]; lib.removeFavs(ids); picked.value = new Set(); confirm.value = false; toast.push(`已取消收藏 ${ids.length} 部`, 'success') }
-function play(r: (typeof rows.value)[number]) {
-  const last = r.last ?? 1
-  const episode = r.d.kind === '本地片库' && last > r.d.updatedTo ? 1 : last
-  router.push(playbackRoute(r.d.id, episode))
+type Row = (typeof rows.value)[number]
+const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
+function play(r: Row) {
+  return router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.last ?? 1))
 }
-const open = (r: (typeof rows.value)[number]) => (batch.value ? pick(r.d.id) : router.push(detailRoute(r.d.id)))
+const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(r)))
 </script>
 <template>
   <div class="fav" data-testid="page-favorites">
@@ -57,12 +58,13 @@ const open = (r: (typeof rows.value)[number]) => (batch.value ? pick(r.d.id) : r
       <li v-for="r in list" :key="r.d.id" class="card" :class="{ sel: picked.has(r.d.id) }" data-testid="fav-card">
         <button class="cover" :aria-label="`${r.d.title}`" @click="open(r)"><img :src="r.d.cover" :alt="r.d.title" /><span class="st"><Play v-if="r.status === '在追'" :size="11" /><CircleCheck v-else-if="r.done" :size="11" />{{ r.d.kind === '真人剧' && r.status === '未看' ? '真人剧' : r.status }}</span>
           <i v-if="batch" class="ck" :class="{ on: picked.has(r.d.id) }" role="checkbox" :aria-checked="picked.has(r.d.id)" /></button>
-        <div class="info"><div class="tt"><h3 class="clamp-2">{{ r.d.title }}</h3><div class="mw"><button aria-label="更多" data-testid="fav-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn"><li><button @click="router.push(detailRoute(r.d.id))">查看详情</button></li><li><button data-testid="menu-unfav" @click="unfav(r.d.id)">取消收藏</button></li></ul></div></div>
-          <p class="mt">{{ r.d.tags.slice(0, 2).join(' · ') }} · {{ r.d.episodeCount }}集</p>
-          <p class="up">{{ r.d.finished ? `已完结（共${r.d.episodeCount}集）` : `更新至 第${r.d.updatedTo}集` }}<em v-if="!r.d.finished && r.d.updatedTo > (r.last ?? 0) + 3" class="new">NEW</em></p>
+        <div class="info"><div class="tt"><h3 class="clamp-2">{{ r.d.title }}</h3><div class="mw"><button aria-label="更多" data-testid="fav-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn"><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li><li><button data-testid="menu-unfav" @click="unfav(r.d.id)">取消收藏</button></li></ul></div></div>
+          <p v-if="r.issue !== 'library'" class="mt">{{ r.d.tags.slice(0, 2).join(' · ') }} · {{ r.d.episodeCount }}集</p>
+          <p v-if="!r.issue" class="up">{{ r.d.finished ? `已完结（共${r.d.episodeCount}集）` : `更新至 第${r.d.updatedTo}集` }}<em v-if="!r.d.finished && r.d.updatedTo > (r.last ?? 0) + 3" class="new">NEW</em></p>
+          <p v-else class="up">{{ r.issue === 'library' ? '本地媒体不可用' : '上次观看的分集不可用' }}</p>
           <p class="lw">{{ r.last ? `上次看到：第${r.last}集` : '尚未观看' }}</p>
           <div class="pg"><ProgressBar :value="r.pct" /><i>{{ r.pct }}%</i></div></div>
-        <div class="ops"><button class="p" data-testid="fav-play" @click="play(r)"><Play :size="13" fill="currentColor" />播放</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
+        <div class="ops"><button class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.issue === 'library' ? '查看片库' : r.issue === 'episode' ? '选集' : '播放' }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
       </li></ul>
     <div v-if="batch" class="batchbar" data-testid="batchbar"><button class="all" data-testid="select-all" @click="selectAll"><i class="ck" :class="{ on: allPicked }" />全选</button><span>已选 {{ picked.size }} 部</span><BaseButton :disabled="!picked.size" data-testid="batch-unfav" @click="confirm = true">取消收藏</BaseButton><BaseButton variant="ghost" @click="toggleBatch">完成</BaseButton></div>
     <Modal :open="confirm" title="取消收藏" confirm-text="确认取消" @cancel="confirm = false" @confirm="doBatch">确定取消收藏已选的 {{ picked.size }} 部短剧吗？</Modal>

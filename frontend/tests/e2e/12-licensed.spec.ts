@@ -283,10 +283,10 @@ type HistoryRow = {
   dramaId: string; episode: number; positionMs: number; durationMs: number; percent: number; watchedAt: number
 }
 
-test('licensed favorites and exact resume survive a restart and work from global pages', async ({ page }) => {
+test('licensed favorites and exact resume survive a restart and work from global pages', async ({ page }, testInfo) => {
   const saved = { favorites: [] as string[], history: [] as HistoryRow[] }
-  let configured = true
-  await page.exposeFunction('readLicensedTestState', () => ({ ...saved, configured }))
+  let episodeCount = 2
+  await page.exposeFunction('readLicensedTestState', () => ({ ...saved, episodeCount }))
   await page.exposeFunction('saveLicensedTestState', (changes: { favorites?: string[]; history: HistoryRow[]; removed: string[] }) => {
     if (changes.favorites) saved.favorites = changes.favorites
     const replaced = new Set([...changes.removed, ...changes.history.map(({ dramaId }) => dramaId)])
@@ -294,7 +294,7 @@ test('licensed favorites and exact resume survive a restart and work from global
   })
   await page.addInitScript((entry) => {
     const desktop = window as unknown as {
-      readLicensedTestState(): Promise<{ configured: boolean; favorites: string[]; history: HistoryRow[] }>
+      readLicensedTestState(): Promise<{ episodeCount: number; favorites: string[]; history: HistoryRow[] }>
       saveLicensedTestState(changes: unknown): Promise<void>
     }
     Object.assign(window, { go: { app: { App: {
@@ -305,8 +305,16 @@ test('licensed favorites and exact resume survive a restart and work from global
       HomeFeed: async () => ({ todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
       GetSetting: async (key: string) => key === 'app' ? '{"startPage":"上次观看"}' : '',
       SaveLibraryChanges: desktop.saveLicensedTestState,
-      LicensedCatalog: async () => (await desktop.readLicensedTestState()).configured ? [entry] : [],
-      Episodes: async () => [1, 2].map((index) => ({ id: entry.id + '-' + index, dramaId: entry.id, index, available: true })),
+      LicensedCatalog: async () => {
+        const { episodeCount } = await desktop.readLicensedTestState()
+        return episodeCount ? [{ ...entry, episodeCount, updatedTo: episodeCount }] : []
+      },
+      Episodes: async () => {
+        const { episodeCount } = await desktop.readLicensedTestState()
+        return Array.from({ length: episodeCount }, (_, i) => ({
+          id: entry.id + '-' + (i + 1), dramaId: entry.id, index: i + 1, available: true,
+        }))
+      },
       ResolvePlayback: async (id: string, index: number) => ({
         kind: 'licensed', episodeId: id + '-' + index,
         sources: [{ src: `/_licensed/media/${id}/${index}/clip.mp4`, type: 'video/mp4' }],
@@ -404,15 +412,56 @@ test('licensed favorites and exact resume survive a restart and work from global
   await page.goto('/#/licensed?id=local-landscape')
   await expect(page.getByRole('alert')).toHaveCount(0)
 
-  configured = false
+  saved.history[0] = validBookmark
+  episodeCount = 1
+  await page.goto('/#/favorites')
+  await page.reload()
+  await expect(card).toContainText('上次观看的分集不可用')
+  await card.getByRole('button', { name: '选集' }).click()
+  await expect(page).toHaveURL(/licensed\?id=local-landscape$/)
+  await expect(page.getByRole('button', { name: '第 1 集' })).toBeVisible()
+  await expect(video).toHaveCount(0)
+
+  await page.goto('/#/history')
+  const shorter = historyPage.getByTestId('history-item').filter({ hasText: '南风纪事' })
+  await expect(shorter).toContainText('该分集不可用')
+  await expect(historyPage.getByTestId('continue-latest')).toBeDisabled()
+  await shorter.getByRole('button', { name: '选集' }).click()
+  await expect(page).toHaveURL(/licensed\?id=local-landscape$/)
+  expect(saved.history).toEqual([validBookmark])
+
+  episodeCount = 0
   await page.goto('/#/favorites')
   await page.reload()
   const unavailable = page.getByTestId('fav-card').filter({ hasText: '本地短剧 · landscape' })
-  await expect(unavailable).toBeVisible()
+  await expect(unavailable).toContainText('本地媒体不可用')
+  await expect(unavailable).not.toContainText('0集')
+  await page.screenshot({ path: testInfo.outputPath('unavailable-favorites.png') })
+  await unavailable.getByTestId('fav-play').click()
+  await expect(page).toHaveURL(/#\/licensed$/)
+  await expect(page.getByText('尚未配置本地片库')).toBeVisible()
+  await page.goto('/#/history')
+  const history = page.getByTestId('history-item').filter({ hasText: '本地短剧 · landscape' })
+  await expect(history).toContainText('本地媒体不可用')
+  await expect(history).not.toContainText('共0集')
+  await page.screenshot({ path: testInfo.outputPath('unavailable-history.png') })
+  await history.getByRole('button', { name: '查看片库' }).click()
+  await expect(page).toHaveURL(/#\/licensed$/)
+  expect(saved.history).toEqual([validBookmark])
+
+  episodeCount = 2
+  await page.goto('/#/history')
+  await page.reload()
+  await historyPage.getByTestId('resume').click()
+  await expect(page).toHaveURL(/licensed\?id=local-landscape&ep=2$/)
+  await expect(video).toHaveJSProperty('currentTime', 12)
+
+  episodeCount = 0
+  await page.goto('/#/favorites')
+  await page.reload()
   await unavailable.getByTestId('fav-unfav').click()
   await expect.poll(() => saved.favorites).toEqual([])
   await page.goto('/#/history')
-  const history = page.getByTestId('history-item').filter({ hasText: '本地短剧 · landscape' })
   await expect(history).toBeVisible()
   await history.getByTestId('h-more').click()
   await history.getByTestId('h-delete').click()

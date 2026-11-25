@@ -7,3 +7,9 @@
 - GitHub 当前版本打包、Windows 和 Intel Mac 原生运行、正式签名和公证仍待验收。官方红果 Provider 的启用条件见 [上游授权](UPSTREAM-AUTHORIZATION.md)。打包和验证流程见 [README](../README.md)。
 
 - Windows 证书库签名流程已通过模拟签名和验签、NSIS 卸载器钩子及工作流静态检查。真实证书和 Windows 签名验收仍待托管或实机运行。
+
+## 本地片库收藏与历史可用状态（2026-11-25）
+
+- 本地媒体不可用时，收藏和历史提供「查看片库」。原分集超出当前目录时提供「选集」。这两个入口保留原进度及收藏、删除操作。恢复目录后的浏览器真实视频测试从原第 2 集 12 秒继续。
+- Node 22 类型检查和生产构建、Vitest 79 项、Playwright 213 项、Go vet 和全量 Go 测试通过。macOS Apple Silicon 原生验证无目录、短目录和恢复第 2 集，退出后的隔离 SQLite 保留原进度且完整性为 `ok`。Windows amd64 生产交叉编译通过，WebView2 原生验收待运行。
+- 1448×1086 实际界面复核了操作位置、原集数和进度显示。见 [收藏](../design/rendered/07-本地媒体不可用.png) 和 [历史](../design/rendered/08-本地媒体不可用.png)。

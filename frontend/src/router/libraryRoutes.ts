@@ -1,3 +1,11 @@
+import type { Drama } from '@/types'
+
+export function savedLocalMediaIssue(drama: Drama, episode: number) {
+  if (drama.kind !== '本地片库') return
+  if (!drama.updatedTo) return 'library'
+  if (episode > drama.updatedTo) return 'episode'
+}
+
 export function detailRoute(id: string) {
   return id.startsWith('local-') ? { name: 'licensed', query: { id } } : `/drama/${id}`
 }
