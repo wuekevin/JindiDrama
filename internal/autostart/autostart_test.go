@@ -2,38 +2,8 @@ package autostart
 
 import (
 	"errors"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
-
-func TestDarwinLaunchAgent(t *testing.T) {
-	home := t.TempDir()
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/Jindi & Drama.app/Contents/MacOS/JindiDrama", HomeDir: home}
-	if on, _ := m.Enabled(); on {
-		t.Fatal("初始应为关闭")
-	}
-	if err := m.Set(true); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(filepath.Join(home, "Library", "LaunchAgents", plistName))
-	if err != nil || !strings.Contains(string(b), "Jindi &amp; Drama") || !strings.Contains(string(b), "RunAtLoad") {
-		t.Fatalf("plist 内容不对（需转义）: %v %s", err, b)
-	}
-	if on, _ := m.Enabled(); !on {
-		t.Fatal("应为开启")
-	}
-	if err := m.Set(false); err != nil {
-		t.Fatal(err)
-	}
-	if on, _ := m.Enabled(); on {
-		t.Fatal("应为关闭")
-	}
-	if err := m.Set(false); err != nil {
-		t.Fatalf("重复关闭不应报错: %v", err)
-	}
-}
 
 func TestUnsupportedOS(t *testing.T) {
 	m := &Manager{GOOS: "linux"}
