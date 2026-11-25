@@ -29,7 +29,6 @@ export const useCommentStore = defineStore('comments', () => {
   const pending = ref<Record<string, boolean>>({})
   const readErrors = ref<Record<string, boolean>>({})
   const saveErrors = ref<Record<string, boolean>>({})
-  let saving = Promise.resolve()
   const all = computed(() => byEp.value[key.value] ?? [])
   const loading = computed(() => !!pending.value[key.value])
   const readError = computed(() => !!readErrors.value[key.value])
@@ -59,20 +58,17 @@ export const useCommentStore = defineStore('comments', () => {
     expanded.value = new Set()
     return load()
   }
-  function persist() {
+  async function persist() {
     if (!canEdit()) return
     const current = key.value
     const { dramaId, index } = episode.value
     const snapshot = JSON.stringify(all.value)
-    saving = saving.then(async () => {
-      try {
-        await saveLocalComments(dramaId, index, snapshot)
-        saveErrors.value[current] = false
-      } catch {
-        saveErrors.value[current] = true
-      }
-    })
-    return saving
+    try {
+      await saveLocalComments(dramaId, index, snapshot)
+      saveErrors.value[current] = false
+    } catch {
+      saveErrors.value[current] = true
+    }
   }
   const sorted = computed(() => { let l = [...all.value]; if (sort.value === 'author') l = l.filter((c) => c.byAuthor || c.mine); l.sort((a, b) => (sort.value === 'hot' ? b.likes - a.likes : b.ts - a.ts)); return l })
   const visible = computed(() => sorted.value.slice(0, shown.value))

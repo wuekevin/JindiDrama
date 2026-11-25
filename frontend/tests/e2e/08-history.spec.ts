@@ -1,6 +1,13 @@
 import { test, expect } from './fixtures'
 test.describe('08 观看历史', () => {
-  test.beforeEach(async ({ page }) => { await page.goto('/#/history'); await page.evaluate(() => localStorage.removeItem('jindi.library.v1')); await page.reload(); await page.waitForSelector('[data-testid=history-item]') })
+  test.beforeEach(async ({ page }) => {
+    // The demo groups use relative timestamps. Anchor them away from midnight.
+    await page.clock.setFixedTime(new Date(2026, 10, 26, 12))
+    await page.goto('/#/history')
+    await page.evaluate(() => localStorage.removeItem('jindi.library.v1'))
+    await page.reload()
+    await page.waitForSelector('[data-testid=history-item]')
+  })
   test('screenshot + groups + stats', async ({ page }) => { await expect(page.getByTestId('group-today')).toContainText('3部'); await expect(page.getByTestId('group-yesterday')).toContainText('4部'); await expect(page.getByTestId('stat-total')).toHaveText('12'); await page.screenshot({ path: '../design/rendered/08-观看历史.png' }) })
   test('status tabs filter', async ({ page }) => { await page.getByTestId('htab-done').click(); await expect(page.getByTestId('history-item')).toHaveCount(4); await expect(page.getByTestId('resume')).toHaveCount(0); await page.getByTestId('htab-watching').click(); await expect(page.getByTestId('done-badge')).toHaveCount(0) })
   test('side filters combine (genre + time)', async ({ page }) => { await page.getByTestId('fg-甜宠').click(); const n1 = await page.getByTestId('history-item').count(); await page.getByTestId('fw-今天').click(); expect(await page.getByTestId('history-item').count()).toBeLessThanOrEqual(n1); await page.getByTestId('fw-全部').click(); await page.getByTestId('fg-全部').click(); await expect(page.getByTestId('history-item')).toHaveCount(12) })

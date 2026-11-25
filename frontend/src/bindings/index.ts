@@ -97,7 +97,6 @@ export const markFrontendReady = () => api()?.MarkFrontendReady?.()
 export const hasBridge = () => api() !== null
 export const closeDesktopWindow = () => api()?.CloseWindow?.()
 let windowCloseSettingWrite = Promise.resolve()
-export const waitForWindowCloseSetting = () => windowCloseSettingWrite
 export function setWindowCloseSetting(action: string) {
   const a = api()
   const save = a?.SetWindowCloseAction?.bind(a)
@@ -117,7 +116,6 @@ export const exportDemoScreenshot = (dramaId: string, episode: number, quality: 
   api()?.ExportDemoScreenshot?.(dramaId, episode, quality, seconds, pngData)
 const episodeLikeStorageKey = (dramaId: string, episode: number) => `jindi.episode-like.${dramaId}.${episode}`
 const episodeLikeWrites = new Map<string, Promise<void>>()
-export const waitForEpisodeLikeWrites = () => Promise.all(episodeLikeWrites.values())
 export async function loadEpisodeLike(dramaId: string, episode: number) {
   const key = episodeLikeStorageKey(dramaId, episode)
   await episodeLikeWrites.get(key)
@@ -146,8 +144,15 @@ export function saveEpisodeLike(dramaId: string, episode: number, liked: boolean
 }
 
 export const loadLocalComments = (dramaId: string, episode: number) => api()?.LocalComments(dramaId, episode)
-export const saveLocalComments = (dramaId: string, episode: number, snapshot: string) =>
-  api()?.SaveLocalComments(dramaId, episode, snapshot)
+let localCommentWrites = Promise.resolve()
+export function saveLocalComments(dramaId: string, episode: number, snapshot: string) {
+  const app = api()
+  if (!app) return
+  const write = localCommentWrites.then(() => app.SaveLocalComments(dramaId, episode, snapshot))
+  // The submitting store reports the failure. Later snapshots still need to run.
+  localCommentWrites = write.catch(() => {})
+  return write
+}
 
 export const loadLocalDanmaku = (dramaId: string, episode: number) => api()?.LocalDanmaku(dramaId, episode)
 export const sendLocalDanmaku = (dramaId: string, episode: number, offsetMs: number, text: string) =>
@@ -181,7 +186,20 @@ interface LibrarySnapshot {
 
 let persistedLibrary: LibrarySnapshot | undefined
 let libraryWrites = Promise.resolve()
-export const waitForLibraryWrites = () => libraryWrites
+function queuedWindowWrites() {
+  return [windowCloseSettingWrite, libraryWrites, localCommentWrites, ...episodeLikeWrites.values()]
+}
+
+export async function waitForWindowWrites() {
+  let pending = queuedWindowWrites()
+  for (;;) {
+    await Promise.allSettled(pending)
+    const current = queuedWindowWrites()
+    // Another queue can accept work while an earlier snapshot is settling.
+    if (current.length === pending.length && current.every((write, index) => write === pending[index])) return
+    pending = current
+  }
+}
 let desktopCache: string | undefined
 let libraryWriter: string | undefined
 let writerRevision = 0

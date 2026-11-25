@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { waitForEpisodeLikeWrites, waitForLibraryWrites, waitForWindowCloseSetting } from './index'
+import { waitForWindowWrites } from './index'
 
 export const BEFORE_WINDOW_CLOSE = 'jindi-before-window-close'
 
@@ -13,7 +13,7 @@ export function registerWindowClose() {
     window.dispatchEvent(new Event(BEFORE_WINDOW_CLOSE))
     try {
       await nextTick()
-      await Promise.all([waitForEpisodeLikeWrites(), waitForLibraryWrites(), waitForWindowCloseSetting()])
+      await waitForWindowWrites()
     } finally {
       runtime.EventsEmit('jindi-window-close-ready')
     }

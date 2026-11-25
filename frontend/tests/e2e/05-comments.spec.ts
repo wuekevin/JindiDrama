@@ -74,6 +74,99 @@ test('desktop processes cold and warm share links and pauses external playback',
   await expect(page).toHaveURL(/#\/watch\/d1\/2\?paused=1$/)
 })
 
+test('desktop close waits for queued comment snapshots, including edits queued during close', async ({ page }) => {
+  await page.addInitScript(() => {
+    let notifyClose: () => void
+    let started = 0
+    let release: () => void
+    let releaseLike: () => void
+    Object.assign(window, {
+      runtime: {
+        EventsOn: (name: string, listener: () => void) => {
+          if (name === 'jindi-before-window-close') notifyClose = listener
+        },
+        EventsEmit: (name: string) => {
+          if (name === 'jindi-window-close-ready') sessionStorage.setItem('comment-close-ready', 'yes')
+        },
+      },
+      go: { app: { App: {
+        StorageReady: async () => false,
+        MarkFrontendReady: async () => {},
+        Drama: async () => undefined,
+        Episodes: async () => [],
+        LocalDanmaku: async () => [],
+        LocalComments: async () => '',
+        LocalEpisodeLiked: async () => false,
+        SetLocalEpisodeLiked: async () => {
+          sessionStorage.setItem('comment-close-like-started', 'yes')
+          await new Promise<void>((resolve) => { releaseLike = resolve })
+        },
+        SaveLocalComments: async (dramaId: string, episode: number, snapshot: string) => {
+          const write = ++started
+          sessionStorage.setItem('comment-writes-started', String(write))
+          sessionStorage.setItem('comment-latest-snapshot', JSON.stringify({ dramaId, episode, snapshot }))
+          await new Promise<void>((resolve, reject) => {
+            release = () => write === 1 ? reject(new Error('test write failure')) : resolve()
+          })
+        },
+      } } },
+    })
+    window.addEventListener('test-comment-close', () => notifyClose())
+    window.addEventListener('test-comment-release', () => release())
+    window.addEventListener('test-comment-release-like', () => releaseLike())
+  })
+  const read = (key: string) => page.evaluate((item) => sessionStorage.getItem(item), key)
+  const releaseWrite = () => page.evaluate(() => window.dispatchEvent(new Event('test-comment-release')))
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  const input = page.getByTestId('comment-input')
+  const post = page.getByTestId('comment-post')
+  await input.fill('退出前的评论')
+  await post.click()
+  await expect.poll(() => read('comment-writes-started')).toBe('1')
+  const ownComment = page.getByTestId('comment').first()
+  await ownComment.getByTestId('reply-btn').click()
+  await ownComment.getByTestId('reply-input').fill('退出前的回复')
+  await ownComment.getByTestId('reply-send').click()
+  await page.getByRole('button', { name: '本地点赞' }).click()
+  await expect.poll(() => read('comment-close-like-started')).toBe('yes')
+
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('test-comment-close'))
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  })
+  expect(await read('comment-close-ready')).toBeNull()
+
+  await releaseWrite()
+  await expect.poll(() => read('comment-writes-started')).toBe('2')
+  const error = page.getByRole('alert')
+  await expect(error).toContainText('本地评论保存失败')
+  await error.getByRole('button', { name: '重试' }).click()
+  const previousSnapshot = await read('comment-latest-snapshot')
+  await releaseWrite()
+  await expect.poll(() => read('comment-writes-started')).toBe('3')
+  expect(await read('comment-latest-snapshot')).toBe(previousSnapshot)
+  await releaseWrite()
+  await expect(error).toHaveCount(0)
+  expect(await read('comment-close-ready')).toBeNull()
+
+  await input.fill('等待期间的评论')
+  await post.click()
+  await expect.poll(() => read('comment-writes-started')).toBe('4')
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('test-comment-release-like'))
+    return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+  })
+  expect(await read('comment-close-ready')).toBeNull()
+  const latest = JSON.parse((await read('comment-latest-snapshot'))!)
+  expect([latest.dramaId, latest.episode]).toEqual(['d1', 32])
+  expect(JSON.parse(latest.snapshot)).toEqual(expect.arrayContaining([
+    expect.objectContaining({ text: '等待期间的评论' }),
+    expect.objectContaining({ text: '退出前的评论', replies: [expect.objectContaining({ text: '退出前的回复' })] }),
+  ]))
+  await releaseWrite()
+  await expect.poll(() => read('comment-close-ready')).toBe('yes')
+})
+
 test.describe('05 评论互动', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/watch/d1/32?panel=comments&t=192&paused'); await page.waitForSelector('[data-testid=comment]') })
   test('screenshot', async ({ page }) => { await expect(page.getByTestId('comment-total')).toContainText('3,217'); await page.screenshot({ path: '../design/rendered/05-评论互动.png' }) })
