@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -40,6 +41,150 @@ func TestDemoExportUsesPlaybackAssetAndPreservesExistingFile(t *testing.T) {
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "demo payload" {
 		t.Fatalf("exported file: %q, %v", data, err)
+	}
+}
+
+type observedDemoAssets struct {
+	fs.FS
+	beforeRead func() error
+}
+
+func (assets observedDemoAssets) Open(name string) (fs.File, error) {
+	file, err := assets.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	return observedDemoAsset{File: file, beforeRead: assets.beforeRead}, nil
+}
+
+type observedDemoAsset struct {
+	fs.File
+	beforeRead func() error
+}
+
+func (asset observedDemoAsset) Read(buffer []byte) (int, error) {
+	if err := asset.beforeRead(); err != nil {
+		return 0, err
+	}
+	return asset.File.Read(buffer[:min(len(buffer), 4)])
+}
+
+func TestDemoExportPublishesOnlyAfterCopy(t *testing.T) {
+	const assetName = "demo/episode.mp4"
+	failedRead := errors.New("source interrupted")
+	for _, scenario := range []struct {
+		name          string
+		duringCopy    func(string) error
+		expectedError error
+		expectedData  string
+	}{
+		{name: "complete", duringCopy: func(string) error { return nil }, expectedData: "demo video"},
+		{name: "read failure", duringCopy: func(string) error { return failedRead }, expectedError: failedRead},
+		{name: "name taken during copy", duringCopy: func(path string) error {
+			return os.WriteFile(path, []byte("other program"), 0o600)
+		}, expectedError: fs.ErrExist, expectedData: "other program"},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			directory := t.TempDir()
+			target := filepath.Join(directory, "episode.mp4")
+			calls := 0
+			assets := observedDemoAssets{FS: fstest.MapFS{assetName: {Data: []byte("demo video")}}}
+			assets.beforeRead = func() error {
+				calls++
+				if calls != 2 {
+					return nil
+				}
+				if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("target became visible before copying ended: %v", err)
+				}
+				return scenario.duringCopy(target)
+			}
+			if err := exportAsset(assets, assetName, target); !errors.Is(err, scenario.expectedError) {
+				t.Fatalf("export result: %v, want %v", err, scenario.expectedError)
+			}
+			if calls < 2 {
+				t.Fatalf("expected more than one read, got %d", calls)
+			}
+			data, err := os.ReadFile(target)
+			if scenario.expectedData == "" {
+				if !errors.Is(err, fs.ErrNotExist) {
+					t.Fatalf("failed copy left target: %q, %v", data, err)
+				}
+			} else if err != nil || string(data) != scenario.expectedData {
+				t.Fatalf("target content: %q, %v", data, err)
+			}
+			if paths, err := filepath.Glob(filepath.Join(directory, ".jindidrama-export-*")); err != nil || len(paths) != 0 {
+				t.Fatalf("export left temporary files: %v, %v", paths, err)
+			}
+		})
+	}
+}
+
+func TestDemoExportFallbackCopiesWithoutReplacingDestination(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "episode.mp4")
+	const asset = "demo/episode.mp4"
+	for _, collision := range []bool{false, true} {
+		t.Run(fmt.Sprintf("collision=%v", collision), func(t *testing.T) {
+			if err := os.Remove(target); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				t.Fatal(err)
+			}
+			expected := "embedded demo"
+			assets := fstest.MapFS{asset: {Data: []byte(expected)}}
+			var staged string
+			publish := func(from, to string) error {
+				staged = from
+				if collision {
+					expected = "other program"
+					if err := os.WriteFile(to, []byte(expected), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.ErrUnsupported
+			}
+			observed := observedDemoAssets{FS: assets, beforeRead: func() error {
+				if staged != "" {
+					if _, err := os.Lstat(staged); !errors.Is(err, fs.ErrNotExist) {
+						t.Fatalf("fallback began before staged file was removed: %v", err)
+					}
+				}
+				return nil
+			}}
+			err := exportDemoAsset(observed, asset, target, publish)
+			if (!collision && err != nil) || (collision && !errors.Is(err, fs.ErrExist)) {
+				t.Fatalf("fallback result: %v", err)
+			}
+			if data, err := os.ReadFile(target); err != nil || string(data) != expected {
+				t.Fatalf("target content: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestDemoExportFallbackFailureClearsOnlyOpenFile(t *testing.T) {
+	const asset = "demo/episode.mp4"
+	target := filepath.Join(t.TempDir(), "episode.mp4")
+	assets := observedDemoAssets{FS: fstest.MapFS{asset: {Data: []byte("embedded demo")}}}
+	fallbackReads := 0
+	useFallback := false
+	assets.beforeRead = func() error {
+		if useFallback {
+			fallbackReads++
+			if fallbackReads == 2 {
+				return errors.New("source interrupted")
+			}
+		}
+		return nil
+	}
+	err := exportDemoAsset(assets, asset, target, func(string, string) error {
+		useFallback = true
+		return errors.ErrUnsupported
+	})
+	if !errors.Is(err, errDemoDirectCopy) {
+		t.Fatalf("fallback failure: %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || len(data) != 0 {
+		t.Fatalf("failed fallback output: %q, %v", data, err)
 	}
 }
 

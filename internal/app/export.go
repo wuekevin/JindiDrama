@@ -12,6 +12,8 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
+var errDemoDirectCopy = errors.New("当前保存位置仅支持直接写入，演示视频保存中断")
+
 func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bool, error) {
 	if a.ctx == nil || a.assets == nil {
 		return false, errors.New("桌面演示媒体暂不可导出")
@@ -40,6 +42,9 @@ func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bo
 	if err := exportAsset(a.assets, asset, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return false, errors.New("目标文件已存在，请使用其他文件名")
+		}
+		if errors.Is(err, errDemoDirectCopy) {
+			return false, errDemoDirectCopy
 		}
 		return false, errors.New("演示视频保存失败")
 	}
@@ -150,6 +155,10 @@ func exportLicensedFile(source *os.File, expected os.FileInfo, target string) er
 }
 
 func writeStagedExport(target string, write func(io.Writer) error) error {
+	return stageExport(target, write, publishExport)
+}
+
+func stageExport(target string, write func(io.Writer) error, publish func(string, string) error) (result error) {
 	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
 		if err == nil {
 			return fs.ErrExist
@@ -160,26 +169,56 @@ func writeStagedExport(target string, write func(io.Writer) error) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(staged.Name())
+	defer func() {
+		if err := os.Remove(staged.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			result = errors.Join(result, err)
+		}
+	}()
 	if err := errors.Join(write(staged), staged.Close()); err != nil {
 		return err
 	}
-	return publishExport(staged.Name(), target)
+	return publish(staged.Name(), target)
 }
 
 func exportAsset(assets fs.FS, path, target string) error {
-	source, err := assets.Open(path)
-	if err != nil {
+	return exportDemoAsset(assets, path, target, publishExport)
+}
+
+func exportDemoAsset(assets fs.FS, path, target string, publish func(string, string) error) error {
+	copyAsset := func(output io.Writer) error {
+		source, err := assets.Open(path)
+		if err != nil {
+			return err
+		}
+		defer source.Close()
+		_, err = io.Copy(output, source)
 		return err
 	}
-	defer source.Close()
+
+	allowCopyFallback := false
+	err := stageExport(target, copyAsset, func(staged, target string) error {
+		err := publish(staged, target)
+		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
+			allowCopyFallback = true
+			return nil
+		}
+		return err
+	})
+	if err != nil || !allowCopyFallback {
+		return err
+	}
+
+	// The temporary copy is already gone so the destination only needs space for one file.
 	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}
-	_, copyErr := io.Copy(file, source)
-	if err := errors.Join(copyErr, file.Close()); err != nil {
-		return errors.Join(err, os.Remove(target))
+	if err := copyAsset(file); err != nil {
+		// Acting on the open file keeps any replacement at the same path intact.
+		return errors.Join(errDemoDirectCopy, err, file.Truncate(0), file.Close())
+	}
+	if err := file.Close(); err != nil {
+		return errors.Join(errDemoDirectCopy, err)
 	}
 	return nil
 }
