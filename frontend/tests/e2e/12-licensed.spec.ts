@@ -741,3 +741,51 @@ test('ending licensed playback does not interrupt a pending page navigation', as
   }
   await expect(page).toHaveURL(/#\/settings$/)
 })
+
+test('licensed manual continuation uses the recorded catalog and starts the available next episode at zero', async ({ page }) => {
+  await page.addInitScript((entry) => {
+    const finished = { ...entry, id: 'local-completed-before-append', title: '已完成后追加分集' }
+    const legacy = { ...entry, id: 'local-legacy-no-count', title: '完成状态未知的旧记录' }
+    const prior = { episode: 1, percent: 100, positionSec: 24, durationSec: 24, watchedAt: Date.now() }
+    localStorage.setItem('jindi.library.v1', JSON.stringify({
+      history: [
+        { ...prior, dramaId: finished.id, episodeCountAtWatch: 1 },
+        { ...prior, dramaId: legacy.id },
+        { ...prior, dramaId: entry.id, episodeCountAtWatch: 2 },
+      ],
+      favorites: [entry.id, finished.id, legacy.id],
+    }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      LicensedCatalog: async () => [entry, finished, legacy],
+      HomeFeed: async () => ({ todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
+      Episodes: async (id: string) => [1, 2].map((index) => ({ id: id + '-' + index, index, available: true })),
+      ResolvePlayback: async (id: string, index: number) => ({
+        kind: 'licensed', episodeId: id + '-' + index,
+        sources: [{ src: `/_licensed/media/${id}/${index}/clip.mp4`, type: 'video/mp4' }],
+      }),
+    } } } })
+  }, drama)
+  await serveLicensedClip(page)
+  await page.goto('/#/home?static')
+  const resume = page.getByTestId('resume-card')
+  await expect(resume).toHaveCount(1)
+  await expect(resume).toContainText('南风纪事')
+  await expect(resume).toContainText('下一集 · 第2集')
+  await resume.click()
+  await expect(page).toHaveURL(/licensed\?id=local-landscape&ep=2$/)
+  const video = page.locator('video')
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.readyState)).toBeGreaterThan(0)
+  await expect(video).toHaveJSProperty('currentTime', 0)
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('jindi.library.v1')!).history)
+  expect(saved.find((row: { dramaId: string }) => row.dramaId === drama.id)).toMatchObject({ episode: 1, percent: 100 })
+
+  await page.goto('/#/favorites')
+  for (const title of ['已完成后追加分集', '完成状态未知的旧记录']) {
+    const row = page.getByTestId('fav-card').filter({ hasText: title })
+    await expect(row.getByTestId('fav-play')).toHaveText('重播本集')
+  }
+  await page.goto('/#/history')
+  await page.getByTestId('continue-latest').click()
+  await expect(page).toHaveURL(/licensed\?id=local-landscape&ep=2$/)
+})

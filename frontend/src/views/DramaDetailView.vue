@@ -9,7 +9,7 @@ import { useAppSettings } from '@/stores/appSettings'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { copyShareLink } from '@/router/shareLinks'
-import { detailRoute } from '@/router/libraryRoutes'
+import { continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -52,7 +52,8 @@ async function load(focusHeading = false) {
     detail.value = result
     state.value = result ? 'ready' : 'notfound'
     const history = lib.history.find((entry) => entry.dramaId === id.value)
-    group.value = history ? Math.floor((history.episode - 1) / 20) : 0
+    group.value = history && result && !savedMediaIssue(result.drama, history.episode)
+      ? Math.floor((history.episode - 1) / 20) : 0
     expanded.value = false
     if (result && focusHeading) {
       await nextTick()
@@ -71,7 +72,18 @@ const eps = computed(() => {
   return range ? (detail.value?.episodes ?? []).filter(({ index }) => index >= range.from && index <= range.to) : []
 })
 const hist = computed(() => lib.history.find((h) => h.dramaId === id.value))
-const watchEp = (ep: number) => { if (!detail.value?.episodes.some(({ index, available }) => index === ep && available)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
+const hasEpisode = (episode: number) => detail.value?.episodes.some((item) => item.index === episode && item.available)
+const continuation = computed(() => {
+  const history = hist.value
+  const current = detail.value
+  if (!history || !current || !hasEpisode(history.episode)) return
+  const next = continuationEpisode(current.drama, history)
+  if (next !== undefined && next !== history.episode && hasEpisode(next)) {
+    return { episode: next, percent: 0, label: '看下一集' }
+  }
+  return { episode: history.episode, percent: history.percent, label: history.percent === 100 ? '重播本集' : '继续观看' }
+})
+const watchEp = (ep: number) => { if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
 const progressOf = (ep: number) => (hist.value && hist.value.episode === ep ? hist.value.percent : ep < (hist.value?.episode ?? 0) ? 100 : 0)
 function fav() { void lib.notifySaved(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏') }
 const share = () => copyShareLink(`/drama/${id.value}`)
@@ -107,7 +119,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
           <p class="status"><b>更新状态</b> {{ detail.schedule }} <u>|</u> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
           <div class="cta">
             <BaseButton size="lg" data-testid="watch-now" @click="watchEp(1)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
-            <button v-if="hist" class="cont" data-testid="continue" @click="watchEp(hist.episode)"><CirclePlay :size="30" /><span>继续观看<em>第{{ hist.episode }}集 · {{ hist.percent }}%</em></span></button>
+            <button v-if="continuation" class="cont" data-testid="continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
             <BaseButton size="lg" variant="ghost" data-testid="fav" @click="fav"><component :is="lib.isFav(id) ? Check : Plus" :size="18" />{{ lib.isFav(id) ? '已收藏' : '收藏' }}</BaseButton>
             <BaseButton size="lg" variant="ghost" data-testid="share" @click="share"><Share2 :size="17" />分享</BaseButton>
           </div>

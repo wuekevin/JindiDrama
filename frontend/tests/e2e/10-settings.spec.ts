@@ -531,6 +531,7 @@ for (const { preference, savedHistory, startPath } of [
       if (savedHistory) localStorage.setItem('jindi.library.v1', JSON.stringify({
         favorites: ['d1'],
         history: [
+          { dramaId: 'd3', episode: 31, percent: 100, watchedAt: 4 },
           { dramaId: 'd1', episode: 32, percent: 100, watchedAt: 3 },
           { dramaId: 'd1', episode: 33, percent: 10, watchedAt: 2 },
           { dramaId: 'd1', episode: 31, percent: 99, watchedAt: 1 },

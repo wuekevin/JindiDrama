@@ -491,3 +491,79 @@ test('window close permits a failed database write after a durable journal', asy
   await page.evaluate(() => window.dispatchEvent(new Event('jd-test-close')))
   await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('jd-close-response') ?? 'null'))).toEqual(['attempt-2', false])
 })
+
+test('manual playback entries prioritize unfinished bookmarks and then open the next episode', async ({ page }) => {
+  await page.addInitScript(() => {
+    const now = Date.now()
+    const history = [
+      { dramaId: 'd2', episode: 80, percent: 100, watchedAt: now },
+      { dramaId: 'd1', episode: 31, percent: 100, watchedAt: now - 1 },
+      { dramaId: 'd3', episode: 6, percent: 99, watchedAt: now - 2 },
+    ]
+    localStorage.setItem('jindi.library.v1', JSON.stringify({ history, favorites: ['d1', 'd2'] }))
+  })
+
+  // Each route starts with the same bookmark even if an earlier simulated player has ticked.
+  let visitNumber = 0
+  const visit = (path: string) => page.goto('/?resume-case=' + (++visitNumber) + '#' + path)
+
+  await visit('/home?static')
+  const resume = page.getByTestId('resume-card')
+  await expect(resume).toHaveCount(2)
+  await expect(resume.first()).toContainText('雨夜逢君')
+  await expect(resume.first()).toContainText('99%')
+  await expect(resume.last()).toContainText('下一集 · 第32集')
+  await resume.last().click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+
+  await visit('/history')
+  await page.getByTestId('continue-latest').click()
+  await expect(page).toHaveURL(/#\/watch\/d3\/6$/)
+  await visit('/history')
+  const next = page.getByTestId('history-item').filter({ hasText: '替嫁成了千亿总裁的心尖宠' })
+  await expect(next).toContainText('第31集')
+  await next.getByRole('button', { name: '看下一集' }).click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+
+  await visit('/favorites')
+  const favorite = page.getByTestId('fav-card').filter({ hasText: '替嫁成了千亿总裁的心尖宠' })
+  await expect(favorite.getByTestId('fav-play')).toHaveText('看下一集')
+  await favorite.getByTestId('fav-play').click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+
+  await visit('/drama/d1')
+  const cta = page.getByTestId('continue')
+  await expect(cta).toContainText('看下一集')
+  await expect(cta).toContainText('第32集 · 0%')
+  await cta.click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+})
+
+test('terminal and locked bookmarks keep replay or selection available without offering continuation', async ({ page }) => {
+  await page.addInitScript(() => {
+    const now = Date.now()
+    const history = [
+      { dramaId: 'd1', episode: 32, percent: 100, watchedAt: now },
+      { dramaId: 'd2', episode: 80, percent: 100, watchedAt: now - 1 },
+      { dramaId: 'd3', episode: 73, percent: 20, watchedAt: now - 2 },
+    ]
+    localStorage.setItem('jindi.library.v1', JSON.stringify({ history, favorites: ['d3'] }))
+  })
+  await page.goto('/#/home?static')
+  await expect(page.getByText('暂无可继续观看的短剧')).toBeVisible()
+  await expect(page.getByTestId('resume-card')).toHaveCount(0)
+  await page.goto('/#/history')
+  await expect(page.getByTestId('continue-latest')).toBeDisabled()
+  await expect(page.getByTestId('done-badge')).toContainText('重播')
+  const terminal = page.getByTestId('history-item').filter({ hasText: '替嫁成了千亿总裁的心尖宠' })
+  await terminal.getByRole('button', { name: '重播本集' }).click()
+  await expect(page).toHaveURL(/#\/watch\/d1\/32$/)
+  await page.goto('/#/favorites')
+  const locked = page.getByTestId('fav-card').filter({ hasText: '雨夜逢君' })
+  await expect(locked).toContainText('上次观看的分集不可用')
+  await locked.getByRole('button', { name: '选集' }).click()
+  await expect(page).toHaveURL(/#\/drama\/d3$/)
+  await expect(page.getByRole('heading', { name: /雨夜逢君/ })).toBeVisible()
+  await expect(page.getByTestId('continue')).toHaveCount(0)
+  await expect(page.getByTestId('ep').first()).toBeVisible()
+})

@@ -5,7 +5,7 @@ import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity
 import { useCatalogStore } from '@/stores/catalog'
 import { useLibraryStore } from '@/stores/library'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
+import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import NewDramaCard from '@/components/NewDramaCard.vue'
 import { ProgressBar, EmptyState, ErrorState } from '@/components/ui'
@@ -24,9 +24,21 @@ onMounted(load); watch(() => route.query.state, load)
 const home = computed(() => catalog.home)
 const { card } = useLicensedCatalog()
 const ranking = computed(() => home.value?.rankings[tab.value].slice(0, 5) ?? [])
-const resume = computed(() => lib.history.flatMap((h) => { const d = card(h.dramaId); return d && h.episode <= d.updatedTo ? [{ h, d }] : [] }).slice(0, 3))
+const resume = computed(() => lib.history.flatMap((history) => {
+  const drama = card(history.dramaId)
+  const episode = drama && continuationEpisode(drama, history)
+  if (!drama || episode === undefined) return []
+  const next = episode !== history.episode
+  return [{ d: drama, episode, next, percent: next ? 0 : history.percent, watchedAt: history.watchedAt }]
+}).sort((a, b) => Number(a.next) - Number(b.next) || b.watchedAt - a.watchedAt).slice(0, 3))
 const openDrama = (id: string) => router.push(detailRoute(id))
-const watchNow = (id: string) => { const h = lib.history.find((x) => x.dramaId === id); router.push(playbackRoute(id, h?.episode ?? 1)) }
+function watchNow(id: string) {
+  const history = lib.history.find((entry) => entry.dramaId === id)
+  const drama = card(id)
+  if (!history || !drama) return router.push(playbackRoute(id, 1))
+  if (savedMediaIssue(drama, history.episode)) return openDrama(id)
+  return router.push(playbackRoute(id, continuationEpisode(drama, history) ?? history.episode))
+}
 function fav(id: string) { const on = lib.toggleFav(id); void lib.notifySaved(on ? '已加入收藏' : '已取消收藏') }
 const rankClass = (i: number) => (i < 3 ? `r${i + 1}` : 'rn')
 const autoplay = computed(() => route.query.static === undefined)
@@ -69,11 +81,11 @@ const autoplay = computed(() => route.query.static === undefined)
 
       <section class="block" aria-label="继续观看">
         <div class="sec-h"><Clock :size="26" /><h2>继续观看</h2><button class="link" @click="router.push('/history')">查看更多<ChevronRight :size="15" /></button></div>
-        <EmptyState v-if="!resume.length" title="还没有观看记录" hint="去推荐页挑一部开始追剧吧" />
-        <div v-else class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="watchNow(r.d.id)">
+        <EmptyState v-if="!resume.length" :title="lib.history.length ? '暂无可继续观看的短剧' : '还没有观看记录'" :hint="lib.history.length ? undefined : '去推荐页挑一部开始追剧吧'" />
+        <div v-else class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="router.push(playbackRoute(r.d.id, r.episode))">
           <img :src="r.d.cover" :alt="r.d.title" />
-          <span class="rm"><strong>{{ r.d.title }}</strong><em>第{{ r.h.episode }}集 / 共{{ r.d.episodeCount }}集</em>
-            <span class="pg"><ProgressBar :value="r.h.percent" /><i>{{ r.h.percent }}%</i></span></span>
+          <span class="rm"><strong>{{ r.d.title }}</strong><em><template v-if="r.next">下一集 · </template>第{{ r.episode }}集 / 共{{ r.d.episodeCount }}集</em>
+            <span class="pg"><ProgressBar :value="r.percent" /><i>{{ r.percent }}%</i></span></span>
           <span class="pl" aria-hidden="true"><Play :size="16" fill="currentColor" /></span>
         </button></div>
       </section>
@@ -104,7 +116,7 @@ const autoplay = computed(() => route.query.static === undefined)
 .resume { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 13px; }
 .rc { position: relative; display: flex; gap: 14px; align-items: center; height: 99px; padding: 8px 14px 8px 10px; border-radius: 14px; background: var(--c-surface); border: 1px solid var(--c-border); text-align: left; &:hover { background: var(--c-surface-hover); }
   img { width: 112px; height: 80px; object-fit: cover; border-radius: 10px; } }
-.rm { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; strong { font-size: 16px; } em { font-style: normal; font-size: 13px; color: var(--c-text-2); } }
+.rm { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; strong { font-size: 16px; margin-inline-end: 38px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } em { font-style: normal; font-size: 13px; color: var(--c-text-2); } }
 .pg { display: flex; align-items: center; gap: 10px; :deep(.bar) { flex: 1; } i { font-style: normal; font-size: 13px; color: var(--c-text-2); width: 36px; } }
 .pl { position: absolute; right: 14px; top: 14px; width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.88); color: #2a1517; display: grid; place-items: center; }
 </style>

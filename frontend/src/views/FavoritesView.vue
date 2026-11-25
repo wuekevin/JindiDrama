@@ -3,7 +3,7 @@ import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Heart, Play, CircleCheck, Clapperboard, Video, SquarePen, LayoutGrid, List, ListChecks, Ellipsis, ChevronDown } from 'lucide-vue-next'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
+import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
@@ -17,8 +17,11 @@ const watchLabels = { done: '已看过', watching: '在追', unwatched: '未看'
 const rows = computed(() => lib.favorites.map((id) => savedCard(id)).filter((d): d is Drama => !!d).map((d) => {
   const h = lib.history.find((x) => x.dramaId === d.id)
   const status = watchStatus(h, d)
-  const issue = savedLocalMediaIssue(d, h?.episode ?? 1)
-  return { d, issue, status, pct: h?.percent ?? 0, last: h?.episode }
+  const issue = savedMediaIssue(d, h?.episode ?? 1)
+  const episode = h ? continuationEpisode(d, h) ?? h.episode : 1
+  const action = issue === 'library' ? '查看片库' : issue === 'episode' ? '选集'
+    : h && episode !== h.episode ? '看下一集' : h?.percent === 100 ? '重播本集' : '播放'
+  return { d, issue, status, pct: h?.percent ?? 0, last: h?.episode, episode, action }
 }))
 const counts = computed(() => ({ all: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, manju: rows.value.filter((r) => r.d.kind === '漫剧').length, real: rows.value.filter((r) => r.d.kind === '真人剧').length }))
 const genres = computed(() => [...new Set(rows.value.flatMap((r) => r.d.tags))])
@@ -42,7 +45,7 @@ function doBatch() { const ids = [...picked.value]; lib.removeFavs(ids); picked.
 type Row = (typeof rows.value)[number]
 const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
 function play(r: Row) {
-  return router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.last ?? 1))
+  return router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.episode))
 }
 const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(r)))
 </script>
@@ -67,7 +70,7 @@ const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(
           <p v-else class="up">{{ r.issue === 'library' ? '本地媒体不可用' : '上次观看的分集不可用' }}</p>
           <p class="lw">{{ r.last ? `上次看到：第${r.last}集` : '尚未观看' }}</p>
           <div class="pg"><ProgressBar :value="r.pct" /><i>{{ r.pct }}%</i></div></div>
-        <div class="ops"><button class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.issue === 'library' ? '查看片库' : r.issue === 'episode' ? '选集' : '播放' }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
+        <div class="ops"><button class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.action }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
       </li></ul>
     <div v-if="batch" class="batchbar" data-testid="batchbar"><button class="all" data-testid="select-all" @click="selectAll"><i class="ck" :class="{ on: allPicked }" />全选</button><span>已选 {{ picked.size }} 部</span><BaseButton :disabled="!picked.size" data-testid="batch-unfav" @click="confirm = true">取消收藏</BaseButton><BaseButton variant="ghost" @click="toggleBatch">完成</BaseButton></div>
     <Modal :open="confirm" title="取消收藏" confirm-text="确认取消" @cancel="confirm = false" @confirm="doBatch">确定取消收藏已选的 {{ picked.size }} 部短剧吗？</Modal>

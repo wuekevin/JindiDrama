@@ -1,9 +1,20 @@
-import type { Drama } from '@/types'
+import { watchStatus } from '@/composables'
+import type { Drama, HistoryEntry } from '@/types'
 
-export function savedLocalMediaIssue(drama: Drama, episode: number) {
-  if (drama.kind !== '本地片库') return
-  if (!drama.updatedTo) return 'library'
-  if (episode > drama.updatedTo) return 'episode'
+export function savedMediaIssue(drama: Drama, episode: number) {
+  if (drama.kind === '本地片库' && !drama.updatedTo) return 'library'
+  if (!Number.isInteger(episode) || episode < 1 || episode > drama.updatedTo) return 'episode'
+}
+
+export function unfinishedBookmark(drama: Drama, history: HistoryEntry) {
+  return history.percent >= 0 && history.percent < 100 && !savedMediaIssue(drama, history.episode)
+}
+
+export function continuationEpisode(drama: Drama, history: HistoryEntry) {
+  if (unfinishedBookmark(drama, history)) return history.episode
+  if (history.percent !== 100 || watchStatus(history, drama) !== 'watching') return
+  const episode = history.episode + 1
+  if (!savedMediaIssue(drama, history.episode) && !savedMediaIssue(drama, episode)) return episode
 }
 
 export function detailRoute(id: string) {

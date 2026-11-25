@@ -1,7 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { hasBridge, LS } from '@/bindings'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { beginStartupPlayback } from './libraryRoutes'
+import { beginStartupPlayback, unfinishedBookmark } from './libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useLibraryStore } from '@/stores/library'
 
@@ -17,8 +17,7 @@ function startupRoute() {
   const { card } = useLicensedCatalog()
   const recent = useLibraryStore().history.filter((entry) => {
     const drama = card(entry.dramaId)
-    return Number.isInteger(entry.episode) && entry.episode > 0 && !!drama
-      && entry.episode <= drama.updatedTo && entry.percent < 100
+    return !!drama && unfinishedBookmark(drama, entry)
   })
   return beginStartupPlayback(recent)
 }

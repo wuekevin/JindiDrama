@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, Play, Trash2, LayoutGrid, List, ChevronDown, ChevronUp, ChartColumn, Filter, Settings, ChevronRight, Ellipsis, Check } from 'lucide-vue-next'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
+import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus, historyDay, agoText, watchHours } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
@@ -35,14 +35,15 @@ type Row = ReturnType<typeof historyDay> & {
   h: HistoryEntry
   d: Drama
   status: ReturnType<typeof watchStatus>
-  issue: ReturnType<typeof savedLocalMediaIssue>
+  issue: ReturnType<typeof savedMediaIssue>
+  continuation?: number
 }
 const rows = computed<Row[]>(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt).flatMap((h) => {
   const d = savedCard(h.dramaId)
   if (!d) return []
   return [{
     h, d, ...historyDay(h.watchedAt, now.value),
-    status: watchStatus(h, d), issue: savedLocalMediaIssue(d, h.episode),
+    status: watchStatus(h, d), issue: savedMediaIssue(d, h.episode), continuation: continuationEpisode(d, h),
   }]
 }))
 const status = ref<'all'|'watching'|'done'>('all'); const genre = ref('全部'); const when = ref('全部'); const view = ref<'grid'|'list'>('grid'); const sort = ref<'time'|'progress'>('time')
@@ -54,14 +55,10 @@ const filtered = computed(() => rows.value.filter((r) => (status.value === 'all'
 const ordered = computed(() => (sort.value === 'progress' ? [...filtered.value].sort((a, b) => b.h.percent - a.h.percent) : filtered.value))
 const groups = computed(() => [{ k: 'today', l: '今天' }, { k: 'yesterday', l: '昨天' }, { k: 'earlier', l: '更早' }].map((g) => ({ ...g, items: ordered.value.filter((r) => r.bucket === g.k) })).filter((g) => g.items.length))
 const stat = computed(() => ({ total: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, hours: watchHours(lib.history) }))
-const latest = computed(() => {
-  const playable = rows.value.filter((r) => !r.issue)
-  return playable.find((r) => r.status === 'watching' && r.h.percent < 100)
-    ?? playable.find((r) => r.status === 'watching')
-    ?? playable[0]
-})
+const latest = computed(() => rows.value.find((r) => r.continuation === r.h.episode)
+  ?? rows.value.find((r) => r.continuation !== undefined))
 const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
-const resume = (r: Row) => router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.h.episode))
+const resume = (r: Row) => router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.continuation ?? r.h.episode))
 function toggleBatch() { batch.value = !batch.value; picked.value = new Set() }
 function pick(id: string) { const s = new Set(picked.value); s.has(id) ? s.delete(id) : s.add(id); picked.value = s }
 function delOne(id: string) { lib.removeHistory([id]); menu.value = ''; void lib.notifySaved('已删除该记录') }
@@ -89,7 +86,7 @@ const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
               <div class="pg"><ProgressBar :value="r.h.percent" /><i>{{ r.h.percent }}%</i></div></div>
             <div class="ac"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.age) }}</span>
               <button v-if="r.issue" class="done" @click="resume(r)">{{ r.issue === 'library' ? '查看片库' : '选集' }}</button>
-              <button v-else-if="r.status === 'done'" class="done" data-testid="done-badge" @click="resume(r)">已看完<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />继续观看</button>
+              <button v-else-if="r.status === 'done'" class="done" data-testid="done-badge" aria-label="已看完，重播本集" @click="resume(r)">已看完 · 重播<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />{{ r.continuation === undefined ? '重播本集' : r.continuation !== r.h.episode ? '看下一集' : '继续观看' }}</button>
               <div class="mw"><button aria-label="更多" data-testid="h-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn"><li><button data-testid="h-delete" @click="delOne(r.d.id)">删除此记录</button></li><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li></ul></div></div>
           </li></ul></section>
       <div v-if="batch" class="batchbar" data-testid="batchbar"><span>已选 {{ picked.size }} 条</span><BaseButton :disabled="!picked.size" data-testid="batch-delete" @click="confirmBatch = true">删除选中</BaseButton><BaseButton variant="ghost" @click="toggleBatch">取消</BaseButton></div>
