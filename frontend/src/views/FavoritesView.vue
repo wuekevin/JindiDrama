@@ -31,7 +31,9 @@ const list = computed(() => {
 const tabs = computed(() => [{ k: 'all', l: '全部收藏', n: counts.value.all, i: Heart }, { k: 'watching', l: '在追', n: counts.value.watching, i: Play }, { k: 'done', l: '已看过', n: counts.value.done, i: CircleCheck }, { k: 'manju', l: '漫剧', n: counts.value.manju, i: Clapperboard }, { k: 'real', l: '真人剧', n: counts.value.real, i: Video }] as const)
 function unfav(id: string) { const idx = lib.favorites.indexOf(id); lib.removeFavs([id]); picked.value.delete(id); menu.value = ''; void lib.notifySaved('已取消收藏', 3500); lastRemoved = { id, idx } }
 let lastRemoved: { id: string; idx: number } | null = null
-function undo() { if (lastRemoved) { lib.favorites.splice(lastRemoved.idx, 0, lastRemoved.id); lastRemoved = null } }
+function undo() {
+  if (lastRemoved && lib.addFav(lastRemoved.id, lastRemoved.idx)) lastRemoved = null
+}
 function toggleBatch() { batch.value = !batch.value; picked.value = new Set() }
 function pick(id: string) { const s = new Set(picked.value); s.has(id) ? s.delete(id) : s.add(id); picked.value = s }
 const allPicked = computed(() => list.value.length > 0 && list.value.every((r) => picked.value.has(r.d.id)))

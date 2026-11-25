@@ -66,3 +66,27 @@ func TestWindowClosePreferenceSupportsSessionWithoutSQLite(t *testing.T) {
 		t.Fatalf("session preference: %q", value)
 	}
 }
+
+func TestWindowCloseResponseRequiresTheActiveAttempt(t *testing.T) {
+	tests := []struct {
+		name        string
+		data        []any
+		unconfirmed bool
+		ok          bool
+	}{
+		{name: "safe", data: []any{"2", false}, ok: true},
+		{name: "unsafe", data: []any{"2", true}, unconfirmed: true, ok: true},
+		{name: "stale", data: []any{"1", true}},
+		{name: "missing attempt", data: []any{true}},
+		{name: "wrong attempt type", data: []any{[]int{2}, true}},
+		{name: "wrong status type", data: []any{"2", "true"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			unsafe, ok := parseWindowCloseResponse("2", test.data)
+			if unsafe != test.unconfirmed || ok != test.ok {
+				t.Fatalf("got (%t, %t), want (%t, %t)", unsafe, ok, test.unconfirmed, test.ok)
+			}
+		})
+	}
+}

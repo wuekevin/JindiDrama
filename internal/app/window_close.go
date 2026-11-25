@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	goruntime "runtime"
+	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -145,17 +146,38 @@ func DesktopWindowMenu(a *App) *menu.Menu {
 	return result
 }
 
+const (
+	windowCloseReadyEvent    = "jindi-window-close-ready"
+	windowCloseDeadlineEvent = "jindi-window-close-deadline"
+	windowCloseCanceledEvent = "jindi-window-close-canceled"
+)
+
+func parseWindowCloseResponse(id string, data []any) (unconfirmed, ok bool) {
+	if len(data) != 2 || data[0] != id {
+		return false, false
+	}
+	unconfirmed, ok = data[1].(bool)
+	return
+}
+
 // PrepareWindowClose gives the WebView a bounded opportunity to finish local writes.
 func PrepareWindowClose(a *App) func(context.Context) bool {
 	const (
-		idle uint32 = iota
-		waiting
+		waiting uint32 = iota
+		confirming
 		ready
 	)
-	var state atomic.Uint32
+	type closeAttempt struct {
+		state atomic.Uint32
+	}
+	var active atomic.Pointer[closeAttempt]
+	var sequence atomic.Uint64
 	var handlingNativeClose atomic.Bool
 	return func(ctx context.Context) bool {
-		if goruntime.GOOS == "windows" && !a.explicitQuit.Load() && state.Load() == idle {
+		if current := active.Load(); current != nil {
+			return current.state.Load() != ready
+		}
+		if goruntime.GOOS == "windows" && !a.explicitQuit.Load() {
 			if handlingNativeClose.CompareAndSwap(false, true) {
 				// Wails invokes the native close hook on the Windows UI thread.
 				go func() {
@@ -166,19 +188,56 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 			}
 			return true
 		}
-		if !state.CompareAndSwap(idle, waiting) {
-			return state.Load() != ready
+
+		current := new(closeAttempt)
+		if !active.CompareAndSwap(nil, current) {
+			return true
 		}
+		id := strconv.FormatUint(sequence.Add(1), 10)
 		a.explicitQuit.Store(true)
-		finish := func() {
-			if state.CompareAndSwap(waiting, ready) {
+		finish := func(from uint32) {
+			if current.state.CompareAndSwap(from, ready) {
+				if from == waiting {
+					runtime.EventsOff(ctx, windowCloseReadyEvent)
+				}
 				runtime.Quit(ctx)
 			}
 		}
 		flush := func() {
-			runtime.EventsOnce(ctx, "jindi-window-close-ready", func(_ ...any) { finish() })
-			time.AfterFunc(2*time.Second, finish)
-			runtime.EventsEmit(ctx, "jindi-before-window-close")
+			runtime.EventsOn(ctx, windowCloseReadyEvent, func(data ...any) {
+				unconfirmed, ok := parseWindowCloseResponse(id, data)
+				if !ok {
+					return
+				}
+				if !unconfirmed {
+					finish(waiting)
+					return
+				}
+				if !current.state.CompareAndSwap(waiting, confirming) {
+					return
+				}
+
+				runtime.EventsOff(ctx, windowCloseReadyEvent)
+				if confirmUnsavedLibraryQuit(ctx) {
+					finish(confirming)
+					return
+				}
+				a.mediaExportMu.Lock()
+				a.windowClosing = false
+				a.mediaExportMu.Unlock()
+				a.explicitQuit.Store(false)
+				active.CompareAndSwap(current, nil)
+				runtime.EventsEmit(ctx, windowCloseCanceledEvent, id)
+			})
+			time.AfterFunc(2*time.Second, func() {
+				if current.state.Load() != waiting {
+					return
+				}
+				// Give a responsive WebView one final check before a forced close.
+				time.AfterFunc(250*time.Millisecond, func() { finish(waiting) })
+				runtime.EventsEmit(ctx, windowCloseDeadlineEvent, id)
+			})
+			runtime.EventsEmit(ctx, "jindi-before-window-close", id)
 		}
 		if exporting := a.prepareExportShutdown(); exporting != nil {
 			a.CancelUpdateDownload()
@@ -191,6 +250,23 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 		}
 		return true
 	}
+}
+
+func confirmUnsavedLibraryQuit(ctx context.Context) bool {
+	// Wails maps Windows question dialogs to the system's localized Yes/No.
+	quit, keepEditing := "Yes", "No"
+	if goruntime.GOOS == "darwin" {
+		quit, keepEditing = "仍然退出", "继续编辑"
+	}
+	selected, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         "收藏或历史尚未保存",
+		Message:       "收藏或观看历史的改动尚未保存，退出后可能丢失。仍然退出吗？",
+		Buttons:       []string{quit, keepEditing},
+		DefaultButton: keepEditing,
+		CancelButton:  keepEditing,
+	})
+	return err == nil && selected == quit
 }
 
 func (a *App) prepareExportShutdown() <-chan struct{} {

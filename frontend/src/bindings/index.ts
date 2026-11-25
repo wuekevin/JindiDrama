@@ -443,6 +443,8 @@ function currentJournalResult(): LibrarySaveResult {
   }
 }
 
+export const hasUnconfirmedLibrarySave = () => currentJournalResult() === 'unsaved'
+
 export function retryLibrarySave(history: HistoryEntry[], favorites: string[]): Promise<LibrarySaveResult> {
   const a = api()
   if (!a) return saveLibrary(history, favorites)

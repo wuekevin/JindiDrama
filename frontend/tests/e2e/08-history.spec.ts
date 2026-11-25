@@ -382,3 +382,112 @@ test('browser preview can retry local history storage in place', async ({ page }
   await page.reload()
   await expect(page.getByTestId('history-item')).toHaveCount(0)
 })
+
+test('window close reports a library write that becomes unconfirmed while waiting', async ({ page }) => {
+  await page.addInitScript(() => {
+    const initial = ['d1', 'd9', 'd2'].map((dramaId) => ({
+      dramaId, episode: 32, positionMs: 1000, durationMs: 5000, percent: 20, watchedAt: Date.now(),
+    }))
+    const originalSet = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'jindi.library.v1' && sessionStorage.getItem('jd-close-block-journal')) {
+        throw new DOMException('full', 'QuotaExceededError')
+      }
+      originalSet.call(this, key, value)
+    }
+    let beginClose: (id: string) => void = () => {}
+    let deadline: (id: string) => void = () => {}
+    let canceled: (id: string) => void = () => {}
+    Object.assign(window, {
+      go: { app: { App: {
+        StorageReady: async () => true, Favorites: async () => [], History: async () => initial,
+        SearchHistory: async () => [], GetSetting: async () => '',
+        SaveLibraryChanges: async () => {
+          sessionStorage.setItem('jd-close-write-started', 'yes')
+          await new Promise<void>((resolve) => window.addEventListener('jd-release-library-write', () => resolve(), { once: true }))
+        },
+      } } },
+      runtime: {
+        EventsOn(name: string, handler: (id: string) => void) {
+          if (name === 'jindi-before-window-close') beginClose = handler
+          if (name === 'jindi-window-close-deadline') deadline = handler
+          if (name === 'jindi-window-close-canceled') canceled = handler
+          return () => {}
+        },
+        EventsEmit(name: string, id: string, unconfirmed: boolean) {
+          if (name === 'jindi-window-close-ready') {
+            const old = JSON.parse(sessionStorage.getItem('jd-close-responses') ?? '[]') as unknown[]
+            sessionStorage.setItem('jd-close-responses', JSON.stringify([...old, [id, unconfirmed]]))
+          }
+        },
+      },
+    })
+    window.addEventListener('jd-test-close', () => beginClose('attempt-1'))
+    window.addEventListener('jd-test-stale-deadline', () => deadline('stale'))
+    window.addEventListener('jd-test-close-deadline', () => deadline('attempt-1'))
+    window.addEventListener('jd-test-stale-cancel', () => canceled('stale'))
+    window.addEventListener('jd-test-cancel', () => canceled('attempt-1'))
+  })
+  await page.goto('/#/history')
+  const rows = page.getByTestId('history-item')
+  async function deleteFirst() {
+    await rows.first().getByTestId('h-more').click()
+    await page.getByTestId('h-delete').click()
+  }
+  async function clearHistory() {
+    await page.getByTestId('clear-all').click()
+    await page.getByTestId('modal-confirm').click()
+  }
+  await expect(rows).toHaveCount(3)
+  await deleteFirst()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('jd-close-write-started'))).toBe('yes')
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('jd-test-close'))
+    sessionStorage.setItem('jd-close-block-journal', 'yes')
+  })
+  await deleteFirst()
+  await expect(rows).toHaveCount(1)
+  const responses = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('jd-close-responses') ?? '[]'))
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-test-stale-deadline')))
+  expect(await responses()).toEqual([])
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-test-close-deadline')))
+  await expect.poll(responses).toEqual([['attempt-1', true]])
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-test-stale-cancel')))
+  await clearHistory()
+  await expect(rows).toHaveCount(1)
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-test-cancel')))
+  await clearHistory()
+  await expect(rows).toHaveCount(0)
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-release-library-write')))
+  expect(await responses()).toEqual([['attempt-1', true]])
+})
+
+test('window close permits a failed database write after a durable journal', async ({ page }) => {
+  await page.addInitScript(() => {
+    let beginClose: (id: string) => void = () => {}
+    Object.assign(window, {
+      go: { app: { App: {
+        StorageReady: async () => true, Favorites: async () => [],
+        History: async () => [{ dramaId: 'd1', episode: 32, positionMs: 1000, durationMs: 5000, percent: 20, watchedAt: Date.now() }],
+        SearchHistory: async () => [], GetSetting: async () => '',
+        SaveLibraryChanges: async () => { throw new Error('locked') },
+      } } },
+      runtime: {
+        EventsOn(name: string, handler: (id: string) => void) {
+          if (name === 'jindi-before-window-close') beginClose = handler
+          return () => {}
+        },
+        EventsEmit(name: string, id: string, unconfirmed: boolean) {
+          if (name === 'jindi-window-close-ready') sessionStorage.setItem('jd-close-response', JSON.stringify([id, unconfirmed]))
+        },
+      },
+    })
+    window.addEventListener('jd-test-close', () => beginClose('attempt-2'))
+  })
+  await page.goto('/#/history')
+  await page.getByTestId('clear-all').click()
+  await page.getByTestId('modal-confirm').click()
+  await expect(page.getByRole('button', { name: '重试保存' })).toBeVisible()
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-test-close')))
+  await expect.poll(() => page.evaluate(() => JSON.parse(sessionStorage.getItem('jd-close-response') ?? 'null'))).toEqual(['attempt-2', false])
+})

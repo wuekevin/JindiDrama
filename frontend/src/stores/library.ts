@@ -5,6 +5,7 @@ import { DEFAULT_HISTORY } from '@/mocks/provider'
 import { hasBridge, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, type LibrarySaveResult } from '@/bindings'
 import { useToastStore } from '@/stores/toast'
 import type { LibraryState } from '@/bindings/libraryRecovery'
+import { windowCloseReplyPending } from '@/bindings/windowClose'
 
 function load(): { history: HistoryEntry[]; favorites: string[] } {
   const cached = readLibraryCache()
@@ -59,7 +60,7 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   async function retrySave() {
-    if (retrying.value) return
+    if (retrying.value || windowCloseReplyPending()) return
     retrying.value = true
     const revision = ++nextSave
     try {
@@ -102,15 +103,32 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   const isFav = (id: string) => favorites.value.includes(id)
-  function toggleFav(id: string) { favorites.value = isFav(id) ? favorites.value.filter((x) => x !== id) : [id, ...favorites.value]; return isFav(id) }
+  function toggleFav(id: string) {
+    if (!windowCloseReplyPending()) {
+      favorites.value = isFav(id) ? favorites.value.filter((x) => x !== id) : [id, ...favorites.value]
+    }
+    return isFav(id)
+  }
   function record(dramaId: string, episode: number, percent: number, positionSec?: number, durationSec?: number, episodeCountAtWatch?: number) {
+    if (windowCloseReplyPending()) return
     history.value = [{ dramaId, episode, percent, watchedAt: Date.now(), positionSec, durationSec, episodeCountAtWatch }, ...history.value.filter((h) => h.dramaId !== dramaId)]
   }
-  const removeFavs = (ids: string[]) => { favorites.value = favorites.value.filter((x) => !ids.includes(x)) }
-  const addFav = (id: string) => { if (!isFav(id)) favorites.value = [id, ...favorites.value] }
-  const removeHistory = (ids: string[]) => { history.value = history.value.filter((h) => !ids.includes(h.dramaId)) }
-  const clearHistory = () => { history.value = [] }
+  function removeFavs(ids: string[]) {
+    if (!windowCloseReplyPending()) favorites.value = favorites.value.filter((id) => !ids.includes(id))
+  }
+  function addFav(id: string, index = 0) {
+    if (windowCloseReplyPending()) return false
+    if (!isFav(id)) favorites.value.splice(index, 0, id)
+    return true
+  }
+  function removeHistory(ids: string[]) {
+    if (!windowCloseReplyPending()) history.value = history.value.filter((row) => !ids.includes(row.dramaId))
+  }
+  function clearHistory() {
+    if (!windowCloseReplyPending()) history.value = []
+  }
   async function restoreMissingFromBackup() {
+    if (windowCloseReplyPending()) return null
     const result = await restoreLibraryBackup()
     if (!result) return null
     await applyLibraryState(result.state)
