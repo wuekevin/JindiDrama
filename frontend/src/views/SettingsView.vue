@@ -232,11 +232,37 @@ function onKey(e: KeyboardEvent) {
 const updates = useDesktopUpdates()
 const { channel, channelBusy, channelAvailable, checking, downloading, canDownload, lastCheck, upd } = storeToRefs(updates)
 if (desktop) void updates.loadChannel()
-async function toggleAutostart() {
-  const want = !st.autostart
-  try { await setAutostart(want); st.autostart = want } catch (e) { toast.push(e instanceof Error ? e.message : '设置开机启动失败', 'error') }
+const autostartPending = ref(false)
+const autostartReadFailed = ref(false)
+async function loadAutostart() {
+  if (autostartPending.value) return
+  autostartPending.value = true
+  try {
+    const enabled = await autostartEnabled()
+    if (enabled !== null) st.autostart = enabled
+    autostartReadFailed.value = false
+  } catch {
+    autostartReadFailed.value = true
+    toast.push('无法读取系统开机启动状态', 'error')
+  } finally {
+    autostartPending.value = false
+  }
 }
-autostartEnabled().then((v) => { if (v !== null) st.autostart = v }).catch(() => {})
+async function toggleAutostart() {
+  if (autostartPending.value || autostartReadFailed.value) return
+  autostartPending.value = true
+  const want = !st.autostart
+  try {
+    await setAutostart(want)
+    st.autostart = want
+  } catch (error) {
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+    toast.push(message || '设置开机启动失败', 'error')
+  } finally {
+    autostartPending.value = false
+  }
+}
+void loadAutostart()
 const version = ref('v0.1.0'); appVersion().then((v) => { version.value = v }).catch(() => {})
 async function changeUpdateChannel(event: Event) {
   const select = event.target as HTMLSelectElement
@@ -262,7 +288,11 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
       <nav class="nav" aria-label="设置分类"><button v-for="s in sections" :key="s.k" :class="{ on: active === s.k }" :data-testid="`snav-${s.k}`" @click="go(s.k)"><component :is="s.i" :size="20" />{{ s.l }}<ChevronRight v-if="active === s.k" :size="16" class="ch" /></button></nav>
       <div class="panels">
         <section id="sec-general" class="pn"><h2><Settings :size="22" />通用</h2>
-          <div class="r"><div>开机启动<small>随系统启动金帝短剧</small></div><button class="tg" :class="{ on: st.autostart }" role="switch" :aria-checked="st.autostart" aria-label="开机启动" data-testid="autostart" @click="toggleAutostart"><i /></button></div>
+          <div class="r">
+            <div>开机启动<small>随系统启动金帝短剧</small></div>
+            <BaseButton v-if="autostartReadFailed" variant="outline" aria-label="重试读取开机启动状态" :disabled="autostartPending" @click="loadAutostart">重试读取</BaseButton>
+            <button v-else class="tg" :class="{ on: st.autostart }" role="switch" :aria-checked="st.autostart" aria-label="开机启动" data-testid="autostart" :disabled="autostartPending" @click="toggleAutostart"><i /></button>
+          </div>
           <label class="r">启动时进入<span class="sel"><select v-model="st.startPage" data-testid="start-page"><option>上次观看</option><option>推荐首页</option><option>我的收藏</option></select><ChevronDown :size="14" /></span></label>
           <label class="r">关闭窗口时<span class="sel"><select :value="closeAction" :disabled="closeActionPending" data-testid="close-action" @change="changeCloseAction"><option>最小化到任务栏</option><option v-if="a.canCloseToTray" :value="CLOSE_TO_TRAY">{{ CLOSE_TO_TRAY_LABEL }}</option><option>退出程序</option></select><ChevronDown :size="14" /></span></label></section>
         <section id="sec-playback" class="pn"><h2><CirclePlay :size="22" />播放</h2>

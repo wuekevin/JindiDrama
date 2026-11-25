@@ -35,40 +35,6 @@ func TestDarwinLaunchAgent(t *testing.T) {
 	}
 }
 
-func TestWindowsRegistryCommands(t *testing.T) {
-	var calls [][]string
-	state := false
-	m := &Manager{GOOS: "windows", Exe: `C:\Program Files\JindiDrama\JindiDrama.exe`, Run: func(n string, a ...string) ([]byte, error) {
-		calls = append(calls, append([]string{n}, a...))
-		switch a[0] {
-		case "add":
-			state = true
-		case "delete":
-			state = false
-		case "query":
-			if !state {
-				return nil, errors.New("not found")
-			}
-			return []byte("    JindiDrama    REG_SZ    x"), nil
-		}
-		return nil, nil
-	}}
-	if err := m.Set(true); err != nil {
-		t.Fatal(err)
-	}
-	add := strings.Join(calls[0], " ")
-	if !strings.Contains(add, `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) || !strings.Contains(add, `"C:\Program Files\JindiDrama\JindiDrama.exe"`) {
-		t.Fatalf("reg add 参数不对: %s", add)
-	}
-	if on, _ := m.Enabled(); !on {
-		t.Fatal("应为开启")
-	}
-	_ = m.Set(false)
-	if on, _ := m.Enabled(); on {
-		t.Fatal("应为关闭")
-	}
-}
-
 func TestUnsupportedOS(t *testing.T) {
 	m := &Manager{GOOS: "linux"}
 	if err := m.Set(true); !errors.Is(err, ErrUnsupported) {

@@ -6,30 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
 
-const (
-	appName   = "JindiDrama"
-	runKey    = `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-	plistName = "com.jindidrama.app.plist"
-)
-
-// Runner 抽象外部命令，便于测试。
-type Runner func(name string, args ...string) ([]byte, error)
-
-func execRunner(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).CombinedOutput()
-}
+const plistName = "com.jindidrama.app.plist"
 
 type Manager struct {
 	GOOS    string
 	Exe     string // 可执行文件绝对路径
 	HomeDir string
-	Run     Runner
 }
 
 // New 使用当前进程的可执行文件与用户目录。
@@ -45,7 +32,7 @@ func New() (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Manager{GOOS: runtime.GOOS, Exe: exe, HomeDir: home, Run: execRunner}, nil
+	return &Manager{GOOS: runtime.GOOS, Exe: exe, HomeDir: home}, nil
 }
 
 var ErrUnsupported = errors.New("当前系统暂不支持开机启动设置")
@@ -53,9 +40,6 @@ var ErrUnsupported = errors.New("当前系统暂不支持开机启动设置")
 func (m *Manager) plistPath() string {
 	return filepath.Join(m.HomeDir, "Library", "LaunchAgents", plistName)
 }
-
-// quoteWin 给含空格路径加引号（注册表 Run 项要求）。
-func quoteWin(p string) string { return `"` + strings.ReplaceAll(p, `"`, "") + `"` }
 
 func (m *Manager) plist() string {
 	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
@@ -76,11 +60,7 @@ func xmlEscape(s string) string {
 func (m *Manager) Enabled() (bool, error) {
 	switch m.GOOS {
 	case "windows":
-		out, err := m.Run("reg", "query", runKey, "/v", appName)
-		if err != nil {
-			return false, nil // 未找到该值
-		}
-		return strings.Contains(string(out), appName), nil
+		return windowsAutostartEnabled(m.Exe)
 	case "darwin":
 		_, err := os.Stat(m.plistPath())
 		return err == nil, nil
@@ -92,15 +72,7 @@ func (m *Manager) Enabled() (bool, error) {
 func (m *Manager) Set(on bool) error {
 	switch m.GOOS {
 	case "windows":
-		if on {
-			if out, err := m.Run("reg", "add", runKey, "/v", appName, "/t", "REG_SZ", "/d", quoteWin(m.Exe), "/f"); err != nil {
-				return fmt.Errorf("写入开机启动失败: %v %s", err, strings.TrimSpace(string(out)))
-			}
-			return nil
-		}
-		// 不存在时 reg delete 会报错，视为已关闭
-		_, _ = m.Run("reg", "delete", runKey, "/v", appName, "/f")
-		return nil
+		return setWindowsAutostart(m.Exe, on)
 	case "darwin":
 		p := m.plistPath()
 		if on {

@@ -401,6 +401,40 @@ test.describe('10 应用设置', () => {
 })
 
 
+test('desktop autostart reports failures and preserves the last confirmed value', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      SaveSetting: async () => {},
+      AutostartEnabled: async () => {
+        if (sessionStorage.getItem('fail-autostart-read')) throw new Error('fixture: read denied')
+        return true
+      },
+      SetAutostart: async () => { throw '无法关闭 Windows 开机启动' },
+      AppVersion: async () => 'v0.1.0',
+      CacheStats: async () => ({ bytes: 0, files: 0, max: 2 * 1024 ** 3, path: '/native/cache' }),
+    } } } })
+  })
+  await page.goto('/#/settings')
+  const toggle = page.getByRole('switch', { name: '开机启动' })
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await toggle.click()
+  await expect(page.getByTestId('toast').last()).toContainText('无法关闭 Windows 开机启动')
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+  await page.screenshot({ path: testInfo.outputPath('autostart-error.png') })
+
+  await page.evaluate(() => sessionStorage.setItem('fail-autostart-read', '1'))
+  await page.reload()
+  await expect(page.getByTestId('toast').last()).toContainText('无法读取系统开机启动状态')
+  await expect(toggle).toHaveCount(0)
+  const retry = page.getByRole('button', { name: '重试读取开机启动状态' })
+  await expect(retry).toBeEnabled()
+  await page.screenshot({ path: testInfo.outputPath('autostart-read-error.png') })
+  await page.evaluate(() => sessionStorage.removeItem('fail-autostart-read'))
+  await retry.click()
+  await expect(toggle).toHaveAttribute('aria-checked', 'true')
+})
+
 test('desktop reports failed cache and diagnostics operations without changing the displayed usage', async ({ page }) => {
   await page.addInitScript(() => {
     Object.assign(window, { go: { app: { App: {
