@@ -17,8 +17,132 @@ test.describe('07 我的收藏', () => {
   test('select all then cancel keeps data', async ({ page }) => { await page.getByTestId('edit-manage').click(); await page.getByTestId('select-all').click(); await expect(page.getByTestId('batchbar')).toContainText('已选 11'); await page.getByTestId('batch-unfav').click(); await page.getByTestId('modal').getByRole('button', { name: '取消', exact: true }).click(); await expect(page.getByTestId('fav-count')).toContainText('11') })
   test('empty state after removing all, persists reload', async ({ page }) => {
     await page.getByTestId('batch-toggle').click(); await page.getByTestId('select-all').click(); await page.getByTestId('batch-unfav').click(); await page.getByTestId('modal-confirm').click(); await expect(page.getByTestId('empty')).toBeVisible()
+    const batchbar = page.getByTestId('batchbar')
+    await expect(batchbar.getByTestId('select-all')).toBeDisabled()
+    await expect(batchbar.getByRole('button', { name: '完成', exact: true })).toBeFocused()
     await page.reload(); await expect(page.getByTestId('empty')).toBeVisible()
   })
   test('list view, play and detail navigation', async ({ page }) => { await page.getByTestId('view-list').click(); await expect(page.getByTestId('fav-grid')).toHaveClass(/list/); await page.getByTestId('fav-play').first().click(); await expect(page).toHaveURL(/#\/watch\//); await page.goBack(); await page.getByTestId('fav-card').first().locator('.cover').click(); await expect(page).toHaveURL(/#\/drama\//) })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=fav-card]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/07-${w}x${h}.png` }) })
+})
+
+for (const dpi of [150, 220]) {
+  test(`favorites keeps toolbar, cards and batch operations reachable at ${dpi}% zoom`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.addInitScript((dpi) => {
+      localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi }))
+    }, dpi)
+    await page.goto('/#/favorites')
+    const favorites = page.getByTestId('page-favorites')
+    const cards = favorites.getByTestId('fav-card')
+    const edit = favorites.getByTestId('edit-manage')
+    await expect(cards).toHaveCount(11)
+    const bounds = (await favorites.boundingBox())!
+    const withinFavorites = async (control: ReturnType<typeof page.getByTestId>) => {
+      const rect = (await control.boundingBox())!
+      expect(rect.width).toBeGreaterThan(0)
+      expect(rect.x).toBeGreaterThanOrEqual(bounds.x - 1)
+      expect(rect.x + rect.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+    }
+    for (const id of ['ftab-real', 'edit-manage', 'sort', 'genre', 'view-list', 'batch-toggle']) {
+      await withinFavorites(favorites.getByTestId(id))
+    }
+    await withinFavorites(cards.nth(3).getByTestId('fav-more'))
+    expect((await cards.first().locator('.info').boundingBox())!.width).toBeGreaterThan(100)
+    await page.screenshot({ path: testInfo.outputPath('favorites-grid.png') })
+
+    const first = cards.first()
+    await expect(first.locator('.st')).toHaveCSS('color', 'rgb(246, 236, 233)')
+    const more = first.getByTestId('fav-more')
+    await more.press('Enter')
+    await expect(more).toHaveAttribute('aria-expanded', 'true')
+    const goToDetail = first.getByRole('button', { name: '查看详情' })
+    await withinFavorites(goToDetail)
+    await expect(goToDetail).toHaveCSS('color', 'rgb(246, 236, 233)')
+    await page.keyboard.press('Tab')
+    await expect(goToDetail).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(more).toBeFocused()
+    await expect(goToDetail).toHaveCount(0)
+
+    await favorites.getByTestId('view-list').click()
+    await withinFavorites(first.getByTestId('fav-play'))
+    await withinFavorites(first.getByTestId('fav-unfav'))
+    await first.getByTestId('fav-play').press('Enter')
+    await expect(page).toHaveURL(/#\/watch\//)
+    await page.goBack()
+
+    if (dpi === 220) {
+      await edit.click()
+      await more.evaluate((button) => {
+        const content = button.closest('#content')!
+        const footer = content.querySelector('[data-testid="batchbar"]')!
+        const zoom = Number.parseFloat(getComputedStyle(document.getElementById('app')!).zoom)
+        content.scrollTop += (button.getBoundingClientRect().top - footer.getBoundingClientRect().top + 36) / zoom
+      })
+      await more.click()
+      const [popup, footer] = await Promise.all([goToDetail.boundingBox(), favorites.getByTestId('batchbar').boundingBox()])
+      expect(popup!.y + popup!.height / 2).toBeGreaterThan(footer!.y)
+      expect(popup!.y + popup!.height / 2).toBeLessThan(footer!.y + footer!.height)
+      expect(await goToDetail.evaluate((button) => {
+        const box = button.getBoundingClientRect()
+        return button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2))
+      })).toBe(true)
+      await goToDetail.click()
+      await expect(page).toHaveURL(/#\/drama\//)
+      await page.goBack()
+    }
+    await edit.click()
+    const cover = first.locator('.cover')
+    await cover.press('Enter')
+    await expect(cover).toHaveAttribute('aria-pressed', 'true')
+    const batchbar = favorites.getByTestId('batchbar')
+    await expect(batchbar).toContainText('已选 1')
+    const trigger = batchbar.getByTestId('batch-unfav')
+    await withinFavorites(trigger)
+    await withinFavorites(batchbar.getByRole('button', { name: '完成', exact: true }))
+    await trigger.press('Enter')
+    const modal = page.getByRole('dialog', { name: '取消收藏' })
+    await expect(modal).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(modal).toHaveCount(0)
+    await expect(trigger).toBeFocused()
+    await trigger.press('Enter')
+    await page.keyboard.press('Shift+Tab')
+    await expect(modal.getByTestId('modal-confirm')).toBeFocused()
+    await page.keyboard.press('Enter')
+    await expect(cards).toHaveCount(10)
+    await expect(batchbar.getByTestId('select-all')).toBeFocused()
+    await page.reload()
+    await expect(cards).toHaveCount(10)
+  })
+}
+
+test('favorites contains a long licensed tag in the toolbar and both card views at 220% zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  const tag = 'LongLicensedTopic'.repeat(12)
+  await page.addInitScript((topic) => {
+    const entry = { id: 'local-long-tag', title: '授权短片', tags: [topic], summary: '', license: '作者自有', updatedTo: 1, episodeCount: 1 }
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
+    localStorage.setItem('jindi.library.v1', JSON.stringify({ favorites: [entry.id], history: [] }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false, LicensedCatalog: async () => [entry],
+    } } } })
+  }, tag)
+  await page.goto('/#/favorites')
+  const favorites = page.getByTestId('page-favorites')
+  const genre = favorites.getByTestId('genre')
+  await expect(genre.locator('option').filter({ hasText: tag })).toHaveCount(1)
+  const bounds = (await favorites.boundingBox())!
+  const box = (await genre.boundingBox())!
+  expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width + 1)
+  await genre.selectOption(tag)
+  await expect(genre).toHaveValue(tag)
+  const card = favorites.getByTestId('fav-card')
+  await expect(card).toContainText('授权短片')
+  for (const view of ['view-grid', 'view-list']) {
+    await favorites.getByTestId(view).click()
+    const meta = card.locator('.mt')
+    expect(await meta.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  }
 })
