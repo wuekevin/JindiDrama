@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, saveSetting, LS, cacheStats, cacheSetLimit, logEvent } from './index'
+import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, LS, cacheStats, cacheSetLimit, logEvent } from './index'
 const calls: string[] = []
 const receipt = { writer: expect.stringMatching(/^[a-f0-9]{32}$/), revision: expect.any(Number) }
 const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], History: async () => [{ dramaId: 'd9', episode: 7, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: 5 }], SearchHistory: async () => ['替嫁'],
@@ -79,6 +79,44 @@ describe('wails bridge', () => {
     }
     expect(await saveLibrary([], ['d1'])).toBe('saved')
   })
+  it.each(['pending', 'unsaved'])('blocks a backup after a library write reports %s', async (result) => {
+    let rejectWrite!: (error: Error) => void
+    const failedWrite = new Promise<never>((_, reject) => { rejectWrite = reject })
+    const BackupNow = vi.fn().mockResolvedValue('/backup.db')
+    const SaveLibraryChanges = vi.fn().mockReturnValueOnce(failedWrite)
+      .mockResolvedValueOnce({ favorites: ['d2'], history: [] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const setItem = Storage.prototype.setItem
+    let blockLibrary = false
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (blockLibrary && key === LS.library) throw new DOMException('full', 'QuotaExceededError')
+      return setItem.call(this, key, value)
+    })
+    vi.stubGlobal('go', { app: { App: { ...fake, BackupNow, SaveLibraryChanges } } })
+    try {
+      await prime()
+      blockLibrary = result === 'unsaved'
+      const write = saveLibrary([], ['d2'])
+      const backup = expect(backupNow()).rejects.toBeInstanceOf(LibraryBackupPendingError)
+      await vi.waitFor(() => expect(SaveLibraryChanges).toHaveBeenCalledOnce())
+      expect(BackupNow).not.toHaveBeenCalled()
+      rejectWrite(new Error('locked'))
+      expect(await write).toBe(result)
+      await backup
+      expect(BackupNow).not.toHaveBeenCalled()
+
+      blockLibrary = false
+      expect(await retryLibrarySave([], ['d2'])).toBe('saved')
+      expect(readLibraryCache()).not.toHaveProperty('pending')
+      expect(await backupNow()).toBe('/backup.db')
+      expect(BackupNow).toHaveBeenCalledOnce()
+    } finally {
+      rejectWrite(new Error('fixture cleanup'))
+      storage.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
   it('retries the same receipt and preserves edits arriving while recovery is blocked', async () => {
     let finishRetry!: (state: { favorites: string[]; history: [] }) => void
     const held = new Promise<{ favorites: string[]; history: [] }>((resolve) => { finishRetry = resolve })

@@ -592,10 +592,20 @@ export const resetCacheDirectory = () => api()?.ResetCacheDirectory?.()
 /** 故障上报：Go 侧统一脱敏后落盘；浏览器模式仅输出到控制台。 */
 export function logEvent(level: 'info' | 'warn' | 'error', component: string, msg: string) { const a = api(); if (a) a.LogEvent(level, component, msg).catch(warn); else console.debug(`[${level}] ${component}: ${msg}`) }
 export const diagnostics = () => api()?.DiagnosticsTail(100) ?? Promise.resolve([] as string[])
+export class LibraryBackupPendingError extends Error {
+  constructor() {
+    super('收藏或观看历史尚未写入数据库。请先重试保存，再创建备份。')
+  }
+}
+
 export function backupNow() {
   const app = api()
   if (!app) return Promise.reject(new Error('仅桌面端支持备份'))
-  return queueLibraryTask(() => app.BackupNow())
+  return queueLibraryTask(async () => {
+    // The queue can finish with edits still in the recovery journal.
+    if (readLibraryCache()?.pending) throw new LibraryBackupPendingError()
+    return app.BackupNow()
+  })
 }
 
 export type UpdateChannel = 'stable' | 'preview'

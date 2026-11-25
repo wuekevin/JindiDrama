@@ -10,7 +10,7 @@ import { formatSpeed } from '@/player/machine'
 import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
-import { cacheStats, cacheClear, cacheSetLimit, hasCacheDirectoryPicker, chooseCacheDirectory, resetCacheDirectory, diagnostics, backupNow, canRestoreLibraryBackup, hasBridge, autostartEnabled, setAutostart, appVersion, type CacheStats } from '@/bindings'
+import { cacheStats, cacheClear, cacheSetLimit, hasCacheDirectoryPicker, chooseCacheDirectory, resetCacheDirectory, diagnostics, backupNow, LibraryBackupPendingError, canRestoreLibraryBackup, hasBridge, autostartEnabled, setAutostart, appVersion, type CacheStats } from '@/bindings'
 import { BaseButton, Modal } from '@/components/ui'
 import BrandLogo from '@/components/BrandLogo.vue'
 import PrivacyNoticeDialog from '@/components/PrivacyNoticeDialog.vue'
@@ -184,8 +184,9 @@ async function createBackup() {
   backupBusy.value = true
   try {
     backupPath.value = await backupNow()
-  } catch {
-    backupErrorToast = toast.push('数据库备份失败', 'error')
+  } catch (error) {
+    const message = error instanceof LibraryBackupPendingError ? error.message : '数据库备份失败'
+    backupErrorToast = toast.push(message, 'error')
   } finally {
     backupBusy.value = false
   }

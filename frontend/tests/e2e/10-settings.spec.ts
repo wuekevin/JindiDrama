@@ -751,3 +751,50 @@ test('the shared native close preference is displayed only after a successful sa
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem('close-action'))).toBe('退出程序')
   expect(await page.evaluate(() => sessionStorage.getItem('legacy-close'))).toBeNull()
 })
+
+test('backup prompts for a failed library write and succeeds after retrying the save', async ({ page }) => {
+  await page.addInitScript(() => {
+    let history = [{ dramaId: 'd1', episode: 32, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: Date.now() }]
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => true,
+      Favorites: async () => [],
+      History: async () => history,
+      SearchHistory: async () => [],
+      GetSetting: async () => '',
+      SaveLibraryChanges: async () => {
+        if (!sessionStorage.getItem('jd-backup-unlocked')) throw new Error('database is locked')
+        history = []
+        return { favorites: [], history }
+      },
+      BackupNow: async () => {
+        sessionStorage.setItem('jd-backup-calls', '1')
+        return '/native/backups/library.db'
+      },
+      AppVersion: async () => 'v0.1.0',
+      CacheStats: async () => null,
+      AutostartEnabled: async () => false,
+    } } } })
+  })
+
+  await page.goto('/#/history')
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
+  await page.getByTestId('clear-all').click()
+  await page.getByTestId('modal-confirm').click()
+  const retry = page.getByRole('button', { name: '重试保存' })
+  await expect(retry).toBeVisible()
+
+  await page.getByTestId('nav-settings').click()
+  const backup = page.getByTestId('create-backup')
+  await backup.click()
+  await expect(page.getByText('收藏或观看历史尚未写入数据库。请先重试保存，再创建备份。')).toBeVisible()
+  await expect(page.getByRole('dialog', { name: '数据备份已创建' })).toHaveCount(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('jd-backup-calls'))).toBeNull()
+
+  await page.evaluate(() => sessionStorage.setItem('jd-backup-unlocked', '1'))
+  await retry.click()
+  await expect(retry).toHaveCount(0)
+  await backup.click()
+  const result = page.getByRole('dialog', { name: '数据备份已创建' })
+  await expect(result.getByText('/native/backups/library.db')).toBeVisible()
+  expect(await page.evaluate(() => sessionStorage.getItem('jd-backup-calls'))).toBe('1')
+})
