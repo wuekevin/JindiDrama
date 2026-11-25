@@ -248,3 +248,118 @@ test('desktop search submits a suggestion without querying it twice', async ({ p
   expect(await page.evaluate(() => (window as Window & { __jdSearchQueries?: string[] }).__jdSearchQueries))
     .toEqual(['替嫁', title])
 })
+
+for (const dpi of [150, 220]) {
+  test(`search results reflow without clipping at ${dpi}% zoom`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.addInitScript((zoom) => {
+      localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: zoom }))
+    }, dpi)
+    await page.goto('/#/search?q=%E6%9B%BF%E5%AB%81')
+    const search = page.getByTestId('page-search')
+    const cards = search.getByTestId('result-card')
+    await expect(cards).toHaveCount(5)
+    const aside = search.getByRole('complementary')
+    const first = cards.first()
+    const heading = search.getByRole('heading', { level: 1 })
+    const title = first.getByRole('heading', { level: 3 })
+    const bounds = await search.boundingBox()
+    expect(bounds).not.toBeNull()
+    expect(await heading.evaluate(el => el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).fontSize)))
+      .toBeLessThan(dpi === 220 ? 5 : 3)
+    expect((await title.boundingBox())!.width).toBeGreaterThan(220)
+    const lastCard = (await cards.last().boundingBox())!
+    expect((await aside.boundingBox())!.y).toBeGreaterThanOrEqual(lastCard.y + lastCard.height)
+    if (dpi === 220) {
+      const cardParts = await first.evaluate((card) => {
+        const bottom = (selector: string) => card.querySelector(selector)!.getBoundingClientRect().bottom
+        return {
+          cover: bottom('.cover'), info: bottom('.info'),
+          actionTop: card.querySelector('.act')!.getBoundingClientRect().top,
+        }
+      })
+      expect(cardParts.actionTop).toBeGreaterThanOrEqual(Math.max(cardParts.cover, cardParts.info))
+    }
+    for (const control of [
+      search.getByTestId('status-ongoing'), search.getByTestId('sort-rating'),
+      first.getByTestId('play-now'), first.getByTestId('view-detail'), aside,
+    ]) {
+      const box = (await control.boundingBox())!
+      expect(box.x).toBeGreaterThanOrEqual(bounds!.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1)
+    }
+    await page.screenshot({ path: testInfo.outputPath('search-results.png') })
+    await search.getByTestId('kind-AI剧').click()
+    await expect(cards).toHaveCount(1)
+    await first.getByTestId('view-detail').press('Enter')
+    await expect(page).toHaveURL(/#\/drama\//)
+    await page.goBack()
+    await first.getByTestId('play-now').click()
+    await expect(page).toHaveURL(/#\/watch\//)
+    await page.goBack()
+    await aside.getByTestId('hot-word').nth(1).click()
+    await expect(heading).toContainText('替嫁新娘')
+  })
+}
+
+test('search heading and recent actions fit a long unbroken query at 220% zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.addInitScript(() => {
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
+  })
+  const query = 'UnbrokenSearch'.repeat(12)
+  await page.goto(`/#/search?q=${query}`)
+  const search = page.getByTestId('page-search')
+  await expect(search.getByTestId('empty')).toBeVisible()
+  const heading = search.getByRole('heading', { level: 1 })
+  expect(await heading.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+  const recent = search.getByTestId('history-item').filter({ hasText: query })
+  await expect(recent).toHaveCount(1)
+  const remove = recent.getByRole('button', { name: `删除${query}` })
+  const [row, button] = await Promise.all([recent.boundingBox(), remove.boundingBox()])
+  expect(button!.x + button!.width).toBeLessThanOrEqual(row!.x + row!.width + 1)
+  await remove.click()
+  await expect(recent).toHaveCount(0)
+})
+
+test('wide search wraps a long query and its heading suffix as one text block', async ({ page }) => {
+  const query = 'UnbrokenSearch'.repeat(12)
+  await page.goto(`/#/search?q=${query}`)
+  const search = page.getByTestId('page-search')
+  await expect(search.getByTestId('empty')).toBeVisible()
+  const heading = search.getByRole('heading', { level: 1 })
+  const suffixLines = await heading.evaluate((el) => {
+    const suffix = el.querySelector('em')!.nextSibling!
+    const range = document.createRange()
+    range.selectNodeContents(suffix)
+    return range.getClientRects().length
+  })
+  expect(suffixLines).toBeLessThanOrEqual(2)
+  expect(await heading.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+})
+
+test('licensed topics keep a long option and its selector inside the page at 220% zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  const tag = 'LongLicensedTopic'.repeat(12)
+  await page.addInitScript((topic) => {
+    const entry = {
+      id: 'local-zoom', title: '授权短片', summary: '授权演示短片', tags: [topic],
+      license: '作者自有', updatedTo: 1, episodeCount: 1,
+    }
+    localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      LicensedCatalog: async () => [entry],
+      Search: async () => [entry],
+    } } } })
+  }, tag)
+  await page.goto('/#/search?browse=topics')
+  const search = page.getByTestId('page-search')
+  const select = search.getByTestId('topic-select')
+  await expect(select.locator('option').filter({ hasText: tag })).toHaveCount(1)
+  const [pageBox, selectBox] = await Promise.all([search.boundingBox(), select.boundingBox()])
+  expect(selectBox!.x + selectBox!.width).toBeLessThanOrEqual(pageBox!.x + pageBox!.width + 1)
+  await select.selectOption(tag)
+  await expect(select).toHaveValue(tag)
+  await expect(search.getByTestId('result-card')).toContainText('授权短片')
+})
