@@ -74,6 +74,8 @@ macOS 打包会解压最终 Universal ZIP，在 Apple Silicon 上启动归档中
 
 ### 准备 GitHub Release
 
+正式打包检查所选提交的完整 Git 历史。可先运行 `bash scripts/verify-distribution-source.sh`，再按照验收记录准备发行。
+
 1. 在拟发布提交上以 `release` 模式运行 `package` 工作流。签名、公证、双平台验收和下载复验全部通过后，会产生 `release-handoff-<版本>-attempt-<轮次>`。如果一轮失败，重跑全部任务或重新发起打包，使两个平台产物来自同一轮。下载交付包并解压到干净目录。
 2. 在仓库中运行 `node scripts/package-checksums.mjs --verify release "<解压目录>"`。核对 `RELEASE-NOTES.md` 中的版本、提交、打包运行和轮次。发行标签应指向说明中的同一个提交。
 3. 用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。确认草稿的资产名称和 SHA-256 后，由维护者发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)

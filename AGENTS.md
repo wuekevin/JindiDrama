@@ -8,7 +8,7 @@
 - 首次安装使用 BMad 上游提交 `e435a22574fe55722841086e5566420178b98df3` 的 Core Tools 与 Method 模块，版本为 `6.13.0-next`。
 
 ## 项目是什么
-Go + Wails v2 桌面应用，前端 Vue 3 + TypeScript + Vite + Pinia + Vue Router(hash) + SCSS。十个页面（首页、搜索、详情、播放、评论、弹幕设置、收藏、历史、登录、设置）按 1448×1086 的产品设计基线实现。本地存储 SQLite（modernc，纯 Go）。当前数据来自 MockProvider 与自制演示视频，**没有接入任何真实内容源**。
+Go + Wails v2 桌面应用，前端 Vue 3 + TypeScript + Vite + Pinia + Vue Router(hash) + SCSS。十个页面（首页、搜索、详情、播放、评论、弹幕设置、收藏、历史、登录、设置）按 1448×1086 的产品设计基线实现。本地存储 SQLite（modernc，纯 Go）。数据来自自制演示目录和经配置的授权本地片库。官方内容源待授权后启用。
 
 ## 目录
 - `frontend/` 前端；`frontend/tests/e2e/` Playwright；`src/**/*.spec.ts` Vitest；`frontend/tools/` 截图脚本
@@ -44,6 +44,6 @@ cd .. && go vet ./... && go test ./...
 - 提交身份（本机未配置全局 git 身份）：`git -c user.name=wuekevin -c user.email=174148816+wuekevin@users.noreply.github.com commit ...`
 
 ## 尚未完成（详见 STATUS.md）
-- 系统托盘（Wails v2 无内置）、自动静默更新、签名/公证（等证书，`package.yml` 已有条件步骤）
-- Windows 实机验证（CI 通过只证明能编译和静默安装）；开机启动的 Windows 路径只有命令构造单测
-- 真实内容源（P2）：Blocked，等官方授权
+
+- Windows 与 Intel Mac 原生验收、GitHub 当前版本打包、正式签名与公证。
+- 官方内容源接入和端到端验证，等待适用的授权、文档和测试环境。
