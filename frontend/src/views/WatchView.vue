@@ -227,7 +227,7 @@ async function toggleEpisodeLike() {
         <DanmakuSettings :time="player.time.value" :send-danmaku="sendDm" />
       </section>
       <section v-else-if="layout === 'cmt'" class="drawer">
-        <CommentPanel @close="setPanel('')" />
+        <CommentPanel :key="`${dramaId}-${episode}`" @close="setPanel('')" />
       </section>
       <aside v-else class="rail">
         <div class="card info"><div class="irow"><img :src="drama.cover" :alt="drama.title" /><div><h2 class="clamp-1">{{ drama.title }}</h2><div class="tg"><span v-for="t in drama.tags.slice(0, 3)" :key="t">{{ t }}</span></div><p>共{{ total }}集 · 已更新至{{ drama.updatedTo }}集</p><p class="ht"><Flame :size="14" color="#ff6a3d" fill="#ff6a3d" />{{ drama.heat.toFixed(1) }}万热度</p><p class="sm" :class="{ c2: !exp }">{{ drama.summary }}<button @click="exp = !exp">{{ exp ? '收起' : '展开' }}</button></p></div></div>

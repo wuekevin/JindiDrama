@@ -1,6 +1,6 @@
 import { localId } from '@/localId'
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { loadLocalComments, saveLocalComments } from '@/bindings'
 
 export interface Reply { id: string; user: string; level: number; text: string; likes: number; liked: boolean; ago: string; mine?: boolean }
@@ -17,6 +17,15 @@ export const useCommentStore = defineStore('comments', () => {
   const sort = ref<'new'|'hot'|'author'>('new'); const shown = ref(4); const expanded = ref<Set<string>>(new Set())
   const episode = ref({ dramaId: 'd1', index: 1 })
   const key = computed(() => `${episode.value.dramaId}-${episode.value.index}`)
+  const drafts = new Map<string, { text: string; replies: Partial<Record<string, string>> }>()
+  function draftForEpisode() {
+    const current = key.value
+    const saved = drafts.get(current)
+    if (saved) return saved
+    const draft = reactive({ text: '', replies: Object.create(null) as Partial<Record<string, string>> })
+    drafts.set(current, draft)
+    return draft
+  }
   const pending = ref<Record<string, boolean>>({})
   const readErrors = ref<Record<string, boolean>>({})
   const saveErrors = ref<Record<string, boolean>>({})
@@ -76,5 +85,5 @@ export const useCommentStore = defineStore('comments', () => {
   function remove(id: string) { if (!canEdit()) return; const l = all.value; const i = l.findIndex((c) => c.id === id && c.mine); if (i >= 0) { l.splice(i, 1); void persist() } }
   function reply(c: Comment, text: string): string | null { if (!canEdit()) return '本集评论尚未载入'; const e = validate(text); if (e) return e; c.replies.push({ id: `${c.id}-m${localId()}`, user: '我', level: 1, text: text.trim(), likes: 0, liked: false, ago: '刚刚', mine: true }); c.replyTotal++; void persist(); return null }
   const toggleReplies = (id: string) => { const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s }
-  return { sort, visible, total, hasMore, loadMore, post, like, remove, reply, validate, open, loading, readError, saveError, load, persist, expanded, toggleReplies }
+  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, validate, open, loading, readError, saveError, load, persist, expanded, toggleReplies }
 })

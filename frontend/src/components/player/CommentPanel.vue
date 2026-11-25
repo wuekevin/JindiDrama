@@ -6,23 +6,48 @@ import { useToastStore } from '@/stores/toast'
 import { EmptyState } from '@/components/ui'
 const emit = defineEmits<{ close: [] }>()
 const c = useCommentStore(); const toast = useToastStore()
-const text = ref(''); const err = ref(''); const replyFor = ref<string | null>(null); const replyText = ref(''); const menuFor = ref<string | null>(null)
+const err = ref('')
+const replyFor = ref<string | null>(null)
+const menuFor = ref<string | null>(null)
+const draft = c.draftForEpisode()
 const tabs = [{ k: 'new', l: '最新' }, { k: 'hot', l: '最热' }, { k: 'author', l: '只看作者' }] as const
 const n = (v: number) => (v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v))
-const over = computed(() => text.value.length > MAX_LEN)
-function submit() { const e = c.post(text.value); err.value = e ?? ''; if (!e) { text.value = ''; toast.push('评论已发布（本地演示，不会同步到红果）', 'success') } }
-function sendReply(cm: Comment) { const e = c.reply(cm, replyText.value); if (e) { toast.push(e, 'error'); return } replyText.value = ''; replyFor.value = null; if (!c.expanded.has(cm.id)) c.toggleReplies(cm.id) }
+const over = computed(() => draft.text.length > MAX_LEN)
+const composing = (event?: KeyboardEvent) => event?.isComposing || event?.keyCode === 229
+function closeOnEscape(event: KeyboardEvent) {
+  if (!composing(event)) emit('close')
+}
+function submit(event?: KeyboardEvent) {
+  if (composing(event) || c.draftForEpisode() !== draft) return
+  const error = c.post(draft.text)
+  err.value = error ?? ''
+  if (!error) {
+    draft.text = ''
+    toast.push('评论已发布（本地演示，不会同步到红果）', 'success')
+  }
+}
+function sendReply(cm: Comment, event?: KeyboardEvent) {
+  if (composing(event) || replyFor.value !== cm.id || c.draftForEpisode() !== draft) return
+  const error = c.reply(cm, draft.replies[cm.id] ?? '')
+  if (error) {
+    toast.push(error, 'error')
+    return
+  }
+  delete draft.replies[cm.id]
+  replyFor.value = null
+  if (!c.expanded.has(cm.id)) c.toggleReplies(cm.id)
+}
 function del(id: string) { c.remove(id); menuFor.value = null; toast.push('评论已删除') }
 const dummy = () => toast.push('该功能在演示模式下暂不可用')
 </script>
 <template>
-  <aside class="cp" role="complementary" aria-label="本集评论" data-testid="comment-panel" @keydown.esc="emit('close')">
+  <aside class="cp" role="complementary" aria-label="本集评论" data-testid="comment-panel" @keydown.esc="closeOnEscape">
     <header><h2>本集评论 <small data-testid="comment-total">({{ c.total.toLocaleString() }})</small></h2><button aria-label="关闭评论" data-testid="comment-close" @click="emit('close')"><X :size="24" /></button></header>
     <div class="sorts"><button v-for="t in tabs" :key="t.k" :class="{ on: c.sort === t.k }" :data-testid="`csort-${t.k}`" @click="c.sort = t.k">{{ t.l }}</button></div>
     <div class="editor"><i class="av" />
-      <div class="box"><textarea v-model="text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
+      <div class="box"><textarea v-model="draft.text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
     <div class="tools"><button aria-label="表情" @click="dummy"><Smile :size="22" /></button><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button>
-      <span class="cnt" :class="{ over }" data-testid="comment-count">{{ text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!text.trim() || over || c.loading || c.readError" data-testid="comment-post" @click="submit">发表评论</button></div>
+      <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError" data-testid="comment-post" @click="submit()">发表评论</button></div>
     <p v-if="err" class="err" role="alert">{{ err }}</p>
     <p v-if="c.saveError" class="err" role="alert">本地评论保存失败 <button @click="c.persist()">重试</button></p>
     <div class="list">
@@ -37,7 +62,7 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
             <button data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ cm.replyTotal }})</button>
             <span class="sp" /><div class="more"><button aria-label="更多" data-testid="more" @click="menuFor = menuFor === cm.id ? null : cm.id"><Ellipsis :size="18" /></button>
               <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" @click="del(cm.id)">删除</button></li><li><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
-          <div v-if="replyFor === cm.id" class="rbox"><input v-model="replyText" :placeholder="`回复 ${cm.user}`" data-testid="reply-input" @keydown.enter="sendReply(cm)" /><button data-testid="reply-send" @click="sendReply(cm)">发送</button></div>
+          <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" @click="sendReply(cm)">发送</button></div>
           <div v-if="cm.replies.length && c.expanded.has(cm.id)" class="replies" data-testid="replies"><div v-for="r in cm.replies" :key="r.id" class="rp"><i class="av a3" /><div><div class="who"><b>{{ r.user }}</b><span class="lv"><Crown :size="10" fill="currentColor" />Lv{{ r.level }}</span></div><p>{{ r.text }}</p><div class="acts s"><time>{{ r.ago }}</time><button class="lk" :class="{ on: r.liked }" @click="c.like(r)"><ThumbsUp :size="13" :fill="r.liked ? 'currentColor' : 'none'" />{{ n(r.likes) }}</button></div></div></div></div>
           <button v-if="cm.replyTotal > 0" class="all" data-testid="toggle-replies" @click="c.toggleReplies(cm.id)">{{ c.expanded.has(cm.id) ? '收起回复' : `共 ${cm.replyTotal} 条回复` }}<ChevronRight :size="13" /></button>
         </div></article>
