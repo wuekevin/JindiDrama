@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { X, Smile, Image, Video, AtSign, ThumbsUp, MessageCircle, Ellipsis, Crown, ChevronRight } from 'lucide-vue-next'
-import { useCommentStore, MAX_LEN, type Comment } from '@/stores/comments'
+import { useCommentStore, MAX_LEN, replyCount, type Comment } from '@/stores/comments'
 import { useToastStore } from '@/stores/toast'
 import { EmptyState } from '@/components/ui'
 const emit = defineEmits<{ close: [] }>()
@@ -122,28 +122,28 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
       <EmptyState v-else-if="!c.visible.length" title="暂无评论" hint="来发表第一条评论吧" />
       <article v-for="cm in c.visible" :key="cm.id" class="cm" data-testid="comment">
         <i class="av a2" /><div class="body">
-          <div class="who"><b>{{ cm.user }}</b><span class="lv"><Crown :size="11" fill="currentColor" />Lv{{ cm.level }}</span><em v-if="cm.byAuthor" class="au">作者</em></div>
-          <time>{{ cm.ago }}</time><p>{{ cm.text }}</p>
-          <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes) }}</button>
-            <button class="reply-button" data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ cm.replyTotal }})</button>
+          <div class="who"><b>{{ cm.user ?? '未知用户' }}</b><span class="lv"><Crown :size="11" fill="currentColor" />Lv{{ cm.level ?? 1 }}</span><em v-if="cm.byAuthor" class="au">作者</em></div>
+          <time v-if="cm.ago">{{ cm.ago }}</time><p>{{ cm.text }}</p>
+          <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked ?? false" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes ?? 0) }}</button>
+            <button class="reply-button" data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ replyCount(cm) }})</button>
             <span class="sp" /><div class="more"><button aria-label="更多" data-testid="more" @click="menuFor = menuFor === cm.id ? null : cm.id"><Ellipsis :size="18" /></button>
               <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" @click="del(cm.id)">删除</button></li><li><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
-          <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" @click="sendReply(cm)">发送</button></div>
-          <div v-if="cm.replies.length && c.expanded.has(cm.id)" class="replies" data-testid="replies">
+          <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user ?? '未知用户'}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" @click="sendReply(cm)">发送</button></div>
+          <div v-if="cm.replies?.length && c.expanded.has(cm.id)" class="replies" data-testid="replies">
             <div v-for="r in cm.replies" :key="r.id" class="rp" data-testid="comment-reply">
               <i class="av a3" />
               <div>
-                <div class="who"><b>{{ r.user }}</b><span class="lv"><Crown :size="10" fill="currentColor" />Lv{{ r.level }}</span></div>
+                <div class="who"><b>{{ r.user ?? '未知用户' }}</b><span class="lv"><Crown :size="10" fill="currentColor" />Lv{{ r.level ?? 1 }}</span></div>
                 <p>{{ r.text }}</p>
                 <div class="acts s">
-                  <time>{{ r.ago }}</time>
-                  <button class="lk" :class="{ on: r.liked }" @click="c.like(r)"><ThumbsUp :size="13" :fill="r.liked ? 'currentColor' : 'none'" />{{ n(r.likes) }}</button>
+                  <time v-if="r.ago">{{ r.ago }}</time>
+                  <button class="lk" :class="{ on: r.liked }" @click="c.like(r)"><ThumbsUp :size="13" :fill="r.liked ? 'currentColor' : 'none'" />{{ n(r.likes ?? 0) }}</button>
                   <button v-if="r.mine === true" type="button" @click="deleteReply(cm.id, r.id, $event)">删除回复</button>
                 </div>
               </div>
             </div>
           </div>
-          <button v-if="cm.replyTotal > 0" class="all" data-testid="toggle-replies" @click="c.toggleReplies(cm.id)">{{ c.expanded.has(cm.id) ? '收起回复' : `共 ${cm.replyTotal} 条回复` }}<ChevronRight :size="13" /></button>
+          <button v-if="replyCount(cm) > 0" class="all" data-testid="toggle-replies" @click="c.toggleReplies(cm.id)">{{ c.expanded.has(cm.id) ? '收起回复' : `共 ${replyCount(cm)} 条回复` }}<ChevronRight :size="13" /></button>
         </div></article>
       <button v-if="c.hasMore" class="loadmore" data-testid="load-more" @click="c.loadMore()">加载更多评论</button>
     </div>

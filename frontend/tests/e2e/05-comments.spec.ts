@@ -448,3 +448,49 @@ test('only the selected own reply is deleted, with persistence and keyboard focu
   await expect(replies.filter({ hasText: '保留这条回复' })).toBeVisible()
   await expect(comment.getByRole('button', { name: '删除回复' })).toHaveCount(1)
 })
+
+test('comment read failures can retry and edit older snapshots without losing replies', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.assign(window, { __JD_MEDIA: 'sim', go: { app: { App: {
+      StorageReady: async () => false,
+      LocalDanmaku: async () => [],
+      LocalEpisodeLiked: async () => false,
+      LocalComments: async () => {
+        if (!sessionStorage.getItem('legacy-comments-ready')) throw new Error('本集评论数据无效')
+        return sessionStorage.getItem('legacy-comments-saved') ?? JSON.stringify([
+          { id: 'legacy-comment', text: '旧版主评论', replies: [{ id: 'legacy-reply', text: '旧版回复' }] },
+          { id: 'legacy-text-only', text: '旧版纯文本评论' },
+        ])
+      },
+      SaveLocalComments: async (_drama: string, _episode: number, snapshot: string) =>
+        sessionStorage.setItem('legacy-comments-saved', snapshot),
+    } } } })
+  })
+  await page.goto('/#/watch/d1/32?panel=comments&paused=1')
+  const panel = page.getByTestId('comment-panel')
+  const readFailure = panel.getByRole('alert').filter({ hasText: '本地评论读取失败' })
+  await expect(readFailure).toBeVisible()
+  await panel.getByTestId('comment-input').fill('重试前的草稿')
+  await expect(panel.getByTestId('comment-post')).toBeDisabled()
+  const saved = () => page.evaluate(() => sessionStorage.getItem('legacy-comments-saved') ?? '')
+  expect(await saved()).toBe('')
+
+  await page.evaluate(() => sessionStorage.setItem('legacy-comments-ready', '1'))
+  await readFailure.getByRole('button', { name: '重试' }).click()
+  await expect(readFailure).toHaveCount(0)
+  await expect(panel.getByText('旧版纯文本评论')).toBeVisible()
+  const legacy = panel.getByTestId('comment').filter({ hasText: '旧版主评论' })
+  await expect(legacy.getByTestId('reply-btn')).toHaveText('回复 (1)')
+  await legacy.getByTestId('toggle-replies').click()
+  await expect(legacy.getByText('旧版回复')).toBeVisible()
+  await expect(legacy.getByRole('button', { name: '删除回复' })).toHaveCount(0)
+  await panel.getByTestId('comment-post').click()
+  await expect.poll(saved).toContain('重试前的草稿')
+  expect(await saved()).toContain('旧版回复')
+  expect(await saved()).toContain('旧版纯文本评论')
+
+  await page.reload()
+  await expect(panel.getByText('重试前的草稿')).toBeVisible()
+  await legacy.getByTestId('toggle-replies').click()
+  await expect(legacy.getByText('旧版回复')).toBeVisible()
+})

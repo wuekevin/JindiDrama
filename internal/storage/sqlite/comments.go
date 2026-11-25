@@ -5,13 +5,13 @@ import (
 	"errors"
 )
 
-func (s *Store) LocalComments(dramaID string, episode int) (string, error) {
+func (s *Store) LocalComments(dramaID string, episode int) (string, bool, error) {
 	var snapshot string
 	err := s.db.QueryRow(`SELECT snapshot FROM local_comments WHERE drama_id=? AND episode=?`, dramaID, episode).Scan(&snapshot)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", nil
+		return "", false, nil
 	}
-	return snapshot, err
+	return snapshot, err == nil, err
 }
 
 func (s *Store) SaveLocalComments(dramaID string, episode int, snapshot string) error {

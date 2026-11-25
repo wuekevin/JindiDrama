@@ -5,8 +5,8 @@ describe('comments store', () => {
   beforeEach(() => { setActivePinia(createPinia()); useCommentStore().open('d1', 32) })
   it('validates', () => { const s = useCommentStore(); expect(s.validate('  ')).toContain('不能为空'); expect(s.validate('a'.repeat(MAX_LEN + 1))).toContain('500'); expect(s.validate('好看')).toBeNull() })
   it('posts to top, deletes only own', () => { const s = useCommentStore(); expect(s.post('我的评论')).toBeNull(); expect(s.visible[0].mine).toBe(true); const id = s.visible[1].id; s.remove(id); expect(s.visible.some((c) => c.id === id)).toBe(true); s.remove(s.visible[0].id); expect(s.visible.some((c) => c.mine)).toBe(false) })
-  it('sort hot desc; author filter', () => { const s = useCommentStore(); s.sort = 'hot'; s.loadMore(); const l = s.visible.map((c) => c.likes); expect(l).toEqual([...l].sort((a, b) => b - a)); s.sort = 'author'; expect(s.visible.every((c) => c.byAuthor)).toBe(true) })
-  it('like toggles; paging', () => { const s = useCommentStore(); const c = s.visible[0]; const n = c.likes; s.like(c); expect(c.likes).toBe(n + 1); s.like(c); expect(c.likes).toBe(n); expect(s.visible).toHaveLength(4); s.loadMore(); expect(s.visible).toHaveLength(8) })
+  it('sort hot desc; author filter', () => { const s = useCommentStore(); s.sort = 'hot'; s.loadMore(); const l = s.visible.map((c) => c.likes); expect(l).toEqual([...l].sort((a, b) => (b ?? 0) - (a ?? 0))); s.sort = 'author'; expect(s.visible.every((c) => c.byAuthor)).toBe(true) })
+  it('like toggles; paging', () => { const s = useCommentStore(); const c = s.visible[0]; const n = c.likes ?? 0; s.like(c); expect(c.likes).toBe(n + 1); s.like(c); expect(c.likes).toBe(n); expect(s.visible).toHaveLength(4); s.loadMore(); expect(s.visible).toHaveLength(8) })
   it('restores desktop comments and saves edits under their episode', async () => {
     const LocalComments = vi.fn().mockResolvedValue('')
     const SaveLocalComments = vi.fn().mockResolvedValue(undefined)
@@ -34,17 +34,53 @@ describe('comments store', () => {
       vi.unstubAllGlobals()
     }
   })
+  it('re-saves a size-limit legacy snapshot without adding display fields', async () => {
+    const empty = JSON.stringify([{ id: 'old', text: '' }])
+    const snapshot = JSON.stringify([{ id: 'old', text: 'x'.repeat(256 * 1024 - empty.length) }])
+    const LocalComments = vi.fn().mockResolvedValue(snapshot)
+    const SaveLocalComments = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('go', { app: { App: { LocalComments, SaveLocalComments } } })
+    try {
+      const store = useCommentStore()
+      await store.open('d1', 31)
+      expect(store.visible[0].id).toBe('old')
+      await store.persist()
+      expect(SaveLocalComments).toHaveBeenCalledWith('d1', 31, snapshot)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('preserves extension fields and refuses reply overflow before mutating the snapshot', async () => {
+    const original = [{
+      id: 'old', text: '评论', __v_isRef: true, replyTotal: Number.MAX_SAFE_INTEGER,
+      replies: [{ id: 'reply', text: '回复', metadata: { label: 'kept' } }],
+    }]
+    const LocalComments = vi.fn().mockResolvedValue(JSON.stringify(original))
+    const SaveLocalComments = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('go', { app: { App: { LocalComments, SaveLocalComments } } })
+    try {
+      const store = useCommentStore()
+      await store.open('d1', 31)
+      expect(store.reply(store.visible[0], '应留在草稿里')).toBe('回复数量已达上限')
+      expect(store.visible[0].replies).toHaveLength(1)
+      expect(SaveLocalComments).not.toHaveBeenCalled()
+      await store.persist()
+      expect(JSON.parse(SaveLocalComments.mock.lastCall![2])).toEqual(original)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
   it('rejects demo replies and replies from another episode', () => {
     const store = useCommentStore()
     const parent = store.visible[0]
-    const demoReply = parent.replies[0]
+    const demoReply = parent.replies![0]
     const originalTotal = parent.replyTotal
     expect(store.removeReply(parent.id, demoReply.id)).toBe(false)
-    expect(parent.replies[0]).toBe(demoReply)
+    expect(parent.replies![0]).toBe(demoReply)
     expect(parent.replyTotal).toBe(originalTotal)
 
     expect(store.reply(parent, '自己的回复')).toBeNull()
-    const ownReply = parent.replies.at(-1)!
+    const ownReply = parent.replies!.at(-1)!
     store.open('d1', 31)
     expect(store.removeReply(parent.id, ownReply.id)).toBe(false)
     store.open('d1', 32)
@@ -53,5 +89,5 @@ describe('comments store', () => {
     expect(store.removeReply(parent.id, ownReply.id)).toBe(false)
     expect(parent.replyTotal).toBe(originalTotal)
   })
-  it('reply adds', () => { const s = useCommentStore(); const c = s.visible[0]; const n = c.replyTotal; expect(s.reply(c, '')).not.toBeNull(); expect(s.reply(c, '同意')).toBeNull(); expect(c.replyTotal).toBe(n + 1) })
+  it('reply adds', () => { const s = useCommentStore(); const c = s.visible[0]; const n = c.replyTotal ?? 0; expect(s.reply(c, '')).not.toBeNull(); expect(s.reply(c, '同意')).toBeNull(); expect(c.replyTotal).toBe(n + 1) })
 })
