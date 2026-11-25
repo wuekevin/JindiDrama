@@ -111,7 +111,7 @@ const rows = computed(() => { const g = groups.value[grp.value]; if (!g) return 
 const thumb = (ep: number) => posterSvg({ hue: 350, hue2: 20, seed: 1 + (ep % 3) })
 const { cards: related, canShuffle: canShuffleRelated, shuffle: shuffleRelated } = useRelatedDramas(drama, 2)
 const guess = computed(() => DRAMAS.filter((d) => d.id !== dramaId.value && d.isNewToday).slice(0, 4))
-function fav() { toast.push(lib.toggleFav(dramaId.value) ? '已加入收藏' : '已取消收藏', 'success') }
+function fav() { void lib.notifySaved(lib.toggleFav(dramaId.value) ? '已加入收藏' : '已取消收藏') }
 const exporting = ref(false)
 const shareEpisode = () => copyShareLink(`/watch/${dramaId.value}/${episode.value}`)
 async function downloadEpisode() {

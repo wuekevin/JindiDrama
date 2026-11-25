@@ -4,7 +4,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity as InfinityIcon, Building2, Medal, Clock, Play } from 'lucide-vue-next'
 import { useCatalogStore } from '@/stores/catalog'
 import { useLibraryStore } from '@/stores/library'
-import { useToastStore } from '@/stores/toast'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
 import HeroCarousel from '@/components/HeroCarousel.vue'
@@ -13,7 +12,7 @@ import { ProgressBar, EmptyState, ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
 const route = useRoute(); const router = useRouter()
-const catalog = useCatalogStore(); const lib = useLibraryStore(); const toast = useToastStore()
+const catalog = useCatalogStore(); const lib = useLibraryStore()
 const icons: Record<string, unknown> = { Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity: InfinityIcon, Building2 }
 const tab = ref<'hot'|'rise'|'new'>('hot')
 const tabs = [{ k: 'hot', l: '热门榜' }, { k: 'rise', l: '飙升榜' }, { k: 'new', l: '新剧榜' }] as const
@@ -26,7 +25,7 @@ const ranking = computed(() => home.value?.rankings[tab.value] ?? [])
 const resume = computed(() => lib.history.flatMap((h) => { const d = card(h.dramaId); return d && h.episode <= d.updatedTo ? [{ h, d }] : [] }).slice(0, 3))
 const openDrama = (id: string) => router.push(detailRoute(id))
 const watchNow = (id: string) => { const h = lib.history.find((x) => x.dramaId === id); router.push(playbackRoute(id, h?.episode ?? 1)) }
-function fav(id: string) { const on = lib.toggleFav(id); toast.push(on ? '已加入收藏' : '已取消收藏', 'success') }
+function fav(id: string) { const on = lib.toggleFav(id); void lib.notifySaved(on ? '已加入收藏' : '已取消收藏') }
 const rankClass = (i: number) => (i < 3 ? `r${i + 1}` : 'rn')
 const autoplay = computed(() => route.query.static === undefined)
 </script>

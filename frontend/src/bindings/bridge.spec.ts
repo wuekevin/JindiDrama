@@ -7,6 +7,78 @@ const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], Hi
 describe('wails bridge', () => {
   beforeEach(() => { localStorage.clear(); calls.length = 0 }); afterEach(() => { vi.unstubAllGlobals(); delete (window as any).go })
   it('no bridge in browser mode: falls back to localStorage', () => { expect(hasBridge()).toBe(false); saveSetting(LS.app, { a: 1 }); expect(localStorage.getItem(LS.app)).toBe('{"a":1}') })
+  it('distinguishes a failed SQLite write with or without a persisted recovery journal', async () => {
+    const SaveLibraryChanges = vi.fn()
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockResolvedValue(undefined)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const setItem = Storage.prototype.setItem
+    let blockLibrary = false
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (blockLibrary && key === LS.library) throw new DOMException('full', 'QuotaExceededError')
+      return setItem.call(this, key, value)
+    })
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges } } })
+    try {
+      await prime()
+      expect(await saveLibrary([], ['d9'])).toBe('pending')
+      const durableJournal = localStorage.getItem(LS.library)
+      expect(JSON.parse(durableJournal!)).toMatchObject({ pending: true })
+      blockLibrary = true
+      expect(await saveLibrary([], ['d2'])).toBe('unsaved')
+      expect(localStorage.getItem(LS.library)).toBe(durableJournal)
+      expect(await saveLibrary([], ['d3'])).toBe('saved')
+      expect(readLibraryCache()).not.toHaveProperty('pending')
+    } finally {
+      storage.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('detects when an earlier acknowledgement has since persisted a queued recovery receipt', async () => {
+    let finishFirst!: () => void
+    const firstWrite = new Promise<void>((resolve) => { finishFirst = resolve })
+    const SaveLibraryChanges = vi.fn().mockReturnValueOnce(firstWrite).mockRejectedValueOnce(new Error('locked'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const setItem = Storage.prototype.setItem
+    let skipNextJournalWrite = false
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (skipNextJournalWrite && key === LS.library) {
+        skipNextJournalWrite = false
+        throw new DOMException('full', 'QuotaExceededError')
+      }
+      return setItem.call(this, key, value)
+    })
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges } } })
+    try {
+      await prime()
+      const first = saveLibrary([], ['d1'])
+      await vi.waitFor(() => expect(SaveLibraryChanges).toHaveBeenCalledTimes(1))
+      skipNextJournalWrite = true
+      const second = saveLibrary([], ['d2'])
+      expect(JSON.parse(localStorage.getItem(LS.library)!).favorites).toEqual(['d1'])
+      finishFirst()
+      expect(await first).toBe('saved')
+      expect(await second).toBe('pending')
+      expect(JSON.parse(localStorage.getItem(LS.library)!)).toMatchObject({ favorites: ['d2'], pending: true })
+    } finally {
+      storage.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('reports a browser library write that could not be saved', async () => {
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+    try {
+      expect(await saveLibrary([], ['d1'])).toBe('unsaved')
+    } finally {
+      storage.mockRestore()
+    }
+    expect(await saveLibrary([], ['d1'])).toBe('saved')
+  })
   it('prime hydrates localStorage from SQLite data', async () => {
     ;(window as any).go = { app: { App: fake } }; expect(hasBridge()).toBe(true); await prime()
     const lib = JSON.parse(localStorage.getItem(LS.library)!); expect(lib.favorites).toEqual(['d9']); expect(lib.history[0]).toMatchObject({ dramaId: 'd9', episode: 7, positionSec: 12 }); expect(localStorage.getItem(LS.app)).toBe('{"theme":"light"}')

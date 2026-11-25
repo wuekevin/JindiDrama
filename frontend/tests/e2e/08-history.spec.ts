@@ -87,7 +87,7 @@ test.describe('观看历史自然日', () => {
   })
 })
 
-test('desktop history clear survives a failed write and restart', async ({ page }) => {
+test('desktop history clear survives a failed write and restart', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     const deleted = 'jd-test-sqlite-deleted'
     const failed = 'jd-test-sqlite-failed'
@@ -113,7 +113,12 @@ test('desktop history clear survives a failed write and restart', async ({ page 
   await page.getByTestId('modal-confirm').click()
   await expect(page.getByTestId('empty')).toBeVisible()
   await expect.poll(() => page.evaluate(() => localStorage.getItem('jd-test-sqlite-failed'))).toBe('1')
+  const pending = page.getByTestId('toast').filter({ hasText: '已暂存在本机' })
+  await expect(pending).toBeVisible()
+  await expect(page.getByTestId('toast').filter({ hasText: '观看历史已清空' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('history-save-pending.png') })
   await page.reload()
+  await expect(pending).toHaveCount(0)
   await expect(page.getByTestId('empty')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('jd-test-sqlite-deleted'))).toBe('1')
   await page.reload()
@@ -269,4 +274,45 @@ test('a committed stale journal cannot overwrite newer history or a later offlin
   expect(attempted[1].receipt).toEqual(original)
   expect(attempted[2].receipt).toEqual(offline[1].receipt)
   expect(await journal()).not.toHaveProperty('pending')
+})
+
+test('desktop history warns when neither store has confirmed the edit', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key: string, value: string) {
+      if (key === 'jindi.library.v1' && JSON.parse(value).pending) throw new DOMException('full', 'QuotaExceededError')
+      setItem.call(this, key, value)
+    }
+    const existing = ['d1', 'd9'].map((dramaId) => ({
+      dramaId, episode: 2, positionMs: 1200, durationMs: 5000, percent: 24, watchedAt: Date.now(),
+    }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => true,
+      Favorites: async () => [],
+      History: async () => existing,
+      SearchHistory: async () => [],
+      GetSetting: async () => '',
+      SaveLibraryChanges: async ({ removed }: { removed: string[] }) => {
+        if (!sessionStorage.getItem('jd-test-sqlite-writable')) throw new Error('database locked')
+        sessionStorage.setItem('jd-test-confirmed-removals', JSON.stringify(removed))
+      },
+    } } } })
+  })
+  await page.goto('/#/history')
+  await expect(page.getByTestId('history-item')).toHaveCount(2)
+  const warning = page.getByTestId('toast').filter({ hasText: '关闭应用后可能丢失' })
+  await page.getByTestId('history-item').first().getByTestId('h-more').click()
+  await page.getByTestId('h-delete').click()
+  await expect(warning).toHaveCount(1)
+  await expect(warning).toBeVisible()
+  await expect(page.getByTestId('toast').filter({ hasText: '已删除该记录' })).toHaveCount(0)
+  await expect(page.getByTestId('toast').filter({ hasText: '已暂存在本机' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('history-save-unconfirmed.png') })
+
+  await page.evaluate(() => sessionStorage.setItem('jd-test-sqlite-writable', '1'))
+  await page.getByTestId('clear-all').click()
+  await page.getByTestId('modal-confirm').click()
+  await expect(warning).toHaveCount(0)
+  await expect(page.getByTestId('toast').filter({ hasText: '观看历史已清空' })).toBeVisible()
+  expect(JSON.parse((await page.evaluate(() => sessionStorage.getItem('jd-test-confirmed-removals')))!).sort()).toEqual(['d1', 'd9'])
 })

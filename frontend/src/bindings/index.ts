@@ -222,7 +222,12 @@ export function readLibraryCache(): LibraryCache | undefined {
 function storeLibraryCache(cache: LibraryCache) {
   const serialized = JSON.stringify(cache)
   if (api()) desktopCache = serialized
-  try { localStorage.setItem(LS.library, serialized) } catch { /* local cache is optional when SQLite is ready */ }
+  try {
+    localStorage.setItem(LS.library, serialized)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function fromHistoryRow(row: HistoryRow): HistoryEntry {
@@ -393,21 +398,28 @@ async function primeDesktopStorage(a: GoApp) {
   }
 }
 
-export function saveLibrary(history: HistoryEntry[], favorites: string[]) {
+export type LibrarySaveResult = 'saved' | 'pending' | 'unsaved'
+
+function journalResult(persisted: boolean): LibrarySaveResult {
+  return persisted ? 'pending' : 'unsaved'
+}
+
+export async function saveLibrary(
+  history: HistoryEntry[], favorites: string[], onUnconfirmed?: () => void,
+): Promise<LibrarySaveResult> {
   const next = { history, favorites }
   const a = api()
-  if (!a) {
-    storeLibraryCache(next)
-    return
-  }
+  if (!a) return storeLibraryCache(next) ? 'saved' : 'unsaved'
+
   const previous = readLibraryCache()
   const batches = pendingBatches(previous)
   const last = batches.at(-1)
   if (!persistedLibrary && last?.intent && offlineDraft
       && last.receipt.writer === offlineDraft.writer && last.receipt.revision === offlineDraft.revision) {
     const intent = captureLibraryIntent({ ...previous!, intent: last.intent }, next)
-    storeLibraryCache({ ...next, pending: true, batches: [...batches.slice(0, -1), { receipt: offlineDraft, intent }] })
-    return
+    return journalResult(storeLibraryCache({
+      ...next, pending: true, batches: [...batches.slice(0, -1), { receipt: offlineDraft, intent }],
+    }))
   }
 
   const receipt = nextLibraryReceipt()
@@ -415,10 +427,9 @@ export function saveLibrary(history: HistoryEntry[], favorites: string[]) {
   const journal = [...batches, { receipt, intent }]
   if (!persistedLibrary) {
     offlineDraft = receipt
-    storeLibraryCache({ ...next, pending: true, batches: journal })
-    return
+    return journalResult(storeLibraryCache({ ...next, pending: true, batches: journal }))
   }
-  return queueLibraryWrite(a, next, journal, receipt)
+  return queueLibraryWrite(a, next, journal, receipt, onUnconfirmed)
 }
 
 function acknowledgeLibraryWrite(receipt: LibraryReceipt) {
@@ -446,20 +457,32 @@ async function writeRebasedLibrary(a: GoApp, previous: LibrarySnapshot, receipt:
   }
 }
 
-function queueLibraryWrite(a: GoApp, state: LibraryState, batches: LibraryBatch[], receipt: LibraryReceipt) {
+function queuedJournalResult(receipt: LibraryReceipt): LibrarySaveResult {
+  try {
+    const durable = parseLibraryCache(localStorage.getItem(LS.library))
+    return journalResult(pendingBatches(durable).some(({ receipt: stored }) =>
+      stored.writer === receipt.writer && stored.revision === receipt.revision))
+  } catch {
+    return 'unsaved'
+  }
+}
+
+function queueLibraryWrite(
+  a: GoApp, state: LibraryState, batches: LibraryBatch[], receipt: LibraryReceipt, onUnconfirmed?: () => void,
+) {
   const committed = { history: state.history, favorites: state.favorites }
-  storeLibraryCache({ ...committed, pending: true, batches })
+  if (!storeLibraryCache({ ...committed, pending: true, batches })) onUnconfirmed?.()
   const pendingRows = state.history.map(toHistoryRow)
   const pendingFavorites = [...state.favorites]
-  libraryWrites = libraryWrites.then(async () => {
+  const write = libraryWrites.then<LibrarySaveResult>(async () => {
     const previous = persistedLibrary
-    if (!previous) return
+    if (!previous) return queuedJournalResult(receipt)
     try {
       // Replay edits queued during restore in receipt order against the new
       // snapshot. An earlier failed edit stays pending until SQLite accepts it.
       if (rebaseLibraryWrites) {
         await writeRebasedLibrary(a, previous, receipt)
-        return
+        return 'saved'
       }
       const next = { favorites: pendingFavorites, history: new Map(pendingRows.map((row) => [row.dramaId, row])) }
       const changes: LibraryChanges = {
@@ -471,11 +494,14 @@ function queueLibraryWrite(a: GoApp, state: LibraryState, batches: LibraryBatch[
       await a.SaveLibraryChanges(changes)
       persistedLibrary = next
       acknowledgeLibraryWrite(receipt)
+      return 'saved'
     } catch (e) {
       warn(e)
+      return queuedJournalResult(receipt)
     }
   })
-  return libraryWrites
+  libraryWrites = write.then(() => undefined)
+  return write
 }
 export function saveSearch(q: string[]) { try { localStorage.setItem(LS.search, JSON.stringify(q)) } catch { /* ignore */ } api()?.SaveSearchHistory(q).catch(warn) }
 export function saveSetting(lsKey: string, value: unknown) {

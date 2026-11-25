@@ -5,12 +5,11 @@ import { Clock, Play, Trash2, LayoutGrid, List, ChevronDown, ChevronUp, ChartCol
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
-import { useToastStore } from '@/stores/toast'
 import { watchStatus, historyDay, agoText, watchHours } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama, HistoryEntry } from '@/types'
 
-const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
+const router = useRouter(); const lib = useLibraryStore()
 const { savedCard } = useLicensedCatalog()
 const now = ref(Date.now())
 let midnightTimer: number | undefined
@@ -65,9 +64,9 @@ const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : 
 const resume = (r: Row) => router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.h.episode))
 function toggleBatch() { batch.value = !batch.value; picked.value = new Set() }
 function pick(id: string) { const s = new Set(picked.value); s.has(id) ? s.delete(id) : s.add(id); picked.value = s }
-function delOne(id: string) { lib.removeHistory([id]); menu.value = ''; toast.push('已删除该记录', 'success') }
-function delBatch() { const ids = [...picked.value]; lib.removeHistory(ids); picked.value = new Set(); confirmBatch.value = false; batch.value = false; toast.push(`已删除 ${ids.length} 条记录`, 'success') }
-function clearAll() { lib.clearHistory(); confirmClear.value = false; batch.value = false; toast.push('观看历史已清空', 'success') }
+function delOne(id: string) { lib.removeHistory([id]); menu.value = ''; void lib.notifySaved('已删除该记录') }
+function delBatch() { const ids = [...picked.value]; lib.removeHistory(ids); picked.value = new Set(); confirmBatch.value = false; batch.value = false; void lib.notifySaved(`已删除 ${ids.length} 条记录`) }
+function clearAll() { lib.clearHistory(); confirmClear.value = false; batch.value = false; void lib.notifySaved('观看历史已清空') }
 const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
 </script>
 <template>

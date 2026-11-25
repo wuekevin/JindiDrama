@@ -5,12 +5,11 @@ import { Heart, Play, CircleCheck, Clapperboard, Video, SquarePen, LayoutGrid, L
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
-import { useToastStore } from '@/stores/toast'
 import { watchStatus } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama } from '@/types'
 
-const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
+const router = useRouter(); const lib = useLibraryStore()
 const tab = ref<'all'|'watching'|'done'|'manju'|'real'>('all'); const sort = ref<'recent'|'update'|'heat'>('recent'); const genre = ref(''); const view = ref<'grid'|'list'>('grid')
 const batch = ref(false); const picked = ref<Set<string>>(new Set()); const confirm = ref(false); const menu = ref('')
 const { savedCard } = useLicensedCatalog()
@@ -30,14 +29,14 @@ const list = computed(() => {
   return l
 })
 const tabs = computed(() => [{ k: 'all', l: '全部收藏', n: counts.value.all, i: Heart }, { k: 'watching', l: '在追', n: counts.value.watching, i: Play }, { k: 'done', l: '已看过', n: counts.value.done, i: CircleCheck }, { k: 'manju', l: '漫剧', n: counts.value.manju, i: Clapperboard }, { k: 'real', l: '真人剧', n: counts.value.real, i: Video }] as const)
-function unfav(id: string) { const idx = lib.favorites.indexOf(id); lib.removeFavs([id]); picked.value.delete(id); menu.value = ''; toast.push('已取消收藏', 'success', 3500); lastRemoved = { id, idx } }
+function unfav(id: string) { const idx = lib.favorites.indexOf(id); lib.removeFavs([id]); picked.value.delete(id); menu.value = ''; void lib.notifySaved('已取消收藏', 3500); lastRemoved = { id, idx } }
 let lastRemoved: { id: string; idx: number } | null = null
 function undo() { if (lastRemoved) { lib.favorites.splice(lastRemoved.idx, 0, lastRemoved.id); lastRemoved = null } }
 function toggleBatch() { batch.value = !batch.value; picked.value = new Set() }
 function pick(id: string) { const s = new Set(picked.value); s.has(id) ? s.delete(id) : s.add(id); picked.value = s }
 const allPicked = computed(() => list.value.length > 0 && list.value.every((r) => picked.value.has(r.d.id)))
 const selectAll = () => { picked.value = allPicked.value ? new Set() : new Set(list.value.map((r) => r.d.id)) }
-function doBatch() { const ids = [...picked.value]; lib.removeFavs(ids); picked.value = new Set(); confirm.value = false; toast.push(`已取消收藏 ${ids.length} 部`, 'success') }
+function doBatch() { const ids = [...picked.value]; lib.removeFavs(ids); picked.value = new Set(); confirm.value = false; void lib.notifySaved(`已取消收藏 ${ids.length} 部`) }
 type Row = (typeof rows.value)[number]
 const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
 function play(r: Row) {

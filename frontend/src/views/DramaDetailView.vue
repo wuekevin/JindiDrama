@@ -73,7 +73,7 @@ const eps = computed(() => {
 const hist = computed(() => lib.history.find((h) => h.dramaId === id.value))
 const watchEp = (ep: number) => { if (!detail.value?.episodes.some(({ index, available }) => index === ep && available)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
 const progressOf = (ep: number) => (hist.value && hist.value.episode === ep ? hist.value.percent : ep < (hist.value?.episode ?? 0) ? 100 : 0)
-function fav() { toast.push(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏', 'success') }
+function fav() { void lib.notifySaved(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏') }
 const share = () => copyShareLink(`/drama/${id.value}`)
 const tagIcon = (t: string) => ({ 古装: Landmark, 甜宠: Heart, 重生: Sprout, 权谋: Swords, 逆袭: Crown }[t] ?? Sparkles)
 const recommendationSource = computed(() => {
