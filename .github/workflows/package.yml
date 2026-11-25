@@ -240,6 +240,10 @@ jobs:
           $exe = "C:\Program Files\JindiDrama\JindiDrama.exe"
           $uninstaller = "C:\Program Files\JindiDrama\uninstall.exe"
           $checkFailure = $null
+          $fixtureDirectory = $null
+          $fixtureFile = $null
+          $fixtureHash = $null
+          $uninstallWorker = $null
           try {
             if (-not (Test-Path $exe)) { throw "安装目录不符，$exe 不存在" }
             if (Test-Path "C:\Program Files\JindiDrama\JindiDrama\JindiDrama.exe") { throw "安装目录多了一层 JindiDrama" }
@@ -248,6 +252,11 @@ jobs:
             $packaged = (Get-FileHash -LiteralPath $portable).Hash
             if ((Get-FileHash $exe).Hash -ne $packaged) { throw "Installed application differs from packaged executable" }
             Write-Host "安装目录与中文桌面快捷方式验证通过"
+            $fixtureDirectory = Join-Path (Split-Path -Parent $exe) ('jindi-uninstall-fixture-' + [Guid]::NewGuid().ToString('N'))
+            $null = [IO.Directory]::CreateDirectory($fixtureDirectory)
+            $fixtureFile = Join-Path $fixtureDirectory 'keep.txt'
+            [IO.File]::WriteAllText($fixtureFile, 'This file was not installed by JindiDrama.')
+            $fixtureHash = (Get-FileHash -LiteralPath $fixtureFile).Hash
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe
@@ -259,12 +268,53 @@ jobs:
               if ($env:PACKAGE_MODE -eq "release") {
                 & ./scripts/sign-windows-release.ps1 -File $uninstaller -VerifyOnly
               }
-              $uninstall = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+              $uninstallWorker = Join-Path $env:RUNNER_TEMP ('jindi-uninstall-' + [Guid]::NewGuid().ToString('N') + '.exe')
+              [IO.File]::Copy($uninstaller, $uninstallWorker)
+              $installDirectory = Split-Path -Parent $exe
+              # NSIS requires _?= last and without quotes. This avoids the launcher returning before its worker.
+              $uninstallArgs = "/S _?=$installDirectory"
+              $lockCheckFailure = $null
+              if ($null -eq $checkFailure) {
+                try {
+                  $locked = [IO.File]::Open($exe, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+                  try {
+                    $blocked = Start-Process -FilePath $uninstallWorker -ArgumentList $uninstallArgs -Wait -PassThru
+                    if ($blocked.ExitCode -eq 0 -or -not (Test-Path -LiteralPath $exe) -or
+                        -not (Test-Path -LiteralPath $uninstaller)) {
+                      throw "Uninstall must report a locked application and preserve the retry entry"
+                    }
+                  } finally {
+                    $locked.Dispose()
+                  }
+                } catch {
+                  $lockCheckFailure = $_
+                }
+              }
+              $uninstall = Start-Process -FilePath $uninstallWorker -ArgumentList $uninstallArgs -Wait -PassThru
               if ($uninstall.ExitCode -ne 0) { throw "Uninstaller exited with $($uninstall.ExitCode)" }
-              if (Test-Path $exe) { throw "Application remains after uninstall" }
+              if (Test-Path -LiteralPath $exe) { throw "Application remains after uninstall" }
+              if (Test-Path -LiteralPath $uninstaller) { throw "Uninstaller remains after uninstall" }
+              if ($fixtureHash) {
+                if (-not (Test-Path -LiteralPath $fixtureFile -PathType Leaf) -or
+                    (Get-FileHash -LiteralPath $fixtureFile).Hash -ne $fixtureHash) {
+                  throw "Uninstall removed or altered an unrelated file in the installation directory"
+                }
+                Write-Host "Uninstall preserved the unrelated file and its SHA-256"
+              }
+              if ($lockCheckFailure) { throw $lockCheckFailure }
             } catch {
               if ($null -eq $checkFailure) { throw }
               Write-Warning "Uninstall also failed: $_"
+            } finally {
+              try {
+                if ($uninstallWorker) { [IO.File]::Delete($uninstallWorker) }
+                if ($fixtureFile) { [IO.File]::Delete($fixtureFile) }
+                if ($fixtureDirectory -and [IO.Directory]::Exists($fixtureDirectory)) {
+                  [IO.Directory]::Delete($fixtureDirectory)
+                }
+              } catch {
+                Write-Warning "Could not clean up the uninstall test fixture: $_"
+              }
             }
           }
           if ($checkFailure) { throw $checkFailure }

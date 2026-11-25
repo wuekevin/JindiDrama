@@ -116,9 +116,11 @@ SectionEnd
 Section "uninstall"
     !insertmacro wails.setShellContext
 
-    RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
-
-    RMDir /r $INSTDIR
+    ClearErrors
+    Delete "$INSTDIR\${PRODUCT_EXECUTABLE}"
+    IfErrors uninstall_files_failed
+    Delete "$INSTDIR\uninstall.exe"
+    IfErrors uninstall_files_failed
 
     Delete "$SMPROGRAMS\${SHORTCUT_NAME}.lnk"
     Delete "$DESKTOP\${SHORTCUT_NAME}.lnk"
@@ -129,5 +131,30 @@ Section "uninstall"
     DeleteRegKey SHELL_CONTEXT "Software\Classes\jindi"
     protocol_done:
 
-    !insertmacro wails.deleteUninstaller
+    # Remove the install registration only after both executable files were removed.
+    SetRegView 64
+    !ifdef WAILS_INSTALL_SCOPE
+      !if "${WAILS_INSTALL_SCOPE}" == "user"
+        DeleteRegKey HKCU "${UNINST_KEY}"
+      !else
+        DeleteRegKey HKLM "${UNINST_KEY}"
+      !endif
+    !else
+      DeleteRegKey HKLM "${UNINST_KEY}"
+    !endif
+    SetOutPath "$TEMP"
+    # RemoveDirectory also removes junctions. Leave an existing reparse point alone.
+    System::Call 'kernel32::GetFileAttributesW(w "$INSTDIR") i.r0'
+    IntOp $1 $0 & 0x400
+    ${If} $1 = 0
+        RMDir "$INSTDIR"
+    ${EndIf}
+    Goto uninstall_done
+
+    uninstall_files_failed:
+    IfSilent +2
+    MessageBox MB_OK|MB_ICONSTOP "无法删除金帝短剧程序或卸载器。请关闭占用文件的程序后重试。"
+    SetErrorLevel 1
+    Abort
+    uninstall_done:
 SectionEnd
