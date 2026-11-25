@@ -62,7 +62,21 @@ CGO_CFLAGS=-mmacosx-version-min=13.0 CGO_LDFLAGS=-mmacosx-version-min=13.0 wails
 
 打包使用 `npm ci` 安装前端锁文件中的依赖，校验 Go 模块后由 Wails 打包已构建的前端。依赖变更应先更新并提交对应的锁文件。
 
-如需从另一份本地检出独立运行 Playwright，可在 `frontend` 目录执行 `JINDI_E2E_PORT=4175 npm run test:e2e`。CI 和显式指定端口的测试各自启动预览服务。
+在 `frontend` 目录运行 Playwright 时，可指定端口来使用独立的预览服务。默认模式会在启动预览前构建前端。运行过 `npm run build` 后，可以用下列命令直接预览这份产物。CI 也使用此模式。此模式会启动自己的预览服务，端口已占用时测试报错。
+
+macOS shell
+
+```sh
+JINDI_E2E_PREBUILT=1 JINDI_E2E_PORT=4175 npm run test:e2e
+```
+
+Windows PowerShell
+
+```powershell
+$env:JINDI_E2E_PREBUILT = '1'
+$env:JINDI_E2E_PORT = '4175'
+npm run test:e2e
+```
 
 Windows 打包会分别启动安装版和便携版，检查 WebView2 页面就绪、应用版本、amd64 运行架构和正常关闭，再从退出后的 SQLite 副本核对完整性和当前业务结构。在 Windows 桌面会话也可单独运行同一检查，脚本为被测程序创建临时配置目录。未提供 `-NativeProbe` 时，脚本会用 Go 构建探针。
 
