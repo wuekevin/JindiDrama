@@ -15,6 +15,7 @@ interface HistoryRow {
   durationMs: number
   percent: number
   watchedAt: number
+  episodeCountAtWatch?: number
 }
 
 interface LibraryChanges {
@@ -210,13 +211,14 @@ function fromHistoryRow(row: HistoryRow): HistoryEntry {
   return {
     dramaId: row.dramaId, episode: row.episode, percent: row.percent, watchedAt: row.watchedAt,
     positionSec: row.positionMs / 1000, durationSec: row.durationMs / 1000,
+    ...(row.episodeCountAtWatch === undefined ? {} : { episodeCountAtWatch: row.episodeCountAtWatch }),
   }
 }
 
 function sameHistoryRow(previous: HistoryRow | undefined, next: HistoryRow): boolean {
   return previous !== undefined && previous.episode === next.episode && previous.percent === next.percent
     && previous.watchedAt === next.watchedAt && previous.positionMs === next.positionMs
-    && previous.durationMs === next.durationMs
+    && previous.durationMs === next.durationMs && previous.episodeCountAtWatch === next.episodeCountAtWatch
 }
 
 function toHistoryRow(entry: HistoryEntry): HistoryRow {
@@ -224,6 +226,7 @@ function toHistoryRow(entry: HistoryEntry): HistoryRow {
     dramaId: entry.dramaId, episode: entry.episode, percent: entry.percent, watchedAt: entry.watchedAt,
     positionMs: Math.round((entry.positionSec ?? 0) * 1000),
     durationMs: Math.round((entry.durationSec ?? 0) * 1000),
+    ...(entry.episodeCountAtWatch === undefined ? {} : { episodeCountAtWatch: entry.episodeCountAtWatch }),
   }
 }
 

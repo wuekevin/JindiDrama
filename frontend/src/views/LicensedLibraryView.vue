@@ -53,6 +53,7 @@ const { active: pipActive, busy: pipBusy, toggle: togglePip } = usePictureInPict
 type EpisodeRef = { id: string; index: number }
 type AutoNext = EpisodeRef & { previous: number; muted: boolean; volume: number }
 type ActivePlayback = EpisodeRef & {
+  episodeCountAtWatch: number
   checkpoint?: HistoryEntry
   pending: boolean
   autoStart?: AutoNext
@@ -60,6 +61,7 @@ type ActivePlayback = EpisodeRef & {
   atEnd: boolean
   restoring?: number
   dirty: boolean
+  hasPlayed: boolean
   last: number
   lastPercent: number
 }
@@ -106,21 +108,25 @@ function openEpisode(index: number) {
 function saveProgress(force = false) {
   const media = video.value
   if (!playback?.dirty || playback.pending || playback.restoring !== undefined || !media || !Number.isFinite(media.duration) || media.duration <= 0) return
+  if (!playback.hasPlayed && playback.checkpoint && playback.checkpoint.percent >= 100) return
   const position = media.currentTime
   if (!Number.isFinite(position) || (!force && Math.abs(position - playback.last) < 5)) return
-  const progress = media.ended ? 100 : Math.min(99, Math.floor(position * 100 / media.duration))
+  const progress = media.ended && playback.hasPlayed ? 100 : Math.min(99, Math.floor(position * 100 / media.duration))
   if (position === playback.last && progress === playback.lastPercent) return
   playback.last = position
   playback.lastPercent = progress
-  library.record(playback.id, playback.index, progress, position, media.duration)
+  const previousEpisodeCount = playback.checkpoint?.episode === playback.index
+    ? playback.checkpoint.episodeCountAtWatch : undefined
+  const episodeCountAtWatch = playback.hasPlayed ? playback.episodeCountAtWatch : previousEpisodeCount
+  library.record(playback.id, playback.index, progress, position, media.duration, episodeCountAtWatch)
 }
 
 function currentMedia(event: Event) {
   return event.currentTarget === video.value
 }
 
-function resumePosition(checkpoint: HistoryEntry | undefined, duration: number) {
-  if (!checkpoint) return 0
+function resumePosition(checkpoint: HistoryEntry | undefined, episode: number, duration: number) {
+  if (!checkpoint || checkpoint.episode !== episode || checkpoint.percent >= 100) return 0
   const previousPosition = checkpoint.positionSec ?? 0
   const previousDuration = checkpoint.durationSec ?? 0
   if (Number.isFinite(previousPosition) && previousPosition > 0) {
@@ -151,7 +157,7 @@ function seekablePosition(ranges: TimeRanges, position: number, currentTime: num
 function restoreProgress(event: Event) {
   const media = video.value
   if (!media || !currentMedia(event) || !playback?.pending || !Number.isFinite(media.duration) || media.duration <= 0) return
-  const position = playback.atEnd ? media.duration : resumePosition(playback.checkpoint, media.duration)
+  const position = playback.atEnd ? media.duration : resumePosition(playback.checkpoint, playback.index, media.duration)
   const ranges = media.seekable
   if (position > 0 && !ranges.length && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
   playback.pending = false
@@ -221,9 +227,10 @@ function onMediaFailure(event: Event) {
   }
 }
 
-function onPlay(event: Event) {
+function onPlaying(event: Event) {
   if (currentMedia(event) && playback) {
     playback.dirty = true
+    playback.hasPlayed = true
     playback.atEnd = false
     playbackNotice.value = ''
   }
@@ -344,8 +351,8 @@ watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttem
       reportPlaybackFailure('本集暂无可播放媒体', autoStart)
       return
     }
-    const saved = library.history.find((item) => item.dramaId === drama.id && item.episode === index && item.percent < 100)
-    playback = { id: drama.id, index, checkpoint: saved, pending: true, autoStart, startOnOpen: autoplay === '1', atEnd, dirty: false, last: -1, lastPercent: -1 }
+    const saved = library.history.find((item) => item.dramaId === drama.id)
+    playback = { id: drama.id, index, episodeCountAtWatch: drama.episodeCount, checkpoint: saved, pending: true, autoStart, startOnOpen: autoplay === '1', atEnd, dirty: false, hasPlayed: false, last: -1, lastPercent: -1 }
     sources.value = ticket.sources
   } catch {
     if (active) reportPlaybackFailure('无法读取本集媒体', autoStart)
@@ -409,7 +416,7 @@ watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttem
         </div>
         <video
           v-if="sources.length" ref="video" :key="sources[0].src + ':' + playbackAttempt" controls controlslist="nodownload" playsinline preload="auto"
-          @loadedmetadata="restoreProgress" @canplay="onPlayable" @play="onPlay"
+          @loadedmetadata="restoreProgress" @canplay="onPlayable" @playing="onPlaying"
           @timeupdate="onTimeUpdate" @seeked="onSeeked" @pause="onPause" @ended="onEnded" @ratechange="onRateChange"
           :aria-label="`第 ${episode} 集播放器`" @error="onMediaFailure"
         >

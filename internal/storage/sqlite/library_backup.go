@@ -25,7 +25,7 @@ func (s *Store) RestoreMissingLibrary(backup *LibraryState) (*LibraryRestore, er
 	if err != nil {
 		return nil, err
 	}
-	history, err := readHistory(tx)
+	history, err := readHistory(tx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -55,7 +55,7 @@ func (s *Store) RestoreMissingLibrary(backup *LibraryState) (*LibraryRestore, er
 		known[entry.DramaID] = true
 		count++
 	}
-	history, err = readHistory(tx)
+	history, err = readHistory(tx, true)
 	if err != nil {
 		return nil, err
 	}
@@ -141,13 +141,13 @@ WHERE "schema"='main' AND type='table' AND name IN ('schema_migrations','favorit
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	state.History, err = readHistory(tx)
+	state.History, err = readHistory(tx, version >= historyEpisodeCountVersion)
 	if err != nil {
 		return nil, err
 	}
 	for _, entry := range state.History {
 		if strings.TrimSpace(entry.DramaID) == "" || entry.Episode < 1 || entry.PositionMs < 0 ||
-			entry.DurationMs < 0 || entry.Percent < 0 || entry.Percent > 100 || entry.WatchedAt < 0 {
+			entry.DurationMs < 0 || entry.Percent < 0 || entry.Percent > 100 || entry.WatchedAt < 0 || !validHistoryEpisodeCount(entry) {
 			return nil, errors.New("备份包含无效的观看历史")
 		}
 	}

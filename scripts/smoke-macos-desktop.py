@@ -116,6 +116,7 @@ def verify_database(profile):
                 "local_danmaku", "library_receipts"} <= {row[0] for row in tables}:
             raise RuntimeError("App did not initialize the tables required by the current desktop features")
         connection.execute("SELECT sort_order FROM favorites LIMIT 1").fetchall()
+        connection.execute("SELECT episode_count_at_watch FROM history LIMIT 1").fetchall()
 
 
 def run_app(executable, helper, profile, output, timeout, version, arch):

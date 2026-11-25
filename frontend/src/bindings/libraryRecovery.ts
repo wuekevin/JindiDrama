@@ -32,7 +32,9 @@ const validID = (id: unknown): id is string => typeof id === 'string' && id.leng
 const validIDs = (ids: unknown): ids is string[] => Array.isArray(ids) && ids.every(validID)
 function isHistoryEntry(entry: HistoryEntry): boolean {
   return Boolean(entry && validID(entry.dramaId) && Number.isInteger(entry.episode) && entry.episode > 0
-    && Number.isFinite(entry.percent) && Number.isFinite(entry.watchedAt))
+    && Number.isFinite(entry.percent) && Number.isFinite(entry.watchedAt)
+    && (entry.episodeCountAtWatch === undefined
+      || (Number.isSafeInteger(entry.episodeCountAtWatch) && entry.episodeCountAtWatch >= entry.episode)))
 }
 
 function validReceipt(receipt: LibraryReceipt | undefined): receipt is LibraryReceipt {
@@ -78,6 +80,7 @@ function sameHistoryEntry(previous: HistoryEntry | undefined, next: HistoryEntry
   return previous !== undefined && previous.episode === next.episode && previous.percent === next.percent
     && previous.watchedAt === next.watchedAt && (previous.positionSec ?? 0) === (next.positionSec ?? 0)
     && (previous.durationSec ?? 0) === (next.durationSec ?? 0)
+    && previous.episodeCountAtWatch === next.episodeCountAtWatch
 }
 
 export function captureLibraryIntent(previous: LibraryCache | undefined, next: LibraryState): LibraryIntent {

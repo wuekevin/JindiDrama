@@ -88,7 +88,7 @@ func (s *Store) WriteLibraryChanges(changes LibraryChanges) (*LibraryState, erro
 		if err != nil {
 			return nil, err
 		}
-		history, err := readHistory(tx)
+		history, err := readHistory(tx, true)
 		if err != nil {
 			return nil, err
 		}

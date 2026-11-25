@@ -7,6 +7,6 @@ export interface Drama {
   heat: number // 万
   isNewToday?: boolean
 }
-export interface HistoryEntry { dramaId: string; episode: number; percent: number; watchedAt: number; positionSec?: number; durationSec?: number }
+export interface HistoryEntry { dramaId: string; episode: number; percent: number; watchedAt: number; positionSec?: number; durationSec?: number; episodeCountAtWatch?: number }
 export interface Banner { id: string; dramaId: string; title: string; subtitle: string; tags: string[]; hue: number; hue2: number; seed: number }
 export interface LoadState<T> { status: 'idle'|'loading'|'ready'|'empty'|'error'; data: T; error?: string }

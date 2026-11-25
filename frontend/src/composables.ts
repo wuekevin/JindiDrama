@@ -1,5 +1,13 @@
 import type { Drama, HistoryEntry } from '@/types'
-export const isFinished = (h: HistoryEntry | undefined, d: Drama) => !!h && d.episodeCount > 0 && h.episode >= d.episodeCount && h.percent >= 100
+export function watchStatus(history: HistoryEntry | undefined, drama: Drama): 'unwatched' | 'watching' | 'done' | 'unknown' {
+  if (!history) return 'unwatched'
+  if (history.percent < 100) return 'watching'
+  if (drama.kind === '本地片库') {
+    if (history.episodeCountAtWatch === undefined) return 'unknown'
+    return history.episode === history.episodeCountAtWatch ? 'done' : 'watching'
+  }
+  return drama.episodeCount > 0 && history.episode >= drama.episodeCount ? 'done' : 'watching'
+}
 export function dayBucket(ts: number, now = Date.now()): 'today' | 'yesterday' | 'earlier' {
   const s = new Date(now); s.setHours(0, 0, 0, 0); const t0 = s.getTime()
   return ts >= t0 ? 'today' : ts >= t0 - 86400e3 ? 'yesterday' : 'earlier'

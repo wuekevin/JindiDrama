@@ -91,6 +91,31 @@ describe('wails bridge', () => {
     expect(JSON.parse(localStorage.getItem(LS.library)!)).toEqual({ history: [], favorites: ['d9'] })
   })
 
+  it('replays the local catalog count after a failed count-only write', async () => {
+    const row = { dramaId: 'local-d9', episode: 1, positionMs: 1000, durationMs: 1000, percent: 100, watchedAt: 5 }
+    const updated = { ...row, episodeCountAtWatch: 2 }
+    const SaveLibraryChanges = vi.fn().mockRejectedValueOnce(new Error('locked'))
+      .mockResolvedValueOnce({ favorites: ['d9'], history: [updated] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      vi.stubGlobal('go', { app: { App: { ...fake, History: async () => [row], SaveLibraryChanges } } })
+      await prime()
+      const { history, favorites } = readLibraryCache()!
+      expect(history[0]).not.toHaveProperty('episodeCountAtWatch')
+      await saveLibrary([{ ...history[0], episodeCountAtWatch: 2 }], favorites)
+      expect(readLibraryCache()?.pending).toBe(true)
+      expect(SaveLibraryChanges).toHaveBeenNthCalledWith(1, expect.objectContaining({ history: [updated], receipt }))
+      await prime()
+      expect(SaveLibraryChanges).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        history: [updated], receipt, readBack: true,
+      }))
+      expect(readLibraryCache()).toMatchObject({ history: [{ episodeCountAtWatch: 2 }] })
+      expect(readLibraryCache()).not.toHaveProperty('pending')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('keeps the latest pending write when the same state is queued twice', async () => {
     let finishFirst!: () => void
     let finishSecond!: () => void

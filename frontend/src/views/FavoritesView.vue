@@ -6,7 +6,7 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
-import { isFinished } from '@/composables'
+import { watchStatus } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama } from '@/types'
 
@@ -14,15 +14,17 @@ const router = useRouter(); const lib = useLibraryStore(); const toast = useToas
 const tab = ref<'all'|'watching'|'done'|'manju'|'real'>('all'); const sort = ref<'recent'|'update'|'heat'>('recent'); const genre = ref(''); const view = ref<'grid'|'list'>('grid')
 const batch = ref(false); const picked = ref<Set<string>>(new Set()); const confirm = ref(false); const menu = ref('')
 const { savedCard } = useLicensedCatalog()
+const watchLabels = { done: '已看过', watching: '在追', unwatched: '未看', unknown: '完成状态未知' }
 const rows = computed(() => lib.favorites.map((id) => savedCard(id)).filter((d): d is Drama => !!d).map((d) => {
-  const h = lib.history.find((x) => x.dramaId === d.id); const done = isFinished(h, d)
+  const h = lib.history.find((x) => x.dramaId === d.id)
+  const status = watchStatus(h, d)
   const issue = savedLocalMediaIssue(d, h?.episode ?? 1)
-  return { d, h, done, issue, status: done ? '已看过' : h ? '在追' : '未看', pct: h?.percent ?? 0, last: h?.episode }
+  return { d, issue, status, pct: h?.percent ?? 0, last: h?.episode }
 }))
-const counts = computed(() => ({ all: rows.value.length, watching: rows.value.filter((r) => r.status === '在追').length, done: rows.value.filter((r) => r.done).length, manju: rows.value.filter((r) => r.d.kind === '漫剧').length, real: rows.value.filter((r) => r.d.kind === '真人剧').length }))
+const counts = computed(() => ({ all: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, manju: rows.value.filter((r) => r.d.kind === '漫剧').length, real: rows.value.filter((r) => r.d.kind === '真人剧').length }))
 const genres = computed(() => [...new Set(rows.value.flatMap((r) => r.d.tags))])
 const list = computed(() => {
-  let l = rows.value.filter((r) => tab.value === 'all' || (tab.value === 'watching' && r.status === '在追') || (tab.value === 'done' && r.done) || (tab.value === 'manju' && r.d.kind === '漫剧') || (tab.value === 'real' && r.d.kind === '真人剧'))
+  let l = rows.value.filter((r) => tab.value === 'all' || (tab.value === 'watching' && r.status === 'watching') || (tab.value === 'done' && r.status === 'done') || (tab.value === 'manju' && r.d.kind === '漫剧') || (tab.value === 'real' && r.d.kind === '真人剧'))
   if (genre.value) l = l.filter((r) => r.d.tags.includes(genre.value))
   if (sort.value === 'update') l = [...l].sort((a, b) => b.d.updatedTo - a.d.updatedTo); if (sort.value === 'heat') l = [...l].sort((a, b) => b.d.heat - a.d.heat)
   return l
@@ -56,7 +58,7 @@ const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(
     <EmptyState v-if="!list.length" :title="counts.all ? '该分类下暂无收藏' : '还没有收藏任何短剧'" :hint="counts.all ? '换个分类或筛选条件试试' : '去推荐页发现喜欢的剧吧'"><BaseButton variant="outline" @click="router.push('/home')">去逛逛</BaseButton></EmptyState>
     <ul v-else class="grid" :class="view" data-testid="fav-grid">
       <li v-for="r in list" :key="r.d.id" class="card" :class="{ sel: picked.has(r.d.id) }" data-testid="fav-card">
-        <button class="cover" :aria-label="`${r.d.title}`" @click="open(r)"><img :src="r.d.cover" :alt="r.d.title" /><span class="st"><Play v-if="r.status === '在追'" :size="11" /><CircleCheck v-else-if="r.done" :size="11" />{{ r.d.kind === '真人剧' && r.status === '未看' ? '真人剧' : r.status }}</span>
+        <button class="cover" :aria-label="`${r.d.title}`" @click="open(r)"><img :src="r.d.cover" :alt="r.d.title" /><span class="st"><Play v-if="r.status === 'watching'" :size="11" /><CircleCheck v-else-if="r.status === 'done'" :size="11" />{{ r.d.kind === '真人剧' && r.status === 'unwatched' ? '真人剧' : watchLabels[r.status] }}</span>
           <i v-if="batch" class="ck" :class="{ on: picked.has(r.d.id) }" role="checkbox" :aria-checked="picked.has(r.d.id)" /></button>
         <div class="info"><div class="tt"><h3 class="clamp-2">{{ r.d.title }}</h3><div class="mw"><button aria-label="更多" data-testid="fav-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn"><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li><li><button data-testid="menu-unfav" @click="unfav(r.d.id)">取消收藏</button></li></ul></div></div>
           <p v-if="r.issue !== 'library'" class="mt">{{ r.d.tags.slice(0, 2).join(' · ') }} · {{ r.d.episodeCount }}集</p>

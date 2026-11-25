@@ -6,27 +6,29 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute, savedLocalMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
-import { isFinished, dayBucket, agoText, watchHours } from '@/composables'
+import { watchStatus, dayBucket, agoText, watchHours } from '@/composables'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama, HistoryEntry } from '@/types'
 
 const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
 const { savedCard } = useLicensedCatalog()
-type Row = { h: HistoryEntry; d: Drama; done: boolean; bucket: 'today'|'yesterday'|'earlier'; issue: ReturnType<typeof savedLocalMediaIssue> }
-const rows = computed<Row[]>(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt).flatMap((h) => { const d = savedCard(h.dramaId); return d ? [{ h, d, bucket: dayBucket(h.watchedAt), done: isFinished(h, d), issue: savedLocalMediaIssue(d, h.episode) }] : [] }))
+type Row = { h: HistoryEntry; d: Drama; status: ReturnType<typeof watchStatus>; bucket: 'today'|'yesterday'|'earlier'; issue: ReturnType<typeof savedLocalMediaIssue> }
+const rows = computed<Row[]>(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt).flatMap((h) => { const d = savedCard(h.dramaId); return d ? [{ h, d, bucket: dayBucket(h.watchedAt), status: watchStatus(h, d), issue: savedLocalMediaIssue(d, h.episode) }] : [] }))
 const status = ref<'all'|'watching'|'done'>('all'); const genre = ref('全部'); const when = ref('全部'); const view = ref<'grid'|'list'>('grid'); const sort = ref<'time'|'progress'>('time')
 const batch = ref(false); const picked = ref<Set<string>>(new Set()); const confirmClear = ref(false); const confirmBatch = ref(false); const menu = ref(''); const fopen = ref(true)
 const GENRES = ['全部', '甜宠', '逆袭', '都市', '古装', '玄幻', '悬疑', '其他']; const WHEN = ['全部', '今天', '昨天', '近7天', '近30天', '更早']
 const days = (ts: number) => Math.floor((Date.now() - ts) / 86400e3)
-const filtered = computed(() => rows.value.filter((r) => (status.value === 'all' || (status.value === 'done') === r.done)
+const filtered = computed(() => rows.value.filter((r) => (status.value === 'all' || status.value === r.status)
   && (genre.value === '全部' || (genre.value === '其他' ? !GENRES.slice(1, 7).some((g) => r.d.tags.includes(g)) : r.d.tags.includes(genre.value)))
   && (when.value === '全部' || (when.value === '今天' && r.bucket === 'today') || (when.value === '昨天' && r.bucket === 'yesterday') || (when.value === '近7天' && days(r.h.watchedAt) <= 7) || (when.value === '近30天' && days(r.h.watchedAt) <= 30) || (when.value === '更早' && r.bucket === 'earlier'))))
 const ordered = computed(() => (sort.value === 'progress' ? [...filtered.value].sort((a, b) => b.h.percent - a.h.percent) : filtered.value))
 const groups = computed(() => [{ k: 'today', l: '今天' }, { k: 'yesterday', l: '昨天' }, { k: 'earlier', l: '更早' }].map((g) => ({ ...g, items: ordered.value.filter((r) => r.bucket === g.k) })).filter((g) => g.items.length))
-const stat = computed(() => ({ total: rows.value.length, watching: rows.value.filter((r) => !r.done).length, done: rows.value.filter((r) => r.done).length, hours: watchHours(lib.history) }))
+const stat = computed(() => ({ total: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, hours: watchHours(lib.history) }))
 const latest = computed(() => {
   const playable = rows.value.filter((r) => !r.issue)
-  return playable.find((r) => !r.done) ?? playable[0]
+  return playable.find((r) => r.status === 'watching' && r.h.percent < 100)
+    ?? playable.find((r) => r.status === 'watching')
+    ?? playable[0]
 })
 const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
 const resume = (r: Row) => router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.h.episode))
@@ -53,11 +55,11 @@ const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
           <li v-for="r in g.items" :key="r.d.id" class="it" :class="{ sel: picked.has(r.d.id) }" data-testid="history-item">
             <button v-if="batch || g.k === 'earlier'" class="cb" :class="{ on: picked.has(r.d.id) }" role="checkbox" :aria-checked="picked.has(r.d.id)" :aria-label="`选择${r.d.title}`" data-testid="hcheck" @click="pick(r.d.id)"><Check v-if="picked.has(r.d.id)" :size="12" /></button>
             <img :src="r.d.cover" :alt="r.d.title" @click="rowClick(r)" />
-            <div class="b"><h3 class="clamp-2">{{ r.d.title }}</h3><p class="tg">{{ r.issue === 'library' ? '本地媒体不可用' : r.issue === 'episode' ? '该分集不可用' : r.d.tags.slice(0, 2).join(' · ') }}</p><p class="ep">第{{ r.h.episode }}集<template v-if="r.issue !== 'library'"> / 共{{ r.d.episodeCount }}集</template></p>
+            <div class="b"><h3 class="clamp-2">{{ r.d.title }}</h3><p class="tg">{{ r.issue === 'library' ? '本地媒体不可用' : r.issue === 'episode' ? '该分集不可用' : r.status === 'unknown' ? '完成状态未知' : r.d.tags.slice(0, 2).join(' · ') }}<span v-if="r.issue && r.status === 'unknown'"> · 完成状态未知</span><span v-else-if="r.issue && r.status === 'done'"> · 已看完</span></p><p class="ep">第{{ r.h.episode }}集<template v-if="r.h.episodeCountAtWatch && r.h.episodeCountAtWatch !== r.d.episodeCount"> / 当时共{{ r.h.episodeCountAtWatch }}集</template><template v-else-if="!r.issue"> / 共{{ r.d.episodeCount }}集</template></p>
               <div class="pg"><ProgressBar :value="r.h.percent" /><i>{{ r.h.percent }}%</i></div></div>
             <div class="ac"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.h.watchedAt) }}</span>
               <button v-if="r.issue" class="done" @click="resume(r)">{{ r.issue === 'library' ? '查看片库' : '选集' }}</button>
-              <button v-else-if="r.done" class="done" data-testid="done-badge" @click="resume(r)">已看完<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />继续观看</button>
+              <button v-else-if="r.status === 'done'" class="done" data-testid="done-badge" @click="resume(r)">已看完<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />继续观看</button>
               <div class="mw"><button aria-label="更多" data-testid="h-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn"><li><button data-testid="h-delete" @click="delOne(r.d.id)">删除此记录</button></li><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li></ul></div></div>
           </li></ul></section>
       <div v-if="batch" class="batchbar" data-testid="batchbar"><span>已选 {{ picked.size }} 条</span><BaseButton :disabled="!picked.size" data-testid="batch-delete" @click="confirmBatch = true">删除选中</BaseButton><BaseButton variant="ghost" @click="toggleBatch">取消</BaseButton></div>

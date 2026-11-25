@@ -281,7 +281,65 @@ test('licensed export requires opt-in and sends the selected episode to desktop'
 
 type HistoryRow = {
   dramaId: string; episode: number; positionMs: number; durationMs: number; percent: number; watchedAt: number
+  episodeCountAtWatch?: number
 }
+
+test('licensed watch categories keep their recorded catalog context', async ({ page }, testInfo) => {
+  await page.addInitScript((entry) => {
+    const short = { ...entry, episodeCount: 1, updatedTo: 1 }
+    const knownFinished = 'local-completed'
+    const legacy = 'local-legacy'
+    const inProgress = 'local-in-progress'
+    const episodeFinished = 'local-episode-finished'
+    const completedEpisode = { episode: 2, positionMs: 24000, durationMs: 24000, percent: 100, watchedAt: Date.now() }
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => true,
+      Favorites: async () => [entry.id, knownFinished, legacy],
+      History: async () => [
+        { ...completedEpisode, dramaId: entry.id, episodeCountAtWatch: 3 },
+        { ...completedEpisode, dramaId: knownFinished, episodeCountAtWatch: 2 },
+        { ...completedEpisode, dramaId: legacy, episode: 1 },
+        { ...completedEpisode, dramaId: episodeFinished, episode: 1, episodeCountAtWatch: 3 },
+        { ...completedEpisode, dramaId: inProgress, episode: 1, positionMs: 12000, percent: 50,
+          watchedAt: completedEpisode.watchedAt - 1000, episodeCountAtWatch: 1 },
+      ],
+      SearchHistory: async () => [],
+      GetSetting: async () => '',
+      LicensedCatalog: async () => [short, { ...short, id: legacy, title: '旧版观看记录' },
+        { ...short, id: inProgress, title: '可继续观看' }, { ...short, id: episodeFinished, title: '已看完一集' }],
+    } } } })
+  }, drama)
+  await page.goto('/#/favorites')
+  const cards = page.getByTestId('fav-card')
+  await expect(cards).toHaveCount(3)
+  await expect(cards.filter({ hasText: '旧版观看记录' })).toContainText('完成状态未知')
+  await page.screenshot({ path: testInfo.outputPath('licensed-completion-favorites.png') })
+  await page.getByTestId('ftab-watching').click()
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first()).toContainText('南风纪事')
+  await expect(cards.first()).toContainText('上次观看的分集不可用')
+  await page.getByTestId('ftab-done').click()
+  await expect(cards).toHaveCount(1)
+  await expect(cards.first()).toContainText('本地短剧 · completed')
+  await expect(cards.first()).toContainText('本地媒体不可用')
+
+  await page.goto('/#/history')
+  const rows = page.getByTestId('history-item')
+  await expect(rows).toHaveCount(5)
+  await expect(rows.filter({ hasText: '旧版观看记录' })).toContainText('完成状态未知')
+  await expect(page.getByTestId('stat-watching')).toHaveText('3')
+  await expect(page.getByTestId('stat-done')).toHaveText('1')
+  await page.screenshot({ path: testInfo.outputPath('licensed-completion-history.png') })
+  await page.getByTestId('htab-watching').click()
+  await expect(rows).toHaveCount(3)
+  await expect(rows.filter({ hasText: '南风纪事' })).toContainText('第2集 / 当时共3集')
+  await page.getByTestId('htab-done').click()
+  await expect(rows).toHaveCount(1)
+  await expect(rows.first()).toContainText('本地短剧 · completed')
+  await expect(rows.first()).toContainText('本地媒体不可用 · 已看完')
+  await page.getByTestId('continue-latest').click()
+  await expect(page).toHaveURL(/licensed\?id=local-in-progress&ep=1$/)
+})
 
 test('licensed favorites and exact resume survive a restart and work from global pages', async ({ page }, testInfo) => {
   const saved = { favorites: [] as string[], history: [] as HistoryRow[] }
@@ -331,7 +389,8 @@ test('licensed favorites and exact resume survive a restart and work from global
   await video.evaluate((media: HTMLVideoElement) => { media.currentTime = 8 })
   await expect(video).toHaveJSProperty('currentTime', 8)
   await expect.poll(() => saved.history[0]?.positionMs).toBe(8000)
-  expect(saved.history[0]?.episode).toBe(2)
+  expect(saved.history[0]).toMatchObject({ episode: 2 })
+  expect(saved.history[0]).not.toHaveProperty('episodeCountAtWatch')
   await page.getByRole('button', { name: '第 1 集' }).click()
   await expect(video).toHaveAttribute('aria-label', '第 1 集播放器')
   await expect(video).toHaveJSProperty('currentTime', 0)
@@ -362,6 +421,8 @@ test('licensed favorites and exact resume survive a restart and work from global
   expect(saved.history[0]?.percent).toBeLessThan(100)
   await video.evaluate((media: HTMLVideoElement) => { media.muted = true; return media.play() })
   await expect.poll(() => saved.history[0]?.percent).toBe(100)
+  const completedBookmark = { ...saved.history[0] }
+  expect(completedBookmark.episodeCountAtWatch).toBe(2)
   await page.goto('/#/history')
   await expect(historyPage.getByTestId('done-badge')).toBeVisible()
   await historyPage.getByTestId('done-badge').click()
@@ -455,6 +516,20 @@ test('licensed favorites and exact resume survive a restart and work from global
   await historyPage.getByTestId('resume').click()
   await expect(page).toHaveURL(/licensed\?id=local-landscape&ep=2$/)
   await expect(video).toHaveJSProperty('currentTime', 12)
+
+  saved.history[0] = completedBookmark
+  episodeCount = 3
+  await page.reload()
+  await expect(video).toHaveJSProperty('currentTime', 0)
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.seekable.length)).toBeGreaterThan(0)
+  await video.evaluate((media: HTMLVideoElement) => { media.currentTime = 6 })
+  await expect(video).toHaveJSProperty('seeking', false)
+  expect(saved.history[0]).toEqual(completedBookmark)
+  await finishLicensedEpisode(video)
+  await expect.poll(() => saved.history[0]).toMatchObject({ episode: 2, percent: 100, episodeCountAtWatch: 3 })
+  await page.goto('/#/history')
+  await expect(historyPage.getByTestId('stat-watching')).toHaveText('1')
+  await expect(historyPage.getByTestId('stat-done')).toHaveText('0')
 
   episodeCount = 0
   await page.goto('/#/favorites')

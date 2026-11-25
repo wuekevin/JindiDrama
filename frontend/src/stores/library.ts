@@ -20,8 +20,8 @@ export const useLibraryStore = defineStore('library', () => {
   }, { deep: true })
   const isFav = (id: string) => favorites.value.includes(id)
   function toggleFav(id: string) { favorites.value = isFav(id) ? favorites.value.filter((x) => x !== id) : [id, ...favorites.value]; return isFav(id) }
-  function record(dramaId: string, episode: number, percent: number, positionSec?: number, durationSec?: number) {
-    history.value = [{ dramaId, episode, percent, watchedAt: Date.now(), positionSec, durationSec }, ...history.value.filter((h) => h.dramaId !== dramaId)]
+  function record(dramaId: string, episode: number, percent: number, positionSec?: number, durationSec?: number, episodeCountAtWatch?: number) {
+    history.value = [{ dramaId, episode, percent, watchedAt: Date.now(), positionSec, durationSec, episodeCountAtWatch }, ...history.value.filter((h) => h.dramaId !== dramaId)]
   }
   const removeFavs = (ids: string[]) => { favorites.value = favorites.value.filter((x) => !ids.includes(x)) }
   const addFav = (id: string) => { if (!isFav(id)) favorites.value = [id, ...favorites.value] }

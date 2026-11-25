@@ -45,9 +45,14 @@ UPDATE favorites SET created_at = (SELECT legacy_order FROM ordered WHERE ordere
 WHERE id IN (SELECT id FROM ordered);
 ALTER TABLE favorites DROP COLUMN sort_order;`},
 	{6, `CREATE TABLE library_receipts(writer TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision > 0));`, `DROP TABLE library_receipts;`},
+	{historyEpisodeCountVersion, `ALTER TABLE history ADD COLUMN episode_count_at_watch INTEGER NOT NULL DEFAULT 0
+CHECK (episode_count_at_watch = 0 OR episode_count_at_watch BETWEEN episode AND 9007199254740991);`, `ALTER TABLE history DROP COLUMN episode_count_at_watch;`},
 }
 
-const scope = "local"
+const (
+	scope                      = "local"
+	historyEpisodeCountVersion = 7
+)
 
 type Store struct {
 	db   *sql.DB
@@ -55,12 +60,13 @@ type Store struct {
 }
 
 type HistoryEntry struct {
-	DramaID    string `json:"dramaId"`
-	Episode    int    `json:"episode"`
-	PositionMs int64  `json:"positionMs"`
-	DurationMs int64  `json:"durationMs"`
-	Percent    int    `json:"percent"`
-	WatchedAt  int64  `json:"watchedAt"`
+	DramaID             string `json:"dramaId"`
+	Episode             int    `json:"episode"`
+	PositionMs          int64  `json:"positionMs"`
+	DurationMs          int64  `json:"durationMs"`
+	Percent             int    `json:"percent"`
+	WatchedAt           int64  `json:"watchedAt"`
+	EpisodeCountAtWatch int    `json:"episodeCountAtWatch,omitempty"`
 }
 
 func Open(path string) (*Store, error) {
@@ -296,13 +302,18 @@ func setFavorites(tx *sql.Tx, ids []string) error {
 
 // ---- 历史 ----
 func (s *Store) History() ([]HistoryEntry, error) {
-	return readHistory(s.db)
+	return readHistory(s.db, true)
 }
 
 func readHistory(db interface {
 	Query(string, ...any) (*sql.Rows, error)
-}) ([]HistoryEntry, error) {
-	rows, err := db.Query(`SELECT drama_id, episode, position_ms, duration_ms, percent, watched_at FROM history WHERE account_scope=? ORDER BY watched_at DESC`, scope)
+}, includeEpisodeCount bool) ([]HistoryEntry, error) {
+	episodeCount := "0"
+	if includeEpisodeCount {
+		episodeCount = "episode_count_at_watch"
+	}
+	rows, err := db.Query(`SELECT drama_id, episode, position_ms, duration_ms, percent, watched_at, `+episodeCount+`
+FROM history WHERE account_scope=? ORDER BY watched_at DESC`, scope)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +321,7 @@ func readHistory(db interface {
 	out := []HistoryEntry{}
 	for rows.Next() {
 		var h HistoryEntry
-		if err := rows.Scan(&h.DramaID, &h.Episode, &h.PositionMs, &h.DurationMs, &h.Percent, &h.WatchedAt); err != nil {
+		if err := rows.Scan(&h.DramaID, &h.Episode, &h.PositionMs, &h.DurationMs, &h.Percent, &h.WatchedAt, &h.EpisodeCountAtWatch); err != nil {
 			return nil, err
 		}
 		out = append(out, h)
@@ -331,7 +342,7 @@ func recordHistory(db historyWriter, h HistoryEntry) error {
 }
 
 func writeHistory(db historyWriter, h HistoryEntry, preserveNewer bool) error {
-	if h.DramaID == "" || h.Episode < 1 {
+	if h.DramaID == "" || h.Episode < 1 || !validHistoryEpisodeCount(h) {
 		return errors.New("无效的历史记录")
 	}
 	if h.Percent < 0 {
@@ -343,11 +354,16 @@ func writeHistory(db historyWriter, h HistoryEntry, preserveNewer bool) error {
 	if h.WatchedAt == 0 {
 		h.WatchedAt = time.Now().UnixMilli()
 	}
-	_, err := db.Exec(`INSERT INTO history(account_scope, drama_id, episode, position_ms, duration_ms, percent, watched_at) VALUES(?,?,?,?,?,?,?)
-ON CONFLICT(account_scope, drama_id) DO UPDATE SET episode=excluded.episode, position_ms=excluded.position_ms, duration_ms=excluded.duration_ms, percent=excluded.percent, watched_at=excluded.watched_at
+	_, err := db.Exec(`INSERT INTO history(account_scope, drama_id, episode, position_ms, duration_ms, percent, watched_at, episode_count_at_watch) VALUES(?,?,?,?,?,?,?,?)
+ON CONFLICT(account_scope, drama_id) DO UPDATE SET episode=excluded.episode, position_ms=excluded.position_ms, duration_ms=excluded.duration_ms, percent=excluded.percent, watched_at=excluded.watched_at,
+episode_count_at_watch=excluded.episode_count_at_watch
 WHERE NOT ? OR excluded.watched_at >= history.watched_at`,
-		scope, h.DramaID, h.Episode, h.PositionMs, h.DurationMs, h.Percent, h.WatchedAt, preserveNewer)
+		scope, h.DramaID, h.Episode, h.PositionMs, h.DurationMs, h.Percent, h.WatchedAt, h.EpisodeCountAtWatch, preserveNewer)
 	return err
+}
+
+func validHistoryEpisodeCount(h HistoryEntry) bool {
+	return h.EpisodeCountAtWatch == 0 || (h.EpisodeCountAtWatch >= h.Episode && int64(h.EpisodeCountAtWatch) <= 1<<53-1)
 }
 
 func (s *Store) RemoveHistory(ids []string) error {
