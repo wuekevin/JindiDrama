@@ -381,6 +381,105 @@ test.describe('10 应用设置', () => {
   })
   test('left nav scrolls to section', async ({ page }) => { await page.getByTestId('snav-about').click(); await expect(page.getByTestId('snav-about')).toHaveClass(/on/) })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=page-settings]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/10-${w}x${h}.png` }) })
+  test('settings controls remain reachable in a scaled minimum window', async ({ page }, testInfo) => {
+    const settings = page.getByTestId('page-settings')
+    const firstPanel = settings.locator('#sec-general')
+    const secondPanel = settings.locator('#sec-playback')
+    expect((await firstPanel.boundingBox())!.y).toBeCloseTo((await secondPanel.boundingBox())!.y, 0)
+    await page.evaluate(() => document.fonts.ready)
+    await page.screenshot({ path: testInfo.outputPath('settings-default.png') })
+
+    await page.setViewportSize({ width: 1280, height: 860 })
+    for (const dpi of [150, 220]) {
+      if (dpi === 150) {
+        await page.getByTestId('dpi').press('End')
+        await expect(settings).toHaveClass(/\bstacked\b/)
+      } else {
+        await page.evaluate((dpi) => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi })), dpi)
+        await page.reload()
+      }
+      await expect(page.locator('html')).toHaveCSS('--user-zoom', String(dpi / 100))
+      await expect(settings).toHaveClass(dpi === 150 ? /\bstacked\b/ : /\bcompact\b/)
+      const clipped = await settings.evaluate((root) => {
+        const main = root.closest('main')!.getBoundingClientRect()
+        return [...root.querySelectorAll('section button, section select, section input')].flatMap((control) => {
+          const box = control.getBoundingClientRect()
+          const panel = control.closest('section')!.getBoundingClientRect()
+          return box.width && (box.left < Math.max(main.left, panel.left) - 1 ||
+            box.right > Math.min(main.right, panel.right) + 1)
+            ? [control.getAttribute('data-testid') || control.textContent?.trim()]
+            : []
+        })
+      })
+      expect(clipped).toEqual([])
+      const heading = settings.getByRole('heading', { name: '设置', exact: true })
+      expect(await heading.evaluate((element) => {
+        const title = document.createRange()
+        title.selectNodeContents(element)
+        return title.getClientRects().length
+      })).toBe(1)
+      if (dpi === 220) await page.screenshot({ path: testInfo.outputPath('settings-compact-categories.png') })
+      const looks = page.getByTestId('snav-look')
+      const theme = page.getByTestId('theme-light')
+      if (dpi === 220) {
+        await looks.press('Enter')
+        await expect(settings.getByRole('heading', { name: '外观' })).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(page.getByTestId('theme-dark')).toBeFocused()
+        await page.keyboard.press('Tab')
+        await expect(theme).toBeFocused()
+        await page.keyboard.press('Enter')
+      } else {
+        await looks.click()
+        await expect(theme).toBeInViewport()
+        await theme.click()
+      }
+      await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+      await page.screenshot({ path: testInfo.outputPath(`settings-${dpi}.png`) })
+
+      const check = page.getByTestId('check-update')
+      await page.getByTestId('snav-about').click()
+      await expect(check).toBeInViewport({ ratio: 0.98 })
+      await check.click()
+      await expect(page.getByTestId('toast')).toContainText('预览模式不支持检查更新')
+    }
+  })
+  for (const { layout, width, dpi, packageAvailable } of [
+    { layout: 'compact', width: 1280, dpi: 220, packageAvailable: true },
+    { layout: 'wide', width: 1800, dpi: 150, packageAvailable: true },
+    { layout: 'wide', width: 1800, dpi: 150, packageAvailable: false },
+  ]) {
+    test(`long desktop release link fits the ${layout} settings panel (package ${packageAvailable})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 860 })
+      await page.addInitScript(({ dpi, packageAvailable }) => {
+        localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi }))
+        const latest = 'v1.2.3+' + 'x'.repeat(118)
+        const url = 'https://github.com/wuekevin/JindiDrama/releases/tag/' + latest
+        Object.assign(window, { go: { app: { App: {
+          StorageReady: async () => false,
+          AppVersion: async () => 'v0.1.0',
+          CheckUpdate: async () => ({
+            current: 'v0.1.0', latest, channel: 'stable', hasUpdate: true, url,
+            downloadName: packageAvailable ? 'JindiDrama-macos-universal.zip' : undefined,
+          }),
+          DownloadUpdate: async () => false,
+          CancelUpdateDownload: async () => {},
+          OpenReleasePage: async () => { sessionStorage.setItem('opened-release', url) },
+        } } } })
+      }, { dpi, packageAvailable })
+      await page.reload()
+      await expect(page.getByTestId('page-settings')).toHaveClass(new RegExp(`\\b${layout}\\b`))
+      await page.getByTestId('snav-about').click()
+      await page.getByTestId('check-update').click()
+      const link = page.getByTestId('open-release')
+      const panel = page.locator('#sec-about')
+      await expect(link).toContainText('v1.2.3+')
+      const [control, bounds] = await Promise.all([link.boundingBox(), panel.boundingBox()])
+      expect(control!.x + control!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1)
+      await link.click()
+      expect(await page.evaluate(() => sessionStorage.getItem('opened-release'))).toContain('/releases/tag/v1.2.3+')
+    })
+  }
   test('saved light theme is applied on startup without opening settings', async ({ page }) => {
     await page.getByTestId('theme-light').click()
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDesktopUpdates } from '@/stores/desktopUpdates'
 import { Settings, CirclePlay, MessageSquareText, Download, Keyboard, Palette, Info, Check, FolderOpen, Trash2, RefreshCw, ChevronRight, FileText, CircleHelp, Sun, Moon, ChevronDown, RotateCcw } from 'lucide-vue-next'
@@ -23,7 +23,21 @@ const showReleaseNotes = ref(false)
 const releaseNotesButton = ref<HTMLButtonElement>()
 const releaseNotesContent = ref<HTMLElement>()
 const active = ref('general'); const root = ref<HTMLElement>()
-function go(k: string) { active.value = k; root.value?.querySelector(`#sec-${k}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }
+const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
+let layoutObserver: ResizeObserver | undefined
+function go(k: string) {
+  active.value = k
+  const panel = root.value?.querySelector(`#sec-${k}`)
+  if (!panel) return
+  if (layout.value === 'compact') {
+    const heading = panel.querySelector('h2')
+    if (heading) {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
+  }
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
 const desktop = hasBridge()
 const closeAction = computed(() => st.closeAction === CLOSE_TO_TRAY && !a.canCloseToTray ? '最小化到任务栏' : st.closeAction)
 const closeActionPending = ref(false)
@@ -278,12 +292,24 @@ async function viewRelease() {
 const checkLabel = computed(() => lastCheck.value
   ? `上次成功检查：${new Date(lastCheck.value).toLocaleString('zh-CN')}`
   : '尚未检查更新')
-onMounted(() => { a.applyTheme(); refreshCache() })
+onMounted(() => {
+  a.applyTheme()
+  refreshCache()
+  if (root.value) {
+    // Measure layout width in CSS pixels. WebKit container queries can use a different width under page zoom.
+    layoutObserver = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width
+      layout.value = width <= 650 ? 'compact' : width <= 1040 ? 'stacked' : 'wide'
+    })
+    layoutObserver.observe(root.value)
+  }
+})
+onBeforeUnmount(() => layoutObserver?.disconnect())
 const pct = (v: number, lo: number, hi: number) => `${((v - lo) / (hi - lo)) * 100}%`
 const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '中', 大: '大' } as Record<string, string>
 </script>
 <template>
-  <div ref="root" class="set" data-testid="page-settings" @keydown.capture="onKey">
+  <div ref="root" class="set" :class="layout" data-testid="page-settings" @keydown.capture="onKey">
     <header><Settings :size="40" :stroke-width="1.6" color="#ff6a4d" /><h1>设置</h1><p>个性化你的观剧体验，让追剧更顺畅、更舒适</p></header>
     <div class="cols">
       <nav class="nav" aria-label="设置分类"><button v-for="s in sections" :key="s.k" :class="{ on: active === s.k }" :data-testid="`snav-${s.k}`" @click="go(s.k)"><component :is="s.i" :size="20" />{{ s.l }}<ChevronRight v-if="active === s.k" :size="16" class="ch" /></button></nav>
@@ -385,7 +411,58 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
 .rs { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 400; color: var(--c-text-2); }
 .k { min-height: 32px; } .kbd { margin-left: auto; min-width: 86px; height: 26px; padding: 0 10px; border-radius: 6px; background: rgba(255,255,255,.1); border: 1px solid var(--c-border-strong); font-size: 12.5px; &.rec { border-color: var(--c-accent); color: var(--c-accent-2); } }
 .tm { align-items: flex-start; padding-top: 8px; white-space: nowrap; } .themes { display: flex; gap: 12px; margin-left: auto; button { width: 118px; text-align: center; span { position: relative; display: grid; place-items: center; height: 60px; border-radius: 10px; border: 2px solid transparent; background: linear-gradient(135deg, #7a2420, #2a1214); gap: 4px; } &.light span { background: linear-gradient(135deg, #fbe1d8, #f3b7a4); } &.system span { background: linear-gradient(90deg, #6a6f7a 50%, #3a3e48 50%); grid-auto-flow: column; } &.on span { border-color: var(--c-accent); } .ck { position: absolute; right: 4px; bottom: 4px; background: var(--c-accent); border-radius: 50%; padding: 2px; } em { display: block; width: auto; margin-top: 6px; font-size: 12.5px; text-align: center; } } }
-.ab { display: flex; flex-wrap: wrap; align-items: center; gap: 36px; padding: 12px 8px 14px; .ver { flex: 1 1 170px; small { color: var(--c-text-2); font-size: 13px; } b { display: block; font-size: 30px; margin: 4px 0; em { display: inline-block; width: auto; margin-left: 10px; padding: 1px 10px; border-radius: 6px; background: rgba(70,194,138,.2); color: var(--c-success); font-size: 12px; font-weight: 400; vertical-align: middle; } } } .update-actions { display: flex; flex-direction: column; gap: 10px; } .chk { display: inline-flex; align-items: center; justify-content: center; gap: 10px; height: 52px; padding: 0 56px; border-radius: 26px; background: var(--g-accent); font-size: 18px; font-weight: 700; &:disabled { opacity: .7; } &.download-update { padding-inline: 24px; } } .links { display: flex; flex-direction: column; gap: 14px; button { display: flex; align-items: center; gap: 8px; font-size: 14.5px; svg:last-child { margin-left: 6px; } } } }
+.ab {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 36px;
+  padding: 12px 8px 14px;
+
+  .ver {
+    flex: 1 1 170px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    small { color: var(--c-text-2); font-size: 13px; }
+    b { display: block; font-size: 30px; margin: 4px 0;
+      em { display: inline-block; width: auto; margin-left: 10px; padding: 1px 10px; border-radius: 6px; background: rgba(70,194,138,.2); color: var(--c-success); font-size: 12px; font-weight: 400; vertical-align: middle; }
+    }
+  }
+  .update-actions { display: flex; flex-direction: column; gap: 10px; min-width: 0; max-width: 100%; }
+  .chk {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 56px;
+    border-radius: 26px;
+    background: var(--g-accent);
+    overflow-wrap: anywhere;
+    font-size: 18px;
+    font-weight: 700;
+    svg { flex: none; }
+    &:disabled { opacity: .7; }
+    &.download-update { padding-inline: 24px; }
+  }
+  .links {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+    max-width: 100%;
+    button {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      text-align: left;
+      font-size: 14.5px;
+      svg { flex: none; }
+      svg:last-child { margin-left: 6px; }
+    }
+  }
+}
 .backup-path { overflow-wrap: anywhere; }
 .release-notes-text { max-height: 52vh; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; h4 { margin-bottom: 8px; } }
 .spin { animation: sp 1s linear infinite; } @keyframes sp { to { transform: rotate(360deg); } }
@@ -394,5 +471,37 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
   flex-direction: row;
   flex-wrap: wrap;
   gap: 14px 28px;
+}
+
+
+.set.stacked, .set.compact {
+  .panels { grid-template-columns: minmax(0, 1fr); }
+  .r { flex-wrap: wrap; padding-block: 6px; }
+  .r > .sel, .r > .radios, .r > .path, .themes { max-width: 100%; }
+  .sel select { max-width: 100%; min-width: min(190px, 100%); }
+  .sel.wide select { min-width: min(240px, 100%); }
+  .path input { min-width: 0; }
+  .path button { flex: none; }
+  .radios, .themes { flex-wrap: wrap; }
+  .tm { white-space: normal; }
+  .ab { gap: 16px; .chk { padding-inline: 24px; } }
+}
+
+.set.compact {
+  & > header {
+    height: auto;
+    min-height: 78px;
+    padding-block: 12px;
+    h1, > svg { flex: none; }
+    p { margin-left: 0; }
+  }
+  .cols { flex-direction: column; align-items: stretch; }
+  .nav {
+    position: static;
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    button { flex: 1 0 128px; padding-inline: 10px; gap: 8px; }
+  }
 }
 </style>
