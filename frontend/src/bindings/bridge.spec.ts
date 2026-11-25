@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, saveLibrary, saveSetting, LS, cacheStats, cacheSetLimit, logEvent } from './index'
+import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, saveSetting, LS, cacheStats, cacheSetLimit, logEvent } from './index'
 const calls: string[] = []
 const receipt = { writer: expect.stringMatching(/^[a-f0-9]{32}$/), revision: expect.any(Number) }
 const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], History: async () => [{ dramaId: 'd9', episode: 7, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: 5 }], SearchHistory: async () => ['替嫁'],
@@ -79,6 +79,124 @@ describe('wails bridge', () => {
     }
     expect(await saveLibrary([], ['d1'])).toBe('saved')
   })
+  it('retries the same receipt and preserves edits arriving while recovery is blocked', async () => {
+    let finishRetry!: (state: { favorites: string[]; history: [] }) => void
+    const held = new Promise<{ favorites: string[]; history: [] }>((resolve) => { finishRetry = resolve })
+    let databaseFavorites = ['d9']
+    const BackupNow = vi.fn().mockResolvedValue('/backup.db')
+    const SaveLibraryChanges = vi.fn()
+      .mockRejectedValueOnce(new Error('locked'))
+      .mockReturnValueOnce(held)
+      .mockResolvedValueOnce({ favorites: ['d3', 'd2', 'd9', 'd1', 'd4'], history: [] })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('go', { app: { App: {
+      ...fake, SaveLibraryChanges, BackupNow, Favorites: async () => databaseFavorites, History: async () => [],
+    } } })
+    try {
+      await prime()
+      expect(await saveLibrary([], ['d2', 'd9'])).toBe('pending')
+      const firstReceipt = SaveLibraryChanges.mock.calls[0][0].receipt
+      databaseFavorites = ['d9', 'd1']
+      const retry = retryLibrarySave([], ['d2', 'd9'])
+      await vi.waitFor(() => expect(SaveLibraryChanges).toHaveBeenCalledTimes(2))
+      expect(SaveLibraryChanges.mock.calls[1][0]).toMatchObject({ receipt: firstReceipt, addedFavorites: ['d2'] })
+      const onReconciled = vi.fn()
+      const second = saveLibrary([], ['d3', 'd2', 'd9'], { onReconciled })
+      const backup = backupNow()
+      expect(BackupNow).not.toHaveBeenCalled()
+      finishRetry({ favorites: ['d2', 'd9', 'd1'], history: [] })
+      expect(await retry).toBe('pending')
+      expect(await second).toBe('saved')
+      expect(onReconciled).toHaveBeenCalledOnce()
+      expect(readLibraryCache()?.favorites).toEqual(['d3', 'd2', 'd9', 'd1', 'd4'])
+      expect(await backup).toBe('/backup.db')
+      expect(BackupNow).toHaveBeenCalledOnce()
+      expect(SaveLibraryChanges.mock.calls[2][0]).toMatchObject({
+        addedFavorites: ['d3'], removedFavorites: [], preserveNewerHistory: true,
+      })
+    } finally {
+      finishRetry({ favorites: [], history: [] })
+      warn.mockRestore()
+    }
+  })
+
+  it('keeps a record unseen by the user when an acknowledgement is followed by another edit', async () => {
+    const locked = new Error('locked')
+    let failSecond!: (reason: Error) => void
+    const paused = new Promise<never>((_, reject) => { failSecond = reject })
+    const view = (favorites: string[]) => ({ favorites, history: [] })
+    const SaveLibraryChanges = vi.fn()
+      .mockRejectedValueOnce(locked)
+      .mockResolvedValueOnce(view(['d2', 'd9']))
+      .mockRejectedValueOnce(locked)
+      .mockResolvedValueOnce(view(['d3', 'd2', 'd9', 'd1']))
+      .mockReturnValueOnce(paused)
+      .mockResolvedValueOnce(view(['d4', 'd3', 'd2', 'd9', 'd1']))
+      .mockResolvedValueOnce(view(['d5', 'd4', 'd3', 'd2', 'd9', 'd1']))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges, History: async () => [] } } })
+    try {
+      await prime()
+      await saveLibrary([], ['d2', 'd9'])
+      expect(await retryLibrarySave([], ['d2', 'd9'])).toBe('saved')
+      await saveLibrary([], ['d3', 'd2', 'd9'])
+      const second = saveLibrary([], ['d4', 'd3', 'd2', 'd9'])
+      await vi.waitFor(() => expect(SaveLibraryChanges).toHaveBeenCalledTimes(5))
+      expect(readLibraryCache()?.favorites).toContain('d1')
+      const newest = saveLibrary([], ['d5', 'd4', 'd3', 'd2', 'd9'], {
+        before: view(['d4', 'd3', 'd2', 'd9']),
+      })
+      expect(readLibraryCache()?.favorites).toContain('d1')
+      expect(readLibraryCache()?.batches?.at(-1)?.intent?.removedFavorites).toEqual([])
+      failSecond(locked)
+      expect(await second).toBe('pending')
+      expect(await newest).toBe('saved')
+      expect(SaveLibraryChanges.mock.lastCall?.[0]).toMatchObject({ addedFavorites: ['d5'], removedFavorites: [] })
+      expect(readLibraryCache()?.favorites).toContain('d1')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('recognizes a durable journal containing an already acknowledged prefix', async () => {
+    const locked = new Error('locked')
+    const SaveLibraryChanges = vi.fn()
+      .mockRejectedValueOnce(locked).mockRejectedValueOnce(locked)
+      .mockResolvedValueOnce({ favorites: ['d2'], history: [] }).mockRejectedValueOnce(locked)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges, History: async () => [] } } })
+    await prime()
+    try {
+      await saveLibrary([], ['d2'])
+      await saveLibrary([], ['d3', 'd2'])
+      const saved = localStorage.getItem(LS.library)
+      const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+        throw new DOMException('full', 'QuotaExceededError')
+      })
+      try {
+        expect(await retryLibrarySave([], ['d3', 'd2'])).toBe('pending')
+        expect(readLibraryCache()?.batches).toHaveLength(1)
+        expect(localStorage.getItem(LS.library)).toBe(saved)
+      } finally {
+        storage.mockRestore()
+      }
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not discard an offline journal when retry still cannot open desktop storage', async () => {
+    const StorageReady = vi.fn().mockResolvedValue(false)
+    const SaveLibraryChanges = vi.fn()
+    vi.stubGlobal('go', { app: { App: { ...fake, StorageReady, SaveLibraryChanges } } })
+    await prime()
+    expect(await saveLibrary([], ['d1'])).toBe('pending')
+    const savedJournal = localStorage.getItem(LS.library)
+    expect(await retryLibrarySave([], ['d1'])).toBe('pending')
+    expect(localStorage.getItem(LS.library)).toBe(savedJournal)
+    expect(SaveLibraryChanges).not.toHaveBeenCalled()
+  })
+
   it('prime hydrates localStorage from SQLite data', async () => {
     ;(window as any).go = { app: { App: fake } }; expect(hasBridge()).toBe(true); await prime()
     const lib = JSON.parse(localStorage.getItem(LS.library)!); expect(lib.favorites).toEqual(['d9']); expect(lib.history[0]).toMatchObject({ dramaId: 'd9', episode: 7, positionSec: 12 }); expect(localStorage.getItem(LS.app)).toBe('{"theme":"light"}')

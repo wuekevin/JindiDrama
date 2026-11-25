@@ -289,7 +289,8 @@ test('desktop history warns when neither store has confirmed the edit', async ({
     Object.assign(window, { go: { app: { App: {
       StorageReady: async () => true,
       Favorites: async () => [],
-      History: async () => existing,
+      History: async () => existing.filter(({ dramaId }) =>
+        !(JSON.parse(sessionStorage.getItem('jd-test-confirmed-removals') ?? '[]') as string[]).includes(dramaId)),
       SearchHistory: async () => [],
       GetSetting: async () => '',
       SaveLibraryChanges: async ({ removed }: { removed: string[] }) => {
@@ -310,9 +311,74 @@ test('desktop history warns when neither store has confirmed the edit', async ({
   await page.screenshot({ path: testInfo.outputPath('history-save-unconfirmed.png') })
 
   await page.evaluate(() => sessionStorage.setItem('jd-test-sqlite-writable', '1'))
+  await warning.getByRole('button', { name: '重试保存' }).click()
+  await expect(warning).toHaveCount(0)
+  const removed = JSON.parse((await page.evaluate(() => sessionStorage.getItem('jd-test-confirmed-removals')))!)
+  expect(removed).toHaveLength(1)
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
+  await page.reload()
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
+})
+
+test('forces a single retry at a time and keeps a failed retry available', async ({ page }) => {
+  await page.addInitScript(() => {
+    const existing = [{ dramaId: 'd1', episode: 32, positionMs: 1000, durationMs: 5000, percent: 20, watchedAt: Date.now() }]
+    let writes = 0
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => true, Favorites: async () => [],
+      History: async () => existing,
+      SearchHistory: async () => [], GetSetting: async () => '',
+      SaveLibraryChanges: async () => {
+        sessionStorage.setItem('jd-retry-count', String(++writes))
+        if (writes === 2) {
+          await new Promise<void>((resolve) => window.addEventListener('jd-finish-retry', () => resolve(), { once: true }))
+        }
+        if (writes < 3) throw new Error('locked')
+        return { favorites: [], history: [] }
+      },
+    } } } })
+  })
+  await page.goto('/#/history')
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
   await page.getByTestId('clear-all').click()
   await page.getByTestId('modal-confirm').click()
-  await expect(warning).toHaveCount(0)
-  await expect(page.getByTestId('toast').filter({ hasText: '观看历史已清空' })).toBeVisible()
-  expect(JSON.parse((await page.evaluate(() => sessionStorage.getItem('jd-test-confirmed-removals')))!).sort()).toEqual(['d1', 'd9'])
+  const retry = page.getByRole('button', { name: '重试保存' })
+  await retry.click()
+  const inProgress = page.getByRole('button', { name: '正在重试…' })
+  await expect(inProgress).toBeDisabled()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('jd-retry-count'))).toBe('2')
+  await page.evaluate(() => window.dispatchEvent(new Event('jd-finish-retry')))
+  await expect(retry).toBeEnabled()
+  await retry.click()
+  await expect(retry).toHaveCount(0)
+  await expect(page.getByTestId('history-item')).toHaveCount(0)
+  expect(await page.evaluate(() => sessionStorage.getItem('jd-retry-count'))).toBe('3')
+})
+
+test('browser preview can retry local history storage in place', async ({ page }) => {
+  await page.addInitScript(() => {
+    const key = 'jindi.library.v1'
+    if (!sessionStorage.getItem('jd-history-seeded')) {
+      localStorage.setItem(key, JSON.stringify({
+        favorites: [], history: [{ dramaId: 'd1', episode: 32, percent: 20, watchedAt: Date.now() }],
+      }))
+      sessionStorage.setItem('jd-history-seeded', '1')
+    }
+    const original = Storage.prototype.setItem
+    Storage.prototype.setItem = function (name: string, value: string) {
+      if (name === key && !sessionStorage.getItem('jd-unblock-storage')) throw new DOMException('full', 'QuotaExceededError')
+      original.call(this, name, value)
+    }
+  })
+  await page.goto('/#/history')
+  await expect(page.getByTestId('history-item')).toHaveCount(1)
+  await page.getByTestId('clear-all').click()
+  await page.getByTestId('modal-confirm').click()
+  const retry = page.getByRole('button', { name: '重试保存' })
+  await expect(retry).toBeVisible()
+  await page.evaluate(() => sessionStorage.setItem('jd-unblock-storage', '1'))
+  await retry.click()
+  await expect(retry).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByTestId('history-item')).toHaveCount(0)
 })

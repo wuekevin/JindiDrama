@@ -186,6 +186,12 @@ interface LibrarySnapshot {
 
 let persistedLibrary: LibrarySnapshot | undefined
 let libraryWrites = Promise.resolve()
+
+function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
+  const queued = libraryWrites.then(task)
+  libraryWrites = queued.then(() => undefined, () => undefined)
+  return queued
+}
 function queuedWindowWrites() {
   return [windowCloseSettingWrite, libraryWrites, localCommentWrites, ...episodeLikeWrites.values()]
 }
@@ -267,7 +273,7 @@ export const canRestoreLibraryBackup = () => typeof api()?.RestoreLibraryBackup 
 
 export function restoreLibraryBackup() {
   const app = api()
-  const restore = libraryWrites.then(async () => {
+  return queueLibraryTask(async () => {
     if (!persistedLibrary || readLibraryCache()?.pending) {
       throw new Error('本地收藏或历史尚未写入。请重新启动应用，等补写完成后再恢复。')
     }
@@ -280,8 +286,6 @@ export function restoreLibraryBackup() {
     storeLibraryCache(batches.length ? { ...state, pending: true, batches } : state)
     return { state, favoritesAdded: result.favoritesAdded, historyAdded: result.historyAdded }
   })
-  libraryWrites = restore.then(() => undefined, () => undefined)
-  return restore
 }
 
 function pendingBatches(previous: LibraryCache | undefined): LibraryBatch[] {
@@ -320,29 +324,40 @@ function batchChanges(batch: LibraryBatch, database: LibraryState): LibraryChang
   return changes
 }
 
-async function recoverLibrary(a: GoApp, database: LibraryState, pending: LibraryCache) {
+async function recoverLibrary(a: GoApp, database: LibraryState, pending: LibraryCache): Promise<LibrarySaveResult> {
   const batches = pendingBatches(pending)
+  // Assign a receipt to a legacy journal before any new edits can append.
+  if (!pending.batches) storeLibraryCache({ ...pending, batches })
+  offlineDraft = undefined
   let confirmed = 0
   let current = database
   try {
     for (const batch of batches) {
       const snapshot = await a.SaveLibraryChanges(batchChanges(batch, current))
       confirmed++
-      // The packaged bridge returns the authoritative transaction snapshot.
-      // Older bridge implementations can refresh after the acknowledgement.
-      current = snapshot ? hydrateLibraryState(snapshot) : await readDesktopLibrary(a)
+      if (snapshot) {
+        current = hydrateLibraryState(snapshot)
+      } else {
+        // Older bridges acknowledge without a snapshot. Keep the known
+        // mutation if the subsequent refresh fails.
+        current = replayLibraryBatch(current, batch)
+        current = await readDesktopLibrary(a)
+      }
     }
-    storeLibraryCache(current)
   } catch (e) {
     warn(e)
-    const remaining = batches.slice(confirmed)
-    if (remaining.length) {
-      storeLibraryCache({ ...remaining.reduce(replayLibraryBatch, current), pending: true, batches: remaining })
-    } else {
-      storeLibraryCache(current)
-    }
     persistedLibrary = undefined
   }
+
+  // Saves arriving during recovery append to the same journal and wait for
+  // the rebased database. Remove only the confirmed prefix.
+  const remaining = (readLibraryCache()?.batches ?? batches).slice(confirmed)
+  if (!remaining.length) {
+    storeLibraryCache(current)
+    return 'saved'
+  }
+  const state = remaining.reduce(replayLibraryBatch, current)
+  return storeLibraryCache({ ...state, pending: true, batches: remaining }) ? 'pending' : currentJournalResult()
 }
 
 /** Hydrate desktop storage before stores are created. */
@@ -404,44 +419,102 @@ function journalResult(persisted: boolean): LibrarySaveResult {
   return persisted ? 'pending' : 'unsaved'
 }
 
+function matchesDurableJournal(current: LibraryCache, durable: LibraryCache): boolean {
+  if (!current.batches) return JSON.stringify(current) === JSON.stringify(durable)
+  if (durable.batches) {
+    const savedBatches = new Set(durable.batches.map((batch) => JSON.stringify(batch)))
+    return current.batches.every((batch) => savedBatches.has(JSON.stringify(batch)))
+  }
+  // A legacy journal may still be durable if writing its new receipt failed.
+  const [legacy] = current.batches
+  return current.batches.length === 1 && legacy.legacy === true &&
+    JSON.stringify(legacy.intent ?? legacy.snapshot) ===
+      JSON.stringify(durable.intent ?? { history: durable.history, favorites: durable.favorites })
+}
+
+function currentJournalResult(): LibrarySaveResult {
+  const current = readLibraryCache()
+  if (!current?.pending) return 'saved'
+  try {
+    const durable = parseLibraryCache(localStorage.getItem(LS.library))
+    return journalResult(durable?.pending === true && matchesDurableJournal(current, durable))
+  } catch {
+    return 'unsaved'
+  }
+}
+
+export function retryLibrarySave(history: HistoryEntry[], favorites: string[]): Promise<LibrarySaveResult> {
+  const a = api()
+  if (!a) return saveLibrary(history, favorites)
+
+  return queueLibraryTask<LibrarySaveResult>(async () => {
+    if (!readLibraryCache()?.pending) return 'saved'
+    try {
+      if (!(await a.StorageReady())) return currentJournalResult()
+      const database = await readDesktopLibrary(a)
+      rebaseLibraryWrites = true
+      const pending = readLibraryCache()
+      return pending?.pending ? await recoverLibrary(a, database, pending) : 'saved'
+    } catch (e) {
+      warn(e)
+      return currentJournalResult()
+    }
+  })
+}
+
+interface LibrarySaveEvents {
+  before?: LibraryState
+  onUnconfirmed?: () => void
+  onReconciled?: () => void
+}
+
 export async function saveLibrary(
-  history: HistoryEntry[], favorites: string[], onUnconfirmed?: () => void,
+  history: HistoryEntry[], favorites: string[], events?: LibrarySaveEvents,
 ): Promise<LibrarySaveResult> {
   const next = { history, favorites }
   const a = api()
   if (!a) return storeLibraryCache(next) ? 'saved' : 'unsaved'
 
   const previous = readLibraryCache()
+  // A queued SQLite acknowledgement can add records before the view renders
+  // them. Only a change to the view the user edited can express deletion.
+  const before = events?.before ?? previous
+  const stage = (batch: LibraryBatch) => rebaseLibraryWrites && previous && events?.before
+    ? replayLibraryBatch(previous, batch) : next
   const batches = pendingBatches(previous)
   const last = batches.at(-1)
   if (!persistedLibrary && last?.intent && offlineDraft
       && last.receipt.writer === offlineDraft.writer && last.receipt.revision === offlineDraft.revision) {
-    const intent = captureLibraryIntent({ ...previous!, intent: last.intent }, next)
+    const batch = { receipt: offlineDraft, intent: captureLibraryIntent({ ...before!, intent: last.intent }, next) }
     return journalResult(storeLibraryCache({
-      ...next, pending: true, batches: [...batches.slice(0, -1), { receipt: offlineDraft, intent }],
+      ...stage(batch), pending: true, batches: [...batches.slice(0, -1), batch],
     }))
   }
 
   const receipt = nextLibraryReceipt()
-  const intent = captureLibraryIntent(previous && { history: previous.history, favorites: previous.favorites }, next)
-  const journal = [...batches, { receipt, intent }]
+  const batch = { receipt, intent: captureLibraryIntent(before, next) }
+  const journal = [...batches, batch]
+  const state = stage(batch)
   if (!persistedLibrary) {
     offlineDraft = receipt
-    return journalResult(storeLibraryCache({ ...next, pending: true, batches: journal }))
+    return journalResult(storeLibraryCache({ ...state, pending: true, batches: journal }))
   }
-  return queueLibraryWrite(a, next, journal, receipt, onUnconfirmed)
+  return queueLibraryWrite(a, state, journal, receipt, events)
 }
 
-function acknowledgeLibraryWrite(receipt: LibraryReceipt) {
+function acknowledgeLibraryWrite(receipt: LibraryReceipt, database?: LibraryState) {
   const latest = readLibraryCache()
   if (!latest?.batches) return
   const remaining = latest.batches.filter(({ receipt: batch }) =>
     batch.writer !== receipt.writer || batch.revision > receipt.revision)
-  const { favorites, history } = latest
-  storeLibraryCache(remaining.length ? { favorites, history, pending: true, batches: remaining } : { favorites, history })
+  const state = database ? remaining.reduce(replayLibraryBatch, database)
+    : { favorites: latest.favorites, history: latest.history }
+  storeLibraryCache(remaining.length ? { ...state, pending: true, batches: remaining } : state)
 }
 
-async function writeRebasedLibrary(a: GoApp, previous: LibrarySnapshot, receipt: LibraryReceipt) {
+async function writeRebasedLibrary(
+  a: GoApp, previous: LibrarySnapshot, receipt: LibraryReceipt, onReconciled?: () => void,
+) {
   let database = { favorites: previous.favorites, history: [...previous.history.values()].map(fromHistoryRow) }
   const batches = readLibraryCache()?.batches ?? []
   for (const batch of batches) {
@@ -453,7 +526,8 @@ async function writeRebasedLibrary(a: GoApp, previous: LibrarySnapshot, receipt:
       database = replayLibraryBatch(database, batch)
       persistedLibrary = { favorites: database.favorites, history: new Map(database.history.map((entry) => [entry.dramaId, toHistoryRow(entry)])) }
     }
-    acknowledgeLibraryWrite(batch.receipt)
+    acknowledgeLibraryWrite(batch.receipt, database)
+    onReconciled?.()
   }
 }
 
@@ -468,20 +542,20 @@ function queuedJournalResult(receipt: LibraryReceipt): LibrarySaveResult {
 }
 
 function queueLibraryWrite(
-  a: GoApp, state: LibraryState, batches: LibraryBatch[], receipt: LibraryReceipt, onUnconfirmed?: () => void,
+  a: GoApp, state: LibraryState, batches: LibraryBatch[], receipt: LibraryReceipt, events?: LibrarySaveEvents,
 ) {
   const committed = { history: state.history, favorites: state.favorites }
-  if (!storeLibraryCache({ ...committed, pending: true, batches })) onUnconfirmed?.()
+  if (!storeLibraryCache({ ...committed, pending: true, batches })) events?.onUnconfirmed?.()
   const pendingRows = state.history.map(toHistoryRow)
   const pendingFavorites = [...state.favorites]
-  const write = libraryWrites.then<LibrarySaveResult>(async () => {
+  return queueLibraryTask<LibrarySaveResult>(async () => {
     const previous = persistedLibrary
     if (!previous) return queuedJournalResult(receipt)
     try {
       // Replay edits queued during restore in receipt order against the new
       // snapshot. An earlier failed edit stays pending until SQLite accepts it.
       if (rebaseLibraryWrites) {
-        await writeRebasedLibrary(a, previous, receipt)
+        await writeRebasedLibrary(a, previous, receipt, events?.onReconciled)
         return 'saved'
       }
       const next = { favorites: pendingFavorites, history: new Map(pendingRows.map((row) => [row.dramaId, row])) }
@@ -500,8 +574,6 @@ function queueLibraryWrite(
       return queuedJournalResult(receipt)
     }
   })
-  libraryWrites = write.then(() => undefined)
-  return write
 }
 export function saveSearch(q: string[]) { try { localStorage.setItem(LS.search, JSON.stringify(q)) } catch { /* ignore */ } api()?.SaveSearchHistory(q).catch(warn) }
 export function saveSetting(lsKey: string, value: unknown) {
@@ -518,7 +590,11 @@ export const resetCacheDirectory = () => api()?.ResetCacheDirectory?.()
 /** 故障上报：Go 侧统一脱敏后落盘；浏览器模式仅输出到控制台。 */
 export function logEvent(level: 'info' | 'warn' | 'error', component: string, msg: string) { const a = api(); if (a) a.LogEvent(level, component, msg).catch(warn); else console.debug(`[${level}] ${component}: ${msg}`) }
 export const diagnostics = () => api()?.DiagnosticsTail(100) ?? Promise.resolve([] as string[])
-export const backupNow = () => api()?.BackupNow() ?? Promise.reject(new Error('仅桌面端支持备份'))
+export function backupNow() {
+  const app = api()
+  if (!app) return Promise.reject(new Error('仅桌面端支持备份'))
+  return queueLibraryTask(() => app.BackupNow())
+}
 
 export type UpdateChannel = 'stable' | 'preview'
 export interface UpdateResult { current: string; latest: string; hasUpdate: boolean; url: string; notes: string; noRelease: boolean; preview: boolean; channel: UpdateChannel; downloadName?: string }
