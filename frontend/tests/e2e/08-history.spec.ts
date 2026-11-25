@@ -21,12 +21,87 @@ test.describe('08 观看历史', () => {
   test('batch delete with confirmation', async ({ page }) => {
     await page.getByTestId('batch-toggle').first().click(); await page.getByTestId('hcheck').nth(0).click(); await page.getByTestId('hcheck').nth(1).click(); await expect(page.getByTestId('batchbar')).toContainText('已选 2'); await page.getByTestId('batch-delete').click(); await page.getByTestId('modal-confirm').click(); await expect(page.getByTestId('stat-total')).toHaveText('10')
   })
+  test('list rows keep their columns at the minimum desktop width', async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 1280, height: 860 })
+    await page.getByTestId('view-list').click()
+    const rows = page.locator('.rows [data-testid="history-item"]')
+    async function expectAlignedRows() {
+      await expect(rows).toHaveCount(12)
+      const misaligned = await rows.evaluateAll((items) => items.flatMap((row, index) => {
+        const bounds = row.getBoundingClientRect()
+        const [cover, body, actions, title, episode, progress] = ['img', '.b', '.ac', 'h3', '.ep', '.pg'].map((selector) =>
+          row.querySelector(selector)!.getBoundingClientRect())
+        return cover.right <= body.left + 1 && body.right <= actions.left + 1 &&
+          actions.right <= bounds.right + 1 && cover.top >= bounds.top && actions.bottom <= bounds.bottom + 1 &&
+          title.width > 0 && [episode, progress].every((part) => part.right <= body.right + 1) &&
+          bounds.right <= window.innerWidth + 1
+          ? [] : [index]
+      }))
+      expect(misaligned).toEqual([])
+    }
+    await expectAlignedRows()
+    await expect(page.getByTestId('group-today').getByRole('checkbox')).toHaveCount(3)
+    await expect(page.getByTestId('group-yesterday').getByRole('checkbox')).toHaveCount(4)
+    await page.screenshot({ path: testInfo.outputPath('history-list.png') })
+    await page.getByTestId('group-today').getByRole('checkbox').first().click()
+    await expect(page.getByTestId('batchbar')).toContainText('已选 1 条')
+    await expectAlignedRows()
+
+    await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: 150 })))
+    await page.reload()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'light')
+    await expect(page.locator('html')).toHaveCSS('--user-zoom', '1.5')
+    await page.getByTestId('view-list').click()
+    await expectAlignedRows()
+    await page.getByTestId('group-today').getByRole('checkbox').first().click()
+    const toolbar = page.getByTestId('batchbar')
+    await expect(toolbar.getByText('已选 1 条')).toHaveCSS('color', 'rgb(200, 183, 179)')
+    await expect(toolbar.getByRole('button', { name: '取消批量' })).toHaveCSS('color', 'rgb(246, 236, 233)')
+    await page.screenshot({ path: testInfo.outputPath('history-list-scaled-light.png') })
+  })
   test('clear all needs second confirmation; cancel keeps; confirm empties and persists', async ({ page }) => {
     await page.getByTestId('clear-all').click(); await page.getByTestId('modal').getByRole('button', { name: '取消', exact: true }).click(); await expect(page.getByTestId('stat-total')).toHaveText('12')
     await page.getByTestId('clear-all').click(); await page.getByTestId('modal-confirm').click(); await expect(page.getByTestId('empty')).toBeVisible(); await page.reload(); await expect(page.getByTestId('empty')).toBeVisible()
   })
   test('list view toggle & sort by progress', async ({ page }) => { await page.getByTestId('view-list').click(); await page.getByTestId('sort').click(); await expect(page.getByTestId('sort')).toContainText('按观看进度') })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=history-item]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/08-${w}x${h}.png` }) })
+})
+
+test('an older checkbox starts batch deletion with keyboard confirmation', async ({ page }, testInfo) => {
+  await page.goto('/#/history')
+  const olderCheckbox = page.getByTestId('group-earlier').getByRole('checkbox').first()
+  const label = await olderCheckbox.getAttribute('aria-label')
+  if (!label) throw new Error('History checkbox has no label')
+  const selected = page.getByRole('checkbox', { name: label, exact: true })
+  const toolbar = page.getByTestId('batchbar')
+  const deleteButton = toolbar.getByRole('button', { name: '删除选中' })
+  const dialog = page.getByRole('dialog', { name: '删除所选记录' })
+
+  await selected.press('Space')
+  await expect(selected).toHaveAttribute('aria-checked', 'true')
+  await expect(toolbar).toContainText('已选 1 条')
+  await page.screenshot({ path: testInfo.outputPath('history-batch.png') })
+  await deleteButton.press('Enter')
+  await expect(dialog).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(deleteButton).toBeFocused()
+  await expect(selected).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByTestId('stat-total')).toHaveText('12')
+
+  await page.keyboard.press('Enter')
+  await expect(dialog).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('button', { name: '取消' })).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(dialog.getByRole('button', { name: '确认删除' })).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('heading', { name: '观看历史', exact: true })).toBeFocused()
+  await expect(selected).toHaveCount(0)
+  await expect(toolbar).toHaveCount(0)
+  await expect(page.getByTestId('stat-total')).toHaveText('11')
+  await page.reload()
+  await expect(page.getByTestId('stat-total')).toHaveText('11')
+  await expect(selected).toHaveCount(0)
 })
 
 async function seedCalendarHistory(page: Page, dates: string[]) {
