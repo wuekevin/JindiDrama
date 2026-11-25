@@ -131,8 +131,21 @@ Section "uninstall"
     DeleteRegKey SHELL_CONTEXT "Software\Classes\jindi"
     protocol_done:
 
-    # Remove the install registration only after both executable files were removed.
+    # Only remove the current user's Run command written for this installation.
     SetRegView 64
+    ClearErrors
+    ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "JindiDrama"
+    IfErrors autostart_unreadable
+    StrCmpS $0 '"$INSTDIR\${PRODUCT_EXECUTABLE}"' 0 autostart_done
+    DeleteRegValue HKCU "Software\Microsoft\Windows\CurrentVersion\Run" "JindiDrama"
+    IfErrors 0 autostart_done
+    DetailPrint "无法移除当前用户的金帝短剧开机启动登记。"
+    Goto autostart_done
+    autostart_unreadable:
+    DetailPrint "当前用户的金帝短剧开机启动登记不存在或无法读取。"
+    autostart_done:
+
+    # Remove the install registration only after both executable files were removed.
     !ifdef WAILS_INSTALL_SCOPE
       !if "${WAILS_INSTALL_SCOPE}" == "user"
         DeleteRegKey HKCU "${UNINST_KEY}"

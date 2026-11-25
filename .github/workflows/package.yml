@@ -235,6 +235,15 @@ jobs:
           $nativeProbe = Join-Path $env:RUNNER_TEMP 'jindi-windows-desktop-smoke.exe'
           go build -o $nativeProbe ./cmd/windows-desktop-smoke
           if ($LASTEXITCODE -ne 0) { throw 'Windows desktop smoke probe could not be built' }
+          $startupRegistryPath = 'Software\Microsoft\Windows\CurrentVersion\Run'
+          $preInstallRun = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey($startupRegistryPath)
+          try {
+            if ($preInstallRun -and $preInstallRun.GetValueNames() -contains 'JindiDrama') {
+              throw 'A JindiDrama Run entry already exists on the runner'
+            }
+          } finally {
+            if ($preInstallRun) { $preInstallRun.Dispose() }
+          }
           $install = Start-Process -FilePath $inst -ArgumentList "/S" -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
           $exe = "C:\Program Files\JindiDrama\JindiDrama.exe"
@@ -243,6 +252,8 @@ jobs:
           $fixtureDirectory = $null
           $fixtureFile = $null
           $fixtureHash = $null
+          $runKey = $null
+          $runFixture = $null
           $uninstallWorker = $null
           try {
             if (-not (Test-Path $exe)) { throw "安装目录不符，$exe 不存在" }
@@ -261,6 +272,14 @@ jobs:
             & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Tray -NativeProbe $nativeProbe
+            $runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($startupRegistryPath)
+            if ($runKey.GetValueNames() -contains 'JindiDrama') { throw 'A JindiDrama Run entry already exists on the runner' }
+            $runFixture = '"' + $exe + '"'
+            $runKey.SetValue('JindiDrama', $runFixture, [Microsoft.Win32.RegistryValueKind]::String)
+            $upgrade = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
+            if ($upgrade.ExitCode -ne 0 -or $runKey.GetValue('JindiDrama') -cne $runFixture) {
+              throw 'An in-place upgrade must preserve the current Run entry'
+            }
           } catch {
             $checkFailure = $_
           } finally {
@@ -283,6 +302,9 @@ jobs:
                         -not (Test-Path -LiteralPath $uninstaller)) {
                       throw "Uninstall must report a locked application and preserve the retry entry"
                     }
+                    if ($runKey.GetValue('JindiDrama') -cne $runFixture) {
+                      throw 'A failed uninstall must preserve the original Run entry'
+                    }
                   } finally {
                     $locked.Dispose()
                   }
@@ -302,10 +324,46 @@ jobs:
                 Write-Host "Uninstall preserved the unrelated file and its SHA-256"
               }
               if ($lockCheckFailure) { throw $lockCheckFailure }
+              if ($null -eq $checkFailure) {
+                if ($runKey.GetValueNames() -contains 'JindiDrama') { throw 'The installed application Run entry remains after uninstall' }
+
+                # A second install and uninstall must preserve the same value name for a different executable path.
+                $runFixture = '"' + (Join-Path $env:RUNNER_TEMP ('other-jindi-' + [Guid]::NewGuid().ToString('N') + '.exe')) + '"'
+                $runKey.SetValue('JindiDrama', $runFixture, [Microsoft.Win32.RegistryValueKind]::String)
+                $reinstall = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
+                if ($reinstall.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $exe -PathType Leaf) -or
+                    -not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
+                  throw "Second installation failed with exit code $($reinstall.ExitCode) or missing files"
+                }
+                $installedRun = $runKey.GetValue('JindiDrama')
+                if ($env:PACKAGE_MODE -eq "release") {
+                  & ./scripts/sign-windows-release.ps1 -File $uninstaller -VerifyOnly
+                }
+                [IO.File]::Copy($uninstaller, $uninstallWorker, $true)
+                $secondUninstall = Start-Process -FilePath $uninstallWorker -ArgumentList $uninstallArgs -Wait -PassThru
+                if ($secondUninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $uninstaller)) {
+                  throw 'Second installation could not be removed'
+                }
+                if ($installedRun -cne $runFixture -or $runKey.GetValue('JindiDrama') -cne $runFixture) {
+                  throw 'Install and uninstall must preserve a Run entry for a different executable'
+                }
+                Write-Host 'Uninstall removed the matching Run entry and preserved a different one'
+              }
             } catch {
               if ($null -eq $checkFailure) { throw }
               Write-Warning "Uninstall also failed: $_"
             } finally {
+              if ($runKey) {
+                try {
+                  if ($runFixture -and $runKey.GetValue('JindiDrama') -ceq $runFixture) {
+                    $runKey.DeleteValue('JindiDrama', $false)
+                  }
+                } catch {
+                  Write-Warning "Could not clean up the Run entry fixture: $_"
+                } finally {
+                  $runKey.Dispose()
+                }
+              }
               try {
                 if ($uninstallWorker) { [IO.File]::Delete($uninstallWorker) }
                 if ($fixtureFile) { [IO.File]::Delete($fixtureFile) }
