@@ -60,7 +60,7 @@ try {
     '',
     '## 文件校验',
     '',
-    '`SHA256SUMS.txt` 列出全部发行文件的 SHA-256。下载全部文件到同一目录后，macOS 可运行 `shasum -a 256 -c SHA256SUMS.txt`。单独下载一个文件时，可对照清单中同名文件的摘要。Windows 可用 PowerShell 的 `Get-FileHash -LiteralPath 路径 -Algorithm SHA256`。',
+    '`SHA256SUMS.txt` 列出全部发行文件的 SHA-256。将全部文件下载到同一目录。macOS 在终端进入该目录后可运行 `shasum -a 256 -c SHA256SUMS.txt`。校验原始 ZIP 后再解压。单独下载一个文件时，可对照清单中同名文件的摘要。Windows 可用 PowerShell 的 `Get-FileHash -LiteralPath 路径 -Algorithm SHA256`。',
     '',
     '## 功能与数据',
     '',

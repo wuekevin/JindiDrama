@@ -61,6 +61,9 @@ if (onMac) {
 await copyFile('docs/RELEASE-ROLLBACK.md', join(directory, 'RELEASE-ROLLBACK.md'))
 
 const system = onMac ? 'macOS 13 Ventura 或更新版本（arm64 / x86_64）' : 'Windows 11 x64，需 Microsoft Edge WebView2 运行时'
+const verificationIntro = onMac
+  ? '把原始 ZIP、随附说明和同一批下载的 `SHA256SUMS.txt` 放在同一目录。在终端进入该目录后运行以下命令，校验通过后再解压 ZIP。'
+  : '把安装文件、随附说明和同一批下载的 `SHA256SUMS.txt` 放在同一目录。在 PowerShell 进入该目录后运行以下命令。'
 const verification = onMac
   ? ['```sh', 'shasum -a 256 -c SHA256SUMS.txt', '```']
   : [
@@ -79,6 +82,21 @@ const verification = onMac
       '}',
       '```',
     ]
+const isolatedMacTest = onMac && mode === 'smoke'
+  ? [
+      '## 用独立的 macOS 用户账号试用',
+      '',
+      '从 Finder 正常打开应用时，会使用当前用户的 JindiDrama 数据目录。相同应用标识也会共享网页缓存。要与日常资料和缓存隔离，请登录专用的 macOS 测试用户账号。',
+      '',
+      '如需在测试账号中为这次试用创建临时数据库，请在终端进入解压得到的 `JindiDrama.app` 所在目录，再运行以下命令。该命令只更改数据库所在的数据目录，网页缓存仍属于当前账号。',
+      '',
+      '```sh',
+      'jindi_test_dir=$(mktemp -d /tmp/jindidrama-smoke.XXXXXX) &&',
+      '  open -na "$PWD/JindiDrama.app" --env "JINDIDRAMA_DATA_DIR=$jindi_test_dir"',
+      '```',
+      '',
+    ]
+  : []
 const lines = [
   ...header,
   '- 系统要求 ' + system,
@@ -91,10 +109,11 @@ const lines = [
   '',
   '## 完整性校验',
   '',
-  '将下载内容解压到同一目录，在该目录运行以下命令。使用与当前平台产物一起取得的清单。',
+  verificationIntro,
   '',
   ...verification,
   '',
+  ...isolatedMacTest,
   '## 功能与数据',
   '',
   '桌面版提供演示目录、授权本地片库、收藏、观看进度、数据备份和本地诊断。演示账号与演示目录可离线使用。红果正式服务待取得接入授权。',
