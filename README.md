@@ -130,6 +130,8 @@ pwsh -NoProfile -File scripts/sign-windows-package.ps1 -SigningThumbprint $thumb
 
 详情页可复制短剧链接，播放页和评论页可复制当前分集链接。桌面安装版通过 `jindi:` 协议打开演示目录的短剧和分集，外部打开的分集默认暂停。Windows 便携版可用命令 `JindiDrama.exe "jindi://watch/d1/2"` 打开分集。浏览器预览复制当前站点的可访问地址。
 
+苹果 CMS 详情页也可复制剧目链接。链接只包含片源指纹和剧目 ID。接收方须已启用同一片源，打开后进入短剧详情。
+
 ## 桌面本地片库
 
 将自有或已获准播放的素材放入同一目录，并在根目录添加 UTF-8 的 `catalog.json`。每部短剧的标识须以 `local-` 开头并在清单中唯一。`episodes` 按集号排列，每集允许一个 MP4、一个 WebM，或同时提供两种格式。路径相对清单目录，子目录使用正斜杠。

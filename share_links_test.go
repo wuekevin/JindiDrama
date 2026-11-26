@@ -45,3 +45,20 @@ func TestPlainWindowsRelaunchRevealsWithoutReplacingPendingShareLink(t *testing.
 		t.Fatalf("delivered: %v, want %v", got, want)
 	}
 }
+
+func TestCMSDetailShareLinksOnlyDeliverCanonicalIDs(t *testing.T) {
+	links := newShareLinks()
+	var got []string
+	links.start(func(route string) { got = append(got, route) })
+	links.frontendReady()
+	path := "catalog/apple-cms:0123456789abcdef0123456789abcdef:90071992547409931234"
+	for _, suffix := range []string{"/play/1", "?token=fixture", "#fragment", "\n", "%0a", ":2"} {
+		links.open("jindi://" + path + suffix)
+	}
+	links.open("jindi://catalog/local-test")
+	links.open("jindi://catalog/apple-cms:short:1")
+	links.openArgs([]string{"jindi://" + path})
+	if want := []string{"/" + path}; !slices.Equal(got, want) {
+		t.Fatalf("delivered: %v, want %v", got, want)
+	}
+}

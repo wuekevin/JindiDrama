@@ -78,6 +78,8 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     const closeReplies: { id: string; unconfirmed: boolean }[] = []
     const testState = {
       calls, released, revoked, lookups, closeReplies, peakLookups: 0, failedLookups: 0, providerReads: 0, resumePending: false, release: () => {},
+      sharedLink: '',
+      openShare: (path: string) => events.get('jindi-open-share-link')?.(path),
       close: () => events.get('jindi-before-window-close')?.('close-1'),
       hide: () => events.get('jindi-before-window-hide')?.(''),
       cancelClose: () => events.get('jindi-window-close-canceled')?.('close-1'),
@@ -85,6 +87,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     if (libraryFixture) {
       Object.assign(window, { runtime: {
         EventsOn: (name: string, handler: (attempt: string) => void) => events.set(name, handler),
+        ClipboardSetText: (text: string) => { testState.sharedLink = text; return Promise.resolve(true) },
         EventsEmit: (_: string, id: string, unconfirmed: boolean) => closeReplies.push({ id, unconfirmed }),
       } })
     }
@@ -152,7 +155,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
             testState.failedLookups++
             throw new Error('unavailable')
           }
-          if (catalog.id !== requestedId) throw 'provider: 未找到'
+          if (catalog.id !== requestedId) throw new Error('provider: 未找到')
           return { ...drama, id: requestedId, cover: catalog.cover, updatedTo: Math.max(0, ...catalog.available) }
         } finally {
           activeLookups--
@@ -161,7 +164,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       CatalogEpisodes: async (requestedId: string) => {
         if (!libraryFixture) return [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms && !hls ? index === 3 : index < 3 }))
         const catalog = await desktop.readDesktopCatalog()
-        if (catalog.id !== requestedId) throw 'provider: 未找到'
+        if (catalog.id !== requestedId) throw new Error('provider: 未找到')
         return [1, 2, 3].map((index) => ({
           id: 'episode-' + index, dramaId: requestedId, index, available: catalog.available.includes(index),
         }))
@@ -605,6 +608,37 @@ const startupCMSHistory: HistoryRow = {
   dramaId: cmsId, episode: 2, positionMs: 7345, durationMs: 24000, percent: 30,
   episodeCountAtWatch: 3, watchedAt: 100,
 }
+
+test('CMS shares a detail-only link and opens it for the configured source at 220% zoom', async ({ page }, testInfo) => {
+  type ShareFixture = { catalogTest: { sharedLink: string; openShare(path: string): void } }
+  await page.setViewportSize({ width: 1280, height: 860 })
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.dpi = 220
+  await page.goto(cmsRoute)
+  const share = page.getByTestId('share')
+  await share.scrollIntoViewIfNeeded()
+  await expect(share).toBeInViewport({ ratio: 0.95 })
+  await share.click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as ShareFixture).catalogTest.sharedLink))
+    .toBe('jindi://catalog/' + cmsId)
+  await expect(page.getByText('分享链接已复制。对方需启用同一片源。')).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('cms-share-220.png') })
+
+  const home = page.getByTestId('nav-home')
+  await home.click()
+  await expect(page.getByTestId('page-home')).toBeVisible()
+  const openShare = (path: string) => page.evaluate((value) =>
+    (window as unknown as ShareFixture).catalogTest.openShare(value), path)
+  await openShare('/catalog/' + cmsId + '?token=fixture')
+  await expect(page).toHaveURL(/\/home$/)
+  await openShare('/catalog/' + cmsId)
+  await expect(page.getByRole('heading', { name: cmsTitle })).toBeVisible()
+
+  desktop.catalog.id = cmsId.replace('0123456789abcdef0123456789abcdef', 'f'.repeat(32))
+  await openShare('/catalog/' + cmsId)
+  await expect(page.getByText('没有找到这部短剧')).toBeVisible()
+  expect(await calls(page)).toEqual([])
+})
 
 test('CMS desktop startup restores the latest current-source bookmark paused', async ({ page }) => {
   const otherSource = 'apple-cms:ffffffffffffffffffffffffffffffff:90071992547409931234'

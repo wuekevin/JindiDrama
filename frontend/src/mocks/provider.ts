@@ -58,6 +58,10 @@ function providerCard(drama: CatalogDrama): Drama {
   }
 }
 
+function providerNotFound(error: unknown) {
+  return (error instanceof Error ? error.message : error) === 'provider: 未找到'
+}
+
 export const MAX_CMS_PAGE = 100_000
 
 export async function loadCMSCatalogPage(query: string, page: number, mode: 'normal' | 'error') {
@@ -119,7 +123,7 @@ export async function loadCatalogHome(mode: 'normal'|'empty'|'error' = 'normal')
         const record = await loadCatalogDrama(id)
         if (record?.id === id) cards.set(id, providerCard(record))
       } catch (e) {
-        if (e !== 'provider: 未找到') throw e
+        if (!providerNotFound(e)) throw e
       }
     }))
     card = (id) => cards.get(id)
@@ -228,7 +232,7 @@ export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', c
         cast: [], long: record.summary, seasons: [], highlights: [],
       }
     } catch (error) {
-      if (error === 'provider: 未找到') return null
+      if (providerNotFound(error)) return null
       throw error
     }
   }

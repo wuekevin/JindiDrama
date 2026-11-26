@@ -12,6 +12,8 @@ import (
 
 var shareLinkPattern = regexp.MustCompile(`^jindi://(drama|watch)/(d[1-9][0-9]{0,5})(?:/([1-9][0-9]{0,3}))?$`)
 
+var cmsDetailSharePattern = regexp.MustCompile(`^jindi://catalog/apple-cms:[0-9a-f]{32}:[0-9]{1,30}$`)
+
 type shareLinks struct {
 	catalog *mock.Provider
 	mu      sync.Mutex
@@ -24,15 +26,17 @@ type shareLinks struct {
 func newShareLinks() *shareLinks { return &shareLinks{catalog: mock.New()} }
 
 func (s *shareLinks) open(raw string) {
-	match := shareLinkPattern.FindStringSubmatch(raw)
-	if len(match) == 0 {
-		return
-	}
-	drama, err := s.catalog.Drama(context.Background(), match[2])
-	episode, _ := strconv.Atoi(match[3])
-	if err != nil || (match[1] == "drama" && episode != 0) ||
-		(match[1] == "watch" && (episode == 0 || episode > drama.UpdatedTo)) {
-		return
+	if !cmsDetailSharePattern.MatchString(raw) {
+		match := shareLinkPattern.FindStringSubmatch(raw)
+		if len(match) == 0 {
+			return
+		}
+		drama, err := s.catalog.Drama(context.Background(), match[2])
+		episode, _ := strconv.Atoi(match[3])
+		if err != nil || (match[1] == "drama" && episode != 0) ||
+			(match[1] == "watch" && (episode == 0 || episode > drama.UpdatedTo)) {
+			return
+		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -1,12 +1,19 @@
 import type { Router } from 'vue-router'
 import { nextTick } from 'vue'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { hasBridge } from '@/bindings'
 import { byId } from '@/mocks/data'
 import { useToastStore } from '@/stores/toast'
 
 const routePattern = /^\/(drama|watch)\/(d[1-9][0-9]{0,5})(?:\/([1-9][0-9]{0,3}))?$/
+const catalogPrefix = '/catalog/'
 export const SHARE_LINK_PAUSE = 'jindi-share-link-pause'
+export const SHARE_CATALOG_REFRESH = 'jindi-share-catalog-refresh'
 function validPath(path: string) {
+  if (path.startsWith(catalogPrefix)) {
+    const id = path.slice(catalogPrefix.length)
+    return id === id.trim() && isAppleCMSDramaId(id)
+  }
   const match = routePattern.exec(path)
   if (!match || match[0] !== path) return false
   const [, kind, id, episode] = match
@@ -44,7 +51,7 @@ export async function copyShareLink(path: string) {
     } else {
       await navigator.clipboard.writeText(link)
     }
-    toast.push('分享链接已复制', 'success')
+    toast.push(path.startsWith(catalogPrefix) ? '分享链接已复制。对方需启用同一片源。' : '分享链接已复制', 'success')
   } catch {
     toast.push('无法复制分享链接，请检查剪贴板权限', 'error')
   }
@@ -54,8 +61,12 @@ export function registerShareLinks(router: Router) {
   desktopRuntime()?.EventsOn?.('jindi-open-share-link', async (path) => {
     if (typeof path !== 'string' || !validPath(path)) return
     const target = landingPath(path)
+    const sameCatalog = () => path.startsWith(catalogPrefix) && router.currentRoute.value.name === 'catalog' &&
+      router.currentRoute.value.params.id === path.slice(catalogPrefix.length)
+    const refresh = sameCatalog()
     await router.push(target)
     await nextTick()
+    if (refresh && sameCatalog()) window.dispatchEvent(new Event(SHARE_CATALOG_REFRESH))
     if (path.startsWith('/watch/') && router.currentRoute.value.fullPath === target) {
       window.dispatchEvent(new Event(SHARE_LINK_PAUSE))
     }

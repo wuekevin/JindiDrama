@@ -9,7 +9,7 @@ import { useAppSettings } from '@/stores/appSettings'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
-import { copyShareLink } from '@/router/shareLinks'
+import { copyShareLink, SHARE_CATALOG_REFRESH } from '@/router/shareLinks'
 import { availableCatalogEpisode, catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
@@ -21,12 +21,16 @@ const root = ref<HTMLElement>()
 const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
 onMounted(() => {
+  window.addEventListener(SHARE_CATALOG_REFRESH, refreshSharedCatalog)
   if (!root.value) return
   layoutObserver = observeContentWidth(root.value, (width) => {
     layout.value = width <= 660 ? 'compact' : width <= 1080 ? 'stacked' : 'wide'
   })
 })
-onBeforeUnmount(() => layoutObserver?.disconnect())
+onBeforeUnmount(() => {
+  window.removeEventListener(SHARE_CATALOG_REFRESH, refreshSharedCatalog)
+  layoutObserver?.disconnect()
+})
 const id = computed(() => String(route.params.id))
 const state = ref<'loading'|'ready'|'notfound'|'error'>('loading'); const err = ref('')
 const detail = ref<DramaDetail | null>(null)
@@ -79,6 +83,9 @@ async function load(focusHeading = false) {
     state.value = 'error'
   }
 }
+function refreshSharedCatalog() {
+  if (route.name === 'catalog') void load(true)
+}
 watch([id, () => route.name], (_, [previous]) => { void load(previous !== undefined) }, { immediate: true })
 const groups = computed(() => (detail.value ? groupEpisodes(detail.value.drama.episodeCount) : []))
 const eps = computed(() => {
@@ -110,7 +117,7 @@ const watchEp = (ep: number) => {
 }
 const progressOf = (ep: number) => (hist.value && hist.value.episode === ep ? hist.value.percent : ep < (hist.value?.episode ?? 0) ? 100 : 0)
 function fav() { void lib.notifySaved(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏') }
-const share = () => copyShareLink(`/drama/${id.value}`)
+const share = () => copyShareLink(`/${detail.value?.appleCMS ? 'catalog' : 'drama'}/${id.value}`)
 const tagIcon = (t: string) => ({ 古装: Landmark, 甜宠: Heart, 重生: Sprout, 权谋: Swords, 逆袭: Crown }[t] ?? Sparkles)
 const recommendationSource = computed(() => {
   const current = detail.value?.drama
@@ -147,6 +154,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
               <BaseButton v-if="detail.catalogPlayback && firstAvailableEpisode" size="lg" data-testid="catalog-watch-now" @click="watchEp(firstAvailableEpisode)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
               <button v-if="detail.catalogPlayback && continuation" class="cont" data-testid="catalog-continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
               <BaseButton v-if="detail.appleCMS" size="lg" variant="ghost" data-testid="fav" :aria-pressed="lib.isFav(id)" @click="fav"><component :is="lib.isFav(id) ? Check : Plus" :size="18" />{{ lib.isFav(id) ? '已收藏' : '收藏' }}</BaseButton>
+              <BaseButton v-if="detail.appleCMS" size="lg" variant="ghost" data-testid="share" @click="share"><Share2 :size="17" />分享</BaseButton>
             </div>
           </div>
           <div v-else class="cta">
