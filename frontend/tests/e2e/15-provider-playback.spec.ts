@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
+import type { PlayMode } from '../../src/player/preferences'
 
 const id = 'catalog:qa/001'
 const route = '/#/catalog/' + encodeURIComponent(id)
@@ -21,6 +22,8 @@ type LibraryChanges = {
 }
 type CatalogState = {
   id: string; provider: string; available: number[]
+  playMode?: PlayMode
+  holdPlaybackEpisode?: number
   home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
 const mediaURL = 'http://127.0.0.1:45671'
@@ -81,7 +84,9 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       Favorites: async () => libraryFixture ? (await desktop.readDesktopCatalog()).favorites : [],
       History: async () => (await desktop.readDesktopCatalog()).history,
       SearchHistory: async () => [],
-      GetSetting: async (key: string) => key === 'app' ? '{"startPage":"上次观看"}' : '',
+      GetSetting: async (key: string) => key === 'app'
+        ? JSON.stringify({ startPage: '上次观看', playMode: libraryFixture ? (await desktop.readDesktopCatalog()).playMode : undefined })
+        : '',
       ProviderName: async () => {
         if (!libraryFixture) return cms ? 'apple-cms' : 'authorized-fixture'
         const { provider } = await desktop.readDesktopCatalog()
@@ -145,6 +150,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
         const leaseId = String.fromCharCode(64 + index) + String.fromCharCode(64 + sequence).repeat(25)
         if (mode === 'stale' && index === 1) await new Promise<void>((resolve) => { testState.release = resolve })
         const catalog = libraryFixture ? await desktop.readDesktopCatalog() : undefined
+        if (catalog?.holdPlaybackEpisode === index) await new Promise<void>((resolve) => { testState.release = resolve })
         const expiresAt = (mode === 'retry' && sequence === 1) || catalog?.expired ? '2001-01-01T00:00:00Z'
           : new Date(Date.now() + (mode === 'apple-cms-hls-expires' ? 4_000 : mode === 'expires-live' ? 3_000 : 120_000)).toISOString()
         const format = !libraryFixture && index === 2 ? 'mp4' : 'webm'
@@ -228,6 +234,12 @@ test('authorized Provider detail opens actual playback, with pause and seek', as
   })
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).paused && (v as HTMLVideoElement).currentTime)).toBeCloseTo(5, 0)
   await page.screenshot({ path: testInfo.outputPath('provider-playback.png') })
+  await video.evaluate(async (media: HTMLVideoElement) => {
+    media.currentTime = media.duration - 0.25
+    await media.play()
+  })
+  await expect(video).toHaveJSProperty('ended', true)
+  await expect(page).toHaveURL(/\/play\/1$/)
   await page.getByRole('link', { name: '返回详情' }).click()
   await expect(page.locator('video')).toHaveCount(0)
   expect(requests.length).toBeGreaterThan(0)
@@ -394,13 +406,17 @@ test('HLS ticket expiry destroys playback and suppresses its direct alternate', 
   const video = page.getByLabel('第1集视频')
   await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth)).toBe(64)
   const objectURL = await video.getAttribute('src')
-  await video.evaluate((v: HTMLVideoElement) => v.play())
+  await video.evaluate((v: HTMLVideoElement) => {
+    v.playbackRate = 0.25
+    return v.play()
+  })
   await expect(page.getByTestId('error')).toContainText('播放票据已过期')
   await expect(video).toHaveCount(0)
   await expect.poll(() => revoked(page)).toContain(objectURL)
   await expect.poll(() => released(page)).toEqual(['A'.repeat(26)])
   const prefix = mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/'
   expect([...new Set(requests)]).toEqual([prefix + '0.m3u8', prefix + 'hls/0.m3u8', prefix + 'hls/1'])
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
 })
 
 
@@ -581,8 +597,8 @@ test('CMS expiry and a shorter replacement preserve a saved bookmark until the u
   expect(desktop.writes).toEqual([])
 })
 
-async function failWithMediaError(video: ReturnType<typeof historyVideo>, resetPosition = false) {
-  return video.evaluate(async (media: HTMLVideoElement, reset) => {
+async function failWithMediaError(video: ReturnType<typeof historyVideo>, options?: { resetPosition?: boolean; pauseFirst?: boolean }) {
+  return video.evaluate(async (media: HTMLVideoElement, options) => {
     const probe = document.createElement('video')
     const error = await new Promise<MediaError | null>((resolve) => {
       probe.addEventListener('error', () => resolve(probe.error), { once: true })
@@ -590,11 +606,15 @@ async function failWithMediaError(video: ReturnType<typeof historyVideo>, resetP
     })
     if (!error) throw new Error('Expected a real MediaError from the invalid media probe')
     Object.defineProperty(media, 'error', { value: error })
-    if (reset) Object.defineProperty(media, 'currentTime', { value: 0 })
+    if (options?.resetPosition) Object.defineProperty(media, 'currentTime', { value: 0 })
     const checkpoint = media.currentTime
+    if (options?.pauseFirst) {
+      media.pause()
+      media.dispatchEvent(new Event('pause'))
+    }
     media.dispatchEvent(new Event('error'))
     return checkpoint
-  }, resetPosition)
+  }, options)
 }
 
 test('CMS media fallback captures the final played position and ignores events from old media', async ({ page }) => {
@@ -643,7 +663,7 @@ test('CMS media fallback keeps the sampled bookmark when a failed decoder resets
     media.currentTime = 7
   })
   await expect.poll(() => desktop.rows()[0]?.positionMs).toBe(7000)
-  expect(await failWithMediaError(video, true)).toBe(0)
+  expect(await failWithMediaError(video, { resetPosition: true })).toBe(0)
   await expect(video).toHaveAttribute('src', /\/1$/)
   await expect.poll(() => position(video)).toBeCloseTo(7, 2)
   expect(desktop.rows()[0]?.positionMs).toBe(7000)
@@ -651,12 +671,15 @@ test('CMS media fallback keeps the sampled bookmark when a failed decoder resets
 
 test('CMS completion survives a paused scrub and only offers an available next episode', async ({ page }) => {
   const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.playMode = '单集播放'
   await page.goto(cmsRoute + '/play/1')
   const video = historyVideo(page, 1)
   await playHistoryVideo(video)
   const duration = await durationMs(video)
   await video.evaluate((media: HTMLVideoElement) => { media.currentTime = media.duration - 0.1 })
   await expect.poll(() => desktop.rows()[0]).toMatchObject({ percent: 100, positionMs: duration, episode: 1 })
+  await expect(video).toHaveJSProperty('ended', true)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
   await video.evaluate((media: HTMLVideoElement) => { media.currentTime = 3 })
   await expect.poll(() => position(video)).toBeCloseTo(3, 2)
   await page.getByRole('link', { name: '返回详情' }).click()
@@ -690,6 +713,221 @@ test('CMS completion survives a paused scrub and only offers an available next e
   await page.getByTestId('nav-history').click()
   await expect(page.getByTestId('stat-done')).toHaveText('1')
   await expect(row.getByTestId('done-badge')).toBeVisible()
+})
+
+test('CMS continuous play saves completion and decodes the adjacent episode through an alternate source', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  const secondPrefix = mediaURL + '/catalog-media/' + 'B'.repeat(26) + '/'
+  await page.route(secondPrefix + '0', (route) => route.fulfill({ status: 404 }))
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await expect(first).toHaveJSProperty('paused', true)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+  desktop.catalog.format = 'webm'
+  const completedDuration = await durationMs(first)
+  await playHistoryVideo(first)
+
+  await expect(page).toHaveURL(/\/play\/2$/)
+  const second = historyVideo(page, 2)
+  await expect(second).toHaveAttribute('src', secondPrefix + '1')
+  await expect.poll(() => second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await expect.poll(() => position(second)).toBeGreaterThan(0.1)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({
+    dramaId: cmsId, episode: 1, percent: 100, positionMs: completedDuration,
+  })
+  expect(await calls(page)).toEqual([1, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+  await expect.poll(() => released(page)).toEqual(['A'.repeat(26)])
+})
+
+test('CMS keeps prior completion when the automatic next episode fails before a checkpoint', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  desktop.catalog.format = 'webm'
+  await playHistoryVideo(first)
+
+  const second = historyVideo(page, 2)
+  await expect.poll(() => position(second)).toBeGreaterThan(0.35)
+  await expect(second).toHaveAttribute('src', /\/0$/)
+  expect(await second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  expect(await failWithMediaError(second, { pauseFirst: true })).toBeLessThan(5)
+
+  await expect(second).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => position(second)).toBe(0)
+  await expect(second).toHaveJSProperty('paused', true)
+  expect(desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  expect(await calls(page)).toEqual([1, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+
+  await playHistoryVideo(second)
+  await second.evaluate((media: HTMLVideoElement) => media.pause())
+  await expect.poll(() => desktop.rows()[0]?.episode).toBe(2)
+})
+
+test('CMS continuous play offers manual playback if the browser refuses automatic start', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    let blocked = false
+    HTMLMediaElement.prototype.play = function () {
+      if (!blocked && this.getAttribute('aria-label') === '第2集视频') {
+        blocked = true
+        return Promise.reject(new DOMException('Blocked by autoplay policy', 'NotAllowedError'))
+      }
+      return play.call(this)
+    }
+  })
+  await page.goto(cmsRoute + '/play/1')
+  await playHistoryVideo(historyVideo(page, 1))
+
+  const notice = page.getByText('已切换到下一集，请点击播放。', { exact: true })
+  await expect(notice).toBeVisible()
+  const second = historyVideo(page, 2)
+  await expect(second).toHaveAttribute('src', /^blob:/)
+  await expect.poll(() => second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBe(64)
+  await expect(second).toHaveJSProperty('paused', true)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  await playHistoryVideo(second)
+  await expect(notice).toHaveCount(0)
+  expect(await calls(page)).toEqual([1, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+})
+
+test('CMS continuous play stops at a missing adjacent episode', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  desktop.catalog.available = [1, 3]
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await playHistoryVideo(first)
+  await expect(first).toHaveJSProperty('ended', true)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  await expect(page).toHaveURL(/\/play\/1$/)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+})
+
+test('CMS seeking straight to the end while playing neither completes nor advances the episode', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await playHistoryVideo(first)
+  await first.evaluate((media: HTMLVideoElement) => media.pause())
+  await expect.poll(() => desktop.rows()[0]?.episode).toBe(1)
+  await playHistoryVideo(first)
+  await first.evaluate((media: HTMLVideoElement) => new Promise<void>((resolve) => {
+    media.addEventListener('ended', () => resolve(), { once: true })
+    media.currentTime = media.duration
+  }))
+  await expect(page).toHaveURL(/\/play\/1$/)
+  expect(desktop.rows()[0]?.percent).toBeLessThan(100)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+})
+
+test('CMS continuous play keeps completion when the next ticket has expired and retries manually', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  await page.goto(cmsRoute + '/play/1')
+  await playHistoryVideo(historyVideo(page, 1))
+  desktop.catalog.expired = true
+
+  await expect(page).toHaveURL(/\/play\/2$/)
+  await expect(page.getByTestId('error')).toContainText('无法播放下一集')
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  expect(desktop.requests.every((address) => address.startsWith(mediaURL + '/catalog-media/' + 'A'.repeat(26)))).toBe(true)
+  expect(await calls(page)).toEqual([1, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+
+  desktop.catalog.expired = false
+  desktop.catalog.format = 'webm'
+  await page.getByRole('button', { name: '重试' }).click()
+  const second = historyVideo(page, 2)
+  await expect.poll(() => second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await expect(second).toHaveJSProperty('paused', true)
+  expect(desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  expect(await calls(page)).toEqual([1, 2, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+})
+
+test('CMS manual selection while the next ticket is pending leaves the selected episode paused', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  desktop.catalog.holdPlaybackEpisode = 2
+  await page.goto(cmsRoute + '/play/1')
+  await playHistoryVideo(historyVideo(page, 1))
+  desktop.catalog.format = 'webm'
+  await expect.poll(() => calls(page)).toEqual([1, 2].map((index) => 'catalog:' + cmsId + ':' + index))
+  await page.getByRole('button', { name: '第3集', exact: true }).click()
+
+  const third = historyVideo(page, 3)
+  await expect.poll(() => third.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await page.evaluate(() => (window as Window & { catalogTest?: { release(): void } }).catalogTest?.release())
+  await expect.poll(() => released(page)).toEqual(['A'.repeat(26), 'B'.repeat(26)])
+  await expect(third).toHaveJSProperty('paused', true)
+  expect(desktop.requests.every((address) => !address.startsWith(mediaURL + '/catalog-media/' + 'B'.repeat(26)))).toBe(true)
+  expect(desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  expect(await calls(page)).toEqual([1, 2, 3].map((index) => 'catalog:' + cmsId + ':' + index))
+})
+
+test('CMS single episode loop plays again from zero under the same ticket', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  desktop.catalog.playMode = '单集循环'
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  const restartedAt = first.evaluate((media: HTMLVideoElement) => new Promise<number>((resolve) => {
+    const ended = () => media.addEventListener('playing', () => resolve(media.currentTime), { once: true })
+    media.addEventListener('ended', ended, { once: true })
+  }))
+  await playHistoryVideo(first)
+  expect(await restartedAt).toBeLessThan(0.15)
+  await expect.poll(() => position(first)).toBeGreaterThan(0.1)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  await expect(page).toHaveURL(/\/play\/1$/)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+  expect(await released(page)).toEqual([])
+})
+
+test('CMS loop stays ended when an active replay is scrubbed directly to the end', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.playMode = '单集循环'
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await playHistoryVideo(first)
+  const restartedAt = await first.evaluate((media: HTMLVideoElement) => new Promise<number>((resolve) => {
+    const ended = () => media.addEventListener('playing', () => resolve(media.currentTime), { once: true })
+    media.addEventListener('ended', ended, { once: true })
+    media.currentTime = media.duration - 0.25
+  }))
+  expect(restartedAt).toBeLessThan(0.15)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  await expect.poll(() => position(first)).toBeGreaterThan(0.1)
+
+  await first.evaluate((media: HTMLVideoElement) => new Promise<void>((resolve) => {
+    media.addEventListener('ended', () => resolve(), { once: true })
+    media.currentTime = media.duration
+  }))
+  await expect(first).toHaveJSProperty('ended', true)
+  await expect(first).toHaveJSProperty('paused', true)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+})
+
+test('CMS close at the end saves completion and cancels pending automatic advance', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await first.evaluate((media: HTMLVideoElement) => {
+    const { close } = (window as unknown as { catalogTest: { close(): void } }).catalogTest
+    media.addEventListener('ended', close, { capture: true, once: true })
+  })
+  await playHistoryVideo(first)
+  await expect(first).toHaveJSProperty('ended', true)
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 1, percent: 100 })
+  await expect(page).toHaveURL(/\/play\/1$/)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
 })
 
 test('CMS history remains manageable offline and after a source or episode changes', async ({ page }) => {

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import type Hls from 'hls.js'
@@ -10,6 +10,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
+import { playbackEndAction } from '@/player/preferences'
 import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
@@ -32,39 +33,63 @@ const settings = useSettingsStore()
 const library = useLibraryStore()
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const error = ref('')
+const playbackNotice = ref('')
 const detail = ref<DramaDetail>()
 const video = ref<HTMLVideoElement>()
 const sources = ref<MediaSource[]>([])
 const selected = ref(0)
 const source = computed(() => sources.value[selected.value])
 let generation = 0
+let playbackPath = ''
 let expiresAt = 0
 let expiryTimer: number | undefined
 let activeLease: string | undefined
 let hls: Hls | undefined
 
-type WatchTarget = { id: string; episode: number; episodeCount: number }
+type WatchTarget = { id: string; episode: number; episodeCount: number; protectCompletion: boolean }
 type Progress = { position: number; duration: number; percent: number }
 type MediaHistory = {
+  generation: number
+  path: string
   target: WatchTarget
   media: HTMLVideoElement
   source: MediaSource
   checkpoint?: HistoryEntry
   pending: boolean
   restoring: boolean
+  endHandled: boolean
+  autoAttempted: boolean
+  terminalSeek?: boolean
   startedAt?: number
   lastPosition: number
   progress?: Progress
   saved?: Progress
 }
+type Advance = { fromGeneration: number; path: string; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
+let nextEpisode: Advance | undefined
+const autoStart = shallowRef<Advance>()
+let manualNavigation: ReturnType<typeof router.push> | undefined
 let closing = false
+
+function isPlaybackRoute(path: string, current: number) {
+  return route.name === 'catalog-play' && route.path === path && generation === current
+}
+
+function isCurrentSource(media: HTMLVideoElement, choice: MediaSource, path: string, current: number) {
+  return isPlaybackRoute(path, current) && state.value === 'ready' &&
+    video.value === media && source.value === choice
+}
+
+function isCurrentHistory(current: MediaHistory) {
+  return current === mediaHistory && Date.now() < expiresAt &&
+    isCurrentSource(current.media, current.source, current.path, current.generation)
+}
 
 function currentHistory(event: Event) {
   const current = mediaHistory
-  if (current && state.value === 'ready' && event.currentTarget === current.media &&
-      video.value === current.media && source.value === current.source && Date.now() < expiresAt) return current
+  if (current && event.currentTarget === current.media && isCurrentHistory(current)) return current
 }
 
 function restoreHistory(current: MediaHistory) {
@@ -85,7 +110,26 @@ function restoreHistory(current: MediaHistory) {
 
 function onPlayable(event: Event) {
   const current = currentHistory(event)
-  if (current) restoreHistory(current)
+  if (!current) return
+  restoreHistory(current)
+  startWhenReady(current)
+}
+
+function startWhenReady(current: MediaHistory) {
+  const { media } = current
+  if (!autoStart.value || current.autoAttempted || current.pending || current.restoring || media.seeking ||
+      media.readyState < HTMLMediaElement.HAVE_METADATA || closing || !isCurrentHistory(current)) return
+  current.autoAttempted = true
+  media.muted = autoStart.value.muted
+  startMedia(current, '已切换到下一集，请点击播放。')
+}
+
+function startMedia(current: MediaHistory, fallback: string) {
+  void current.media.play().catch(() => {
+    if (closing || !isCurrentHistory(current) || !current.media.paused || current.media.error) return
+    autoStart.value = undefined
+    playbackNotice.value = fallback
+  })
 }
 
 function onPlaying(event: Event) {
@@ -93,10 +137,22 @@ function onPlaying(event: Event) {
   if (!current || current.media.paused) return
   if (closing) {
     current.media.pause()
-  } else if (current.startedAt === undefined) {
+    return
+  }
+  autoStart.value = undefined
+  playbackNotice.value = ''
+  current.endHandled = false
+  if (current.startedAt === undefined) {
     current.startedAt = current.media.currentTime
     current.progress = undefined
   }
+}
+
+function onSeeking(event: Event) {
+  const current = currentHistory(event)
+  if (!current) return
+  const { currentTime, duration } = current.media
+  current.terminalSeek = Number.isFinite(duration) && duration > 0 && currentTime >= duration
 }
 
 function onSeeked(event: Event) {
@@ -105,6 +161,7 @@ function onSeeked(event: Event) {
   if (current.restoring) {
     current.restoring = false
     current.lastPosition = current.media.currentTime
+    startWhenReady(current)
     return
   }
   saveProgress(true)
@@ -113,13 +170,15 @@ function onSeeked(event: Event) {
 function captureProgress(current: MediaHistory, failed: boolean) {
   const media = current.media
   const { currentTime, duration } = media
-  if (current.startedAt === undefined || current.pending || current.restoring || media.seeking ||
+  if (current.startedAt === undefined || current.pending || current.restoring || media.seeking || current.terminalSeek ||
       (!failed && media.error) || !media.played.length || !Number.isFinite(duration) || duration <= 0 ||
       !Number.isFinite(currentTime)) return
   // A failed decoder can reset its position. Keep the last valid sample in that case.
   if (failed && (currentTime <= 0 || currentTime > duration)) return
   const position = Math.max(0, Math.min(currentTime, duration))
   const ended = !failed && media.ended
+  // A seek straight to the end can emit "ended" without playing the tail.
+  if (ended && media.played.end(media.played.length - 1) < position - 0.05) return
   if (!current.progress && (position === current.lastPosition || position === current.startedAt) && !ended) return
   const percent = ended ? 100 : Math.min(99, Math.floor(position * 100 / duration))
   current.progress = { position, duration, percent }
@@ -128,7 +187,7 @@ function captureProgress(current: MediaHistory, failed: boolean) {
 
 function saveProgress(force: boolean, failed = false) {
   const current = mediaHistory
-  if (!current) return
+  if (!current || (current.target.protectCompletion && (failed || current.media.error))) return
   // A ticket can expire between media events. Keep only the last position sampled while it was valid.
   if (Date.now() < expiresAt) captureProgress(current, failed)
   const progress = current.progress
@@ -139,22 +198,60 @@ function saveProgress(force: boolean, failed = false) {
   current.lastPosition = progress.position
   const { id, episode, episodeCount } = current.target
   library.record(id, episode, progress.percent, progress.position, progress.duration, episodeCount)
+  current.target.protectCompletion = false
 }
 
 function onProgress(event: Event) {
   if (!closing && currentHistory(event)) saveProgress(event.type !== 'timeupdate')
 }
 
+function onEnded(event: Event) {
+  const current = currentHistory(event)
+  if (!current || !current.media.ended || current.endHandled || current.terminalSeek) return
+  saveProgress(true)
+  if (current.progress?.percent !== 100) return
+  current.endHandled = true
+  if (closing || manualNavigation) return
+
+  const next = current.target.episode + 1
+  const action = playbackEndAction(preferences.s.playMode, !!availableCatalogEpisode(detail.value, next))
+  if (action === 'loop') {
+    current.media.currentTime = 0
+    startMedia(current, '请点击播放重新开始本集。')
+  } else if (action === 'next') {
+    const destination = catalogPlaybackRoute(current.target.id, next)
+    const advance = { fromGeneration: current.generation, path: router.resolve(destination).path, muted: current.media.muted }
+    nextEpisode = advance
+    const clearPending = () => {
+      if (nextEpisode === advance) nextEpisode = undefined
+    }
+    void router.replace(destination).then(clearPending, clearPending)
+  }
+}
+
 function saveOnExit() { saveProgress(true) }
 
 function onWindowClose() {
-  if (closing || !watchTarget) return
+  if (closing) return
   closing = true
-  video.value?.pause()
+  nextEpisode = undefined
+  autoStart.value = undefined
+  if (watchTarget) video.value?.pause()
   saveOnExit()
 }
 
 function onWindowCloseCanceled() { closing = false }
+
+function selectEpisode(index: number) {
+  nextEpisode = undefined
+  autoStart.value = undefined
+  const navigation = router.push(catalogPlaybackRoute(id.value, index))
+  manualNavigation = navigation
+  const settled = () => {
+    if (manualNavigation === navigation) manualNavigation = undefined
+  }
+  void navigation.then(settled, settled)
+}
 
 function stopMedia(failed = false) {
   saveProgress(true, failed)
@@ -197,6 +294,7 @@ function releaseLease(token = activeLease) {
 }
 
 function expireTicket() {
+  autoStart.value = undefined
   stopMedia()
   releaseLease()
   sources.value = []
@@ -216,7 +314,14 @@ function watchExpiry(current: number) {
 }
 
 async function load() {
+  const path = route.path
+  if (route.name !== 'catalog-play') return
+  const automatic = !closing && nextEpisode?.fromGeneration === generation && nextEpisode.path === path
+    ? nextEpisode : undefined
+  nextEpisode = undefined
+  autoStart.value = automatic
   const current = ++generation
+  playbackPath = path
   const targetId = id.value
   const targetEpisode = episode.value
   clearTimeout(expiryTimer)
@@ -226,49 +331,53 @@ async function load() {
   sources.value = []
   selected.value = 0
   error.value = ''
+  playbackNotice.value = ''
   state.value = 'loading'
   detail.value = undefined
+  const fail = (message: string) => {
+    autoStart.value = undefined
+    error.value = automatic ? '无法播放下一集。' + message : message
+    state.value = 'error'
+  }
   try {
     const result = await getDetail(targetId, 'normal', true)
-    if (current !== generation) return
+    if (!isPlaybackRoute(path, current)) return
     detail.value = result ?? undefined
-    if (!result?.catalogPlayback) {
-      error.value = '当前剧目播放暂不可用。'
-      state.value = 'error'
+    if (!result?.catalogPlayback || (automatic && (!result.appleCMS || closing))) {
+      fail('当前剧目播放暂不可用。')
       return
     }
     const requested = availableCatalogEpisode(result, targetEpisode)
     if (!requested?.id) {
-      error.value = '所选分集暂不可播放。'
-      state.value = 'error'
+      fail('所选分集暂不可播放。')
       return
     }
     const ticket = await resolveCatalogPlayback(targetId, targetEpisode)
-    if (current !== generation) {
+    if (!isPlaybackRoute(path, current)) {
       if (ticket?.leaseId) releaseLease(ticket.leaseId)
       return
     }
     if (!ticket) throw new Error()
     const choices = validateSources(ticket, requested.id)
-    if (!choices.length) {
+    if (!choices.length || (automatic && closing)) {
       if (ticket.leaseId) releaseLease(ticket.leaseId)
       throw new Error()
     }
     activeLease = ticket.leaseId
-    if (result.appleCMS) watchTarget = { id: targetId, episode: targetEpisode, episodeCount: result.drama.episodeCount }
+    if (result.appleCMS) {
+      watchTarget = { id: targetId, episode: targetEpisode, episodeCount: result.drama.episodeCount, protectCompletion: !!automatic }
+    }
     expiresAt = Date.parse(ticket.expiresAt ?? '')
     sources.value = choices
     state.value = 'ready'
     watchExpiry(current)
   } catch {
-    if (current !== generation) return
-    error.value = '无法取得可用的播放源，请重试。'
-    state.value = 'error'
+    if (isPlaybackRoute(path, current)) fail('无法取得可用的播放源，请重试。')
   }
 }
 
 function failMedia(media: HTMLVideoElement, choice: MediaSource) {
-  if (media !== video.value || choice !== source.value || state.value !== 'ready') return
+  if (!isCurrentSource(media, choice, playbackPath, generation)) return
   if (expiresAt <= Date.now()) {
     expireTicket()
     return
@@ -279,7 +388,8 @@ function failMedia(media: HTMLVideoElement, choice: MediaSource) {
     return
   }
   state.value = 'error'
-  error.value = '媒体加载失败，请重试。'
+  error.value = autoStart.value ? '下一集媒体加载失败，请重试。' : '媒体加载失败，请重试。'
+  autoStart.value = undefined
   sources.value = []
   releaseLease()
 }
@@ -292,17 +402,20 @@ function mediaError(event: Event) {
 
 watch([video, source], async ([media, choice]) => {
   if (!media || !choice || state.value !== 'ready') return
+  const current = generation
+  const path = route.path
   if (watchTarget) {
     const target = watchTarget
     const checkpoint = library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
     mediaHistory = {
-      target, media, source: choice, checkpoint, pending: true, restoring: false, lastPosition: 0,
+      generation: current, path, target, media, source: choice, checkpoint,
+      pending: true, restoring: false, endHandled: false, autoAttempted: false, lastPosition: 0,
     }
     restoreHistory(mediaHistory)
+    startWhenReady(mediaHistory)
   }
   if (choice.type !== hlsType) return
-  const current = generation
-  const isCurrent = () => current === generation && video.value === media && source.value === choice && state.value === 'ready'
+  const isCurrent = () => isCurrentSource(media, choice, path, current)
   if (expiresAt <= Date.now()) {
     expireTicket()
     return
@@ -337,14 +450,14 @@ function applyPreferences(event: Event) {
   onPlayable(event)
 }
 
-watch([id, episode], load, { immediate: true })
-window.addEventListener('pagehide', saveOnExit)
+watch(() => route.path, load, { immediate: true })
+window.addEventListener('pagehide', onWindowClose)
 window.addEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
 window.addEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
 window.addEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
 onBeforeUnmount(() => {
   generation++
-  window.removeEventListener('pagehide', saveOnExit)
+  window.removeEventListener('pagehide', onWindowClose)
   window.removeEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
   window.removeEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
   window.removeEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
@@ -362,16 +475,17 @@ onBeforeUnmount(() => {
     <div class="stage">
       <Skeleton v-if="state === 'loading'" class="loading" />
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
-      <video v-else-if="source" :key="source.src" ref="video" controls playsinline preload="metadata"
+      <video v-else-if="source" :key="source.src" ref="video" controls playsinline :preload="autoStart ? 'auto' : 'metadata'"
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences"
-        @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeked="onSeeked"
-        @playing="onPlaying" @timeupdate="onProgress" @pause="onProgress" @ended="onProgress" />
+        @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
+        @playing="onPlaying" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
     </div>
+    <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
       <button v-for="item in detail.episodes" :key="item.index" type="button" :disabled="!item.available"
         :aria-current="item.index === episode ? 'page' : undefined"
-        @click="router.push(catalogPlaybackRoute(id, item.index))">第{{ item.index }}集</button>
+        @click="selectEpisode(item.index)">第{{ item.index }}集</button>
     </nav>
   </article>
 </template>
