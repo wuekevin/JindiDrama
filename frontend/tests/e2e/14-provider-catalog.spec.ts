@@ -155,7 +155,7 @@ async function setupCMSPages(page: Page) {
         state.calls.push([keyword, page])
         let entries: ReturnType<typeof row>[] = []
         if (!keyword) {
-          if (page === 2 && document.body.dataset.failDirectoryPage === '1') {
+          if (document.body.dataset.directoryOffline === '1') {
             throw new Error('苹果 CMS 目录暂不可用')
           }
           entries = page === 1 ? Array.from({ length: 6 }, (_, index) => row(index + 1, '潮汐来信' + (index ? ' ' + (index + 1) : '')))
@@ -224,20 +224,49 @@ test('CMS directory fetches the selected page and restores it through browser hi
   await expect(page).toHaveURL(/feed=today$/)
 })
 
-test('CMS directory can return to the page retained after an error', async ({ page }) => {
+test('CMS directory restores the retained page while the source stays offline', async ({ page }, testInfo) => {
   await setupCMSPages(page)
   await page.goto('/#/search?feed=today')
   const cards = page.getByTestId('result-card')
+  const heading = page.getByRole('heading', { level: 1, name: '片源目录' })
+  const next = page.getByRole('button', { name: '下一页' })
+  const previous = page.getByRole('button', { name: '上一页' })
+  const failure = page.getByRole('status').filter({ hasText: '当前显示已加载的第' })
+  const setOffline = (offline: boolean) => page.locator('body').evaluate((element, offline) => {
+    element.dataset.directoryOffline = offline ? '1' : '0'
+  }, offline)
+
   await expect(cards).toHaveCount(6)
-  await page.locator('body').evaluate((element) => { element.dataset.failDirectoryPage = '1' })
-  await page.getByRole('button', { name: '下一页' }).click()
+  await setOffline(true)
+  await next.click()
   await expect(page).toHaveURL(/feed=today&page=2$/)
-  await expect(page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })).toBeVisible()
+  await expect(failure).toContainText('当前显示已加载的第 1 页')
   await expect(cards).toHaveCount(6)
   await page.getByRole('button', { name: '返回第 1 页' }).click()
   await expect(page).toHaveURL(/feed=today$/)
-  await expect(page.getByRole('button', { name: '下一页' })).toBeVisible()
-  expect(await cmsPageCalls(page)).toEqual([['', 1], ['', 2], ['', 1]])
+  await expect(next).toBeVisible()
+  await expect(failure).toHaveCount(0)
+  await expect(heading).toBeFocused()
+  expect(await cmsPageCalls(page)).toEqual([['', 1], ['', 2]])
+  await page.screenshot({ path: testInfo.outputPath('cms-directory-offline-return.png') })
+
+  await next.click()
+  await expect(failure).toContainText('当前显示已加载的第 1 页')
+  await setOffline(false)
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(cards.first()).toContainText('岸边灯塔')
+  expect(await cmsPageCalls(page)).toEqual([['', 1], ['', 2], ['', 2], ['', 2]])
+
+  await setOffline(true)
+  await previous.click()
+  await expect(failure).toContainText('当前显示已加载的第 2 页')
+  await page.getByRole('button', { name: '返回第 2 页' }).click()
+  await expect(page).toHaveURL(/feed=today&page=2$/)
+  await expect(previous).toBeVisible()
+  await expect(next).toHaveCount(0)
+  await expect(failure).toHaveCount(0)
+  await expect(cards.first()).toContainText('岸边灯塔')
+  expect(await cmsPageCalls(page)).toEqual([['', 1], ['', 2], ['', 2], ['', 2], ['', 1]])
 })
 
 test('CMS keyword search retries the same page and shows local matches only on page one', async ({ page }, testInfo) => {

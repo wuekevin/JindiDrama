@@ -640,3 +640,8 @@
 - 重拍十页 1448×1086 截图并对照设计稿。评论和弹幕两页的截图测试现在等待播放器进入暂停就绪态，避免把加载遮罩存为基准。修改后两个套件共 54 项通过。设计与实际的媒体素材、部分控件及视口内显示范围仍有差异。[回归日志](../build/bin/qa-current-20261127.46/e2e.log) · [十页对照上半](../build/bin/qa-current-20261127.46/visual-diff/review-0.png) · [十页对照下半](../build/bin/qa-current-20261127.46/visual-diff/review-5.png)
 - Apple Silicon 从本地 `v0.1.0-smoke.20261127.46` ZIP 验证实际架构、版本、启动与正常退出、隔离 SQLite 及回滚。测试应用采用 ad-hoc 签名，最低 macOS 13.0。Windows x64 生产交叉编译成功，校验 PE 架构和应用版本。Node 与 macOS 发行工具各 13 项通过，Windows 会话与签名 PowerShell 夹具通过。[Mac 原生验收](../build/bin/qa-current-20261127.46/mac-native.log) · [测试 ZIP 校验清单](../build/bin/qa-current-20261127.46/SHA256SUMS.txt)
 - 按生产标签扫描的 Go 源码、Mac 与 Windows 二进制及 npm 生产依赖未报告已知漏洞。Go 源码扫描使用隔离缓存复验。GitHub 只读查询显示签名环境、仓库级 Actions secrets 和 Release 均为 0。当前源码的 Windows、Intel Mac 原生、正式签名和公证及授权公网片源待验收。[BMad 记录](../_bmad-output/plan-e13-current-local-acceptance.md)
+
+## E02 苹果 CMS 断线返回已加载页（2026-11-27）
+
+- 点击「返回第 N 页」时，从同一片源和浏览范围的内存结果恢复剧目及分页按钮。更新路由页码，将焦点移回标题。显式翻页或重试照常访问片源。
+- 用持续失败的目录夹具在旧版复现。修复后核对回到第 1、2 页都没有新增目录请求，并验证上下一页、故障恢复后的重试和 URL。38 项搜索与片源 Playwright、122 项 Vitest、类型检查、生产构建、Go vet 和 Go 全量测试通过。[BMad 记录](../_bmad-output/plan-e02-cms-offline-return.md) · [断线返回截图](../build/bin/qa-cms-offline-return/cms-directory-offline-return.png)

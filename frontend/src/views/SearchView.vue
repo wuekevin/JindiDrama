@@ -77,7 +77,8 @@ const cmsPagination = ref(false)
 const cmsTopics = computed(() => browseTopics.value && cmsPagination.value)
 const cmsHasMore = ref(false)
 const cmsFallback = ref<{ page: number; reason: string }>()
-let lastCMSResult: { scope: string; page: number; items: Drama[] } | undefined
+let lastCMSResult: { scope: string; page: number; items: Drama[]; hasMore: boolean } | undefined
+let cmsReturnPath: string | undefined
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
 const isDemo = ref(false)
 const localResultsOnly = ref(false)
@@ -106,6 +107,8 @@ function showInvalidCMSGenre() {
 }
 async function run(isRetry = false) {
   const my = ++token
+  const returningToCMSResult = route.fullPath === cmsReturnPath
+  cmsReturnPath = undefined
   state.value = 'loading'
   page.value = 1
   cmsHasMore.value = false
@@ -158,6 +161,15 @@ async function run(isRetry = false) {
         : section ? 'today' : `search:${keyword.trim()}`
       cmsScope = scope
       if (lastCMSResult?.scope !== scope) lastCMSResult = undefined
+      if (returningToCMSResult && lastCMSResult?.page === requestedPage) {
+        lastCMSRequest = { scope, page: requestedPage }
+        cmsHasMore.value = lastCMSResult.hasMore
+        items.value = lastCMSResult.items
+        state.value = 'ready'
+        await nextTick()
+        if (my === token) focusResults()
+        return
+      }
       if (topicBrowse) {
         if (isRetry || cmsGenres.value === undefined || (genreScope && lastGenreScope !== genreScope)) {
           const genres = await loadCMSCatalogGenres(mode)
@@ -199,7 +211,7 @@ async function run(isRetry = false) {
         }
         cmsHasMore.value = remote.hasMore
         results = [...local, ...remote.entries]
-        lastCMSResult = results.length ? { scope, page: requestedPage, items: results } : undefined
+        lastCMSResult = results.length ? { scope, page: requestedPage, items: results, hasMore: remote.hasMore } : undefined
       } catch (error) {
         if (my !== token) return
         if (topicBrowse && !lastCMSResult) throw new Error('苹果 CMS 分类暂不可用')
@@ -269,6 +281,18 @@ const currentPage = computed(() => {
 })
 const shown = computed(() => cmsPagination.value ? items.value
   : items.value.slice((currentPage.value - 1) * PAGE, currentPage.value * PAGE))
+async function returnToCMSResult() {
+  const retained = cmsFallback.value
+  if (!retained || retained.page === cmsPage.value) return
+  const target = { query: { ...route.query, page: retained.page === 1 ? undefined : String(retained.page) } }
+  const path = router.resolve(target).fullPath
+  cmsReturnPath = path
+  try {
+    await router.push(target)
+  } finally {
+    if (cmsReturnPath === path) cmsReturnPath = undefined
+  }
+}
 function selectPage(value: number) {
   const routePage = value === 1 ? undefined : String(value)
   if (cmsPagination.value) void router.push({ query: { ...route.query, page: routePage } })
@@ -356,7 +380,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
         </li>
       </ul>
       <nav v-if="cmsPagination && !invalidCMSGenre && state !== 'loading'" class="pager cms-pager" aria-label="分页">
-        <button v-if="cmsFallback && cmsFallback.page !== cmsPage" @click="selectPage(cmsFallback.page)">返回第 {{ cmsFallback.page }} 页</button>
+        <button v-if="cmsFallback && cmsFallback.page !== cmsPage" @click="returnToCMSResult">返回第 {{ cmsFallback.page }} 页</button>
         <button v-else-if="!cmsFallback && cmsPage > 1" @click="selectPage(cmsPage - 1)">上一页</button>
         <span aria-current="page">第 {{ cmsFallback?.page ?? cmsPage }} 页</span>
         <button v-if="cmsHasMore && cmsPage < MAX_CMS_PAGE" @click="selectPage(cmsPage + 1)">下一页</button>
