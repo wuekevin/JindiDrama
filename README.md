@@ -159,3 +159,17 @@ Windows（PowerShell）
 $env:JINDIDRAMA_LICENSED_MEDIA_DIR = 'C:\Media\JindiDrama'
 & 'C:\Program Files\JindiDrama\JindiDrama.exe'
 ```
+
+### 连接参考项目的目录服务
+
+先在自己管理且有权使用的环境部署相应服务。启动金帝短剧前指定以下环境变量。
+
+| 变量 | 值 |
+| --- | --- |
+| `JINDIDRAMA_REFERENCE_PROVIDER` | `hongguo-open-player` 或 `hongguo-drama-server` |
+| `JINDIDRAMA_REFERENCE_URL` | Open Player 使用本机地址，如 `http://127.0.0.1:8900`。Docker 可使用本机 HTTP 或受信任的 HTTPS 服务地址 |
+| `JINDIDRAMA_REFERENCE_TOKEN` | 使用 `hongguo-drama-server` 时，填写部署时设置的 Bearer 令牌。使用 32 至 256 个可见 ASCII 字符，由启动环境提供 |
+
+[hongguo-open-player 的 HTTP 路由](https://github.com/zfdang/hongguo-open-player/blob/5e68b052cd4908d3367cbffa7afdf5c3f7720c81/src/server/index.js) 支持目录、搜索、详情和分集。适配器从本机播放器首页建立会话后调用同源 API。[hongguo-drama Docker Web/API](https://github.com/jackotom/hongguo-drama/blob/6816bf56f6cc692158a031724e961376a0b9cdc7/docs/docker.md) 支持搜索、详情和分集，可从金帝短剧的搜索框开始使用。
+
+两种连接均使用目录的只读接口。播放、账户和互动能力以 Provider 所报告的状态为准。目录响应需要在 1,000 集以内。未配置参考服务时使用演示片库，本地授权片库仍可独立使用。

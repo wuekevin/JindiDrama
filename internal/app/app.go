@@ -61,6 +61,11 @@ func NewWithAssets(assets fs.FS) *App {
 	return a
 }
 
+// ConfigureCatalogProvider selects an operator-configured catalog before Wails binds the app.
+func ConfigureCatalogProvider(a *App, catalog provider.VideoProvider) {
+	a.p = catalog
+}
+
 // SetFrontendReadyHandler wires the bundled frontend's startup acknowledgement.
 func SetFrontendReadyHandler(a *App, handler func()) {
 	a.frontendReady = handler

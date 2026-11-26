@@ -17,6 +17,7 @@ import (
 
 	"jindi-drama/internal/app"
 	"jindi-drama/internal/observability"
+	"jindi-drama/internal/provider/reference"
 )
 
 //go:embed all:frontend/dist
@@ -39,6 +40,14 @@ func main() {
 		return
 	}
 	a := app.NewWithAssets(webAssets)
+	if name := os.Getenv("JINDIDRAMA_REFERENCE_PROVIDER"); name != "" {
+		catalog, err := reference.New(name, os.Getenv("JINDIDRAMA_REFERENCE_URL"), os.Getenv("JINDIDRAMA_REFERENCE_TOKEN"))
+		if err != nil {
+			println(err.Error())
+			return
+		}
+		app.ConfigureCatalogProvider(a, catalog)
+	}
 	app.SetFrontendReadyHandler(a, func() {
 		documentReady.Store(true)
 		session.Load().Ready()
