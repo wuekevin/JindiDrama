@@ -15,6 +15,11 @@ export interface CatalogPage {
   hasMore: boolean
 }
 
+export interface CatalogGenre {
+  id: string
+  name: string
+}
+
 export interface LocalDanmaku { id: number; offsetMs: number; text: string }
 
 interface HistoryRow {
@@ -82,6 +87,8 @@ interface GoApp {
   Capabilities?(): Promise<Partial<Record<Capability, CapabilityState>>>
   CatalogSearch?(query: string): Promise<CatalogDrama[]>
   CatalogPage?(query: string, page: number): Promise<CatalogPage>
+  CatalogGenres?(): Promise<CatalogGenre[]>
+  CatalogGenrePage?(genre: string, page: number): Promise<CatalogPage>
   CatalogDrama?(id: string): Promise<CatalogDrama>
   CatalogEpisodes?(id: string): Promise<Episode[]>
   CatalogPlayback?(id: string, episode: number): Promise<PlaybackTicket>
@@ -336,6 +343,8 @@ export const activeProviderName = () => api()?.ProviderName?.()
 export const searchProvider = (query: string) => api()?.Search(query)
 export const searchActiveCatalog = (query: string) => api()?.CatalogSearch?.(query)
 export const loadCatalogPage = (query: string, page: number) => api()?.CatalogPage?.(query, page)
+export const loadCatalogGenres = () => api()?.CatalogGenres?.()
+export const loadCatalogGenrePage = (genre: string, page: number) => api()?.CatalogGenrePage?.(genre, page)
 export const loadCatalogDrama = (id: string) => api()?.CatalogDrama?.(id)
 export const hasCatalogPlayback = () => typeof api()?.CatalogPlayback === 'function'
 export const resolveCatalogPlayback = (id: string, episode: number) => api()?.CatalogPlayback?.(id, episode)

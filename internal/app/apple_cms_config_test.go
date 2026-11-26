@@ -258,3 +258,63 @@ func TestAppleCMSCatalogPageBinding(t *testing.T) {
 		t.Fatalf("upstream queries = %s", got)
 	}
 }
+
+func TestAppleCMSGenreBindingsUseConfiguredCatalog(t *testing.T) {
+	const genre = "90071992547409931234"
+	a := New()
+	if _, err := a.CatalogGenres(); !errors.Is(err, provider.ErrNotAuthorized) {
+		t.Fatalf("non-CMS genre catalog: %v", err)
+	}
+	if _, err := a.CatalogGenrePage(genre, 1); !errors.Is(err, provider.ErrNotAuthorized) {
+		t.Fatalf("non-CMS filtered catalog: %v", err)
+	}
+
+	client := newCatalogMediaClient()
+	var calls []string
+	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.Query()
+		calls = append(calls, q.Get("ac")+":"+q.Get("t")+":"+q.Get("pg")+":"+q.Get("ids"))
+		if req.URL.Scheme != "https" || req.URL.Host != "catalog.example.test" || req.URL.Path != "/vod" ||
+			q.Get("token") != "fixture" || q.Get("at") != "json" || q.Has("wd") {
+			t.Errorf("unexpected CMS request: %s", req.URL)
+		}
+		body := `{"code":1,"page":2,"pagecount":2,"list":[{"vod_id":43,"vod_name":"北海归航","type_id":` + genre + `}]}`
+		switch {
+		case q.Get("ac") == "list":
+			body = `{"code":1,"class":[{"type_id":` + genre + `,"type_name":"海岛"},{"type_id":7,"type_name":"海岛"}],"list":[{"vod_id":42,"vod_name":"普通目录","type_id":1}]}`
+		case q.Get("pg") == "1":
+			body = `{"code":1,"page":1,"pagecount":2,"list":[{"vod_id":44,"vod_name":"北海来信","type_id":"` + genre + `"}]}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	if err := configureAppleCMS(a, "https://catalog.example.test/vod?token=fixture&t=old", client); err != nil {
+		t.Fatal(err)
+	}
+	genres, err := a.CatalogGenres()
+	if err != nil || len(genres) != 2 || genres[0].ID != genre || genres[1].ID != "7" || genres[0].Name != genres[1].Name {
+		t.Fatalf("genre binding = %+v, %v", genres, err)
+	}
+	if _, err := a.CatalogGenrePage("0", 1); err == nil {
+		t.Fatal("invalid genre reached binding")
+	}
+	first, err := a.CatalogGenrePage(genre, 1)
+	if err != nil || !first.HasMore || len(first.Entries) != 1 || first.Entries[0].Title != "北海来信" {
+		t.Fatalf("first genre page = %+v, %v", first, err)
+	}
+	second, err := a.CatalogGenrePage(genre, 2)
+	if err != nil || second.HasMore || len(second.Entries) != 1 || second.Entries[0].Title != "北海归航" {
+		t.Fatalf("second genre page = %+v, %v", second, err)
+	}
+	detail, err := a.CatalogDrama(second.Entries[0].ID)
+	if err != nil || detail.ID != second.Entries[0].ID || detail.Title != second.Entries[0].Title {
+		t.Fatalf("genre detail = %+v, %v", detail, err)
+	}
+	payload, err := json.Marshal(second)
+	if err != nil || strings.Contains(string(payload), "type_id") || strings.Contains(string(payload), genre) ||
+		strings.Contains(string(payload), "catalog.example.test") {
+		t.Fatalf("unexpected genre page payload: %s, %v", payload, err)
+	}
+	if got, want := strings.Join(calls, ","), "list::1:,detail:"+genre+":1:,detail:"+genre+":2:,detail:::43"; got != want {
+		t.Fatalf("upstream queries = %s, want %s", got, want)
+	}
+}

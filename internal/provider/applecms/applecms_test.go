@@ -237,3 +237,178 @@ func TestCatalogPageMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogGenres(t *testing.T) {
+	const maxID = "123456789012345678901234567890"
+	const classes = `"class":[
+		{"type_id":` + maxID + `,"type_pid":7,"type_name":"<b>悬疑</b> https://catalog.example.test/?secret"},
+		{"type_id":"007","type_name":"&lt;b&gt;悬疑&lt;/b&gt; //catalog.example.test/?secret"},
+		{"type_id":7,"type_name":"重复"},
+		{"type_id":"` + maxID + `","type_name":"重复"},
+		{"type_id":0,"type_name":"零"},
+		{"type_id":"000","type_name":"零字符串"},
+		{"type_id":1.5,"type_name":"小数"},
+		{"type_id":1e10,"type_name":"指数"},
+		{"type_id":-1,"type_name":"负数"},
+		{"type_id":" 8","type_name":"空格"},
+		{"type_id":"` + maxID + `1","type_name":"超长"},
+		{"type_id":{},"type_name":"对象"},
+		{"type_id":8,"type_name":true},
+		{"type_id":8,"type_name":"https://catalog.example.test/?secret"},
+		null, "非对象", {}
+	]`
+	wantGenres := []CatalogGenre{{ID: maxID, Name: "悬疑"}, {ID: "7", Name: "悬疑"}}
+	bounded := make([]string, maxRecords+1)
+	wantBounded := make([]CatalogGenre, maxRecords)
+	for i := range bounded {
+		bounded[i] = fmt.Sprintf(`{"type_id":%d,"type_name":"正常分类"}`, i+1)
+		if i < maxRecords {
+			wantBounded[i] = CatalogGenre{ID: fmt.Sprint(i + 1), Name: "正常分类"}
+		}
+	}
+	tests := []struct {
+		name string
+		body string
+		want []CatalogGenre
+		err  error
+	}{
+		{"standard list", `{"code":1,` + classes + `,"list":[{"vod_id":42,"vod_name":"第一页","type_id":9}]}`, wantGenres, nil},
+		{"class only", `{"code":"1",` + classes + `}`, wantGenres, nil},
+		{"missing class", `{"code":1,"list":[{"type_name":"非分类目录"}]}`, []CatalogGenre{}, nil},
+		{"null class", `{"code":1,"class":null}`, []CatalogGenre{}, nil},
+		{"bounded", `{"code":1,"class":[` + strings.Join(bounded, ",") + `]}`, wantBounded, nil},
+		{"malformed class", `{"code":1,"class":{"url":"https://catalog.example.test/?secret"}}`, nil, errUpstream},
+		{"upstream error", `{"code":0,"msg":"private",` + classes + `}`, nil, errUpstream},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				const want = "ac=list&at=json&pg=1&token=fixture"
+				if r.URL.RawQuery != want {
+					t.Errorf("catalog genre query = %s, want %s", r.URL.RawQuery, want)
+				}
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+			p := fixtureProvider(t, server.URL+"?token=fixture&t=8&pg=4&wd=old&ids=41", server.Client())
+			genres, err := p.CatalogGenres(t.Context())
+			if err != tt.err || !slices.Equal(genres, tt.want) || (genres == nil) != (tt.want == nil) {
+				t.Fatalf("genres = %+v, %v, want %+v, %v", genres, err, tt.want, tt.err)
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("catalog genre requests = %d, want 1", calls.Load())
+			}
+		})
+	}
+}
+
+func TestCatalogGenrePageMatchesEveryRecord(t *testing.T) {
+	const row = `{"vod_id":42,"vod_name":"分类剧目","type_id":` + wideID + `,"type_name":"&lt;b&gt;剧情 &amp; 奇幻&lt;/b&gt; //catalog.example.test/?secret"}`
+	tests := []struct {
+		name  string
+		genre string
+		page  int
+		body  string
+		count int
+		more  bool
+		err   error
+	}{
+		{"first page", wideID, 1, `{"code":1,"page":1,"pagecount":2,"list":[` + row + `]}`, 1, true, nil},
+		{"next page", "00" + wideID, 2, `{"code":1,"page":"2","pagecount":2,"list":[{"vod_id":43,"vod_name":"下一部","type_id":"00` + wideID + `"}]}`, 1, false, nil},
+		{"empty page", wideID, 2, `{"code":1,"page":2,"pagecount":3,"list":[]}`, 0, false, nil},
+		{"mixed page", wideID, 1, `{"code":1,"list":[` + row + `,{"vod_id":43,"vod_name":"同类标签","type_name":"分类剧目","type_id":3}]}`, 0, false, errGenreMismatch},
+		{"missing type", wideID, 1, `{"code":1,"list":[` + row + `,{"vod_id":43,"vod_name":"缺少类型"}]}`, 0, false, errGenreMismatch},
+		{"invalid type", wideID, 1, `{"code":1,"list":[{"vod_id":42,"vod_name":"类型错误","type_id":9e19}]}`, 0, false, errGenreMismatch},
+		{"ignores class", wideID, 2, `{"code":1,"page":2,"class":"unused","list":[` + row + `]}`, 1, false, nil},
+		{"wrong page", wideID, 2, `{"code":1,"page":1,"list":[` + row + `]}`, 0, false, errPageMismatch},
+		{"blank genre", "", 1, "", 0, false, errInvalidGenre},
+		{"zero genre", "000", 1, "", 0, false, errInvalidGenre},
+		{"invalid genre", "1&t=2", 1, "", 0, false, errInvalidGenre},
+		{"overlong genre", strings.Repeat("1", 31), 1, "", 0, false, errInvalidGenre},
+		{"invalid page", wideID, 0, "", 0, false, errInvalidPage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var classCalls, pageCalls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.RawQuery == "ac=list&at=json&pg=1" {
+					classCalls.Add(1)
+					_, _ = io.WriteString(w, `{"code":1,"class":[{"type_id":`+wideID+`,"type_name":"剧情"}]}`)
+					return
+				}
+				pageCalls.Add(1)
+				want := fmt.Sprintf("ac=detail&at=json&pg=%d&t=%s", tt.page, wideID)
+				if r.URL.RawQuery != want {
+					t.Errorf("catalog genre page query = %s, want %s", r.URL.RawQuery, want)
+				}
+				_, _ = io.WriteString(w, tt.body)
+			}))
+			defer server.Close()
+			p := fixtureProvider(t, server.URL, server.Client())
+			page, err := p.CatalogGenrePage(t.Context(), tt.genre, tt.page)
+			if err != tt.err || len(page.Entries) != tt.count || page.HasMore != tt.more ||
+				(err == nil && (page.Page != tt.page || page.Entries == nil)) {
+				t.Fatalf("genre page = %+v, %v, want %d records, more=%v, err=%v", page, err, tt.count, tt.more, tt.err)
+			}
+			if tt.name == "first page" && !slices.Equal(page.Entries[0].Tags, []string{"剧情 & 奇幻"}) {
+				t.Fatalf("unexpected filtered page tags: %v", page.Entries[0].Tags)
+			}
+			wantCalls := int32(1)
+			if tt.body == "" {
+				wantCalls = 0
+			}
+			if classCalls.Load() != wantCalls || pageCalls.Load() != wantCalls {
+				t.Fatalf("class calls = %d, page calls = %d, want %d each", classCalls.Load(), pageCalls.Load(), wantCalls)
+			}
+		})
+	}
+}
+
+func TestCatalogGenrePageUsesLatestClassSnapshot(t *testing.T) {
+	var version, classCalls, pageCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("ac") == "list" {
+			classCalls.Add(1)
+			_, _ = fmt.Fprintf(w, `{"code":1,"class":[{"type_id":%d,"type_name":"剧情"}]}`, version.Load())
+			return
+		}
+		pageCalls.Add(1)
+		if q.Get("t") != fmt.Sprint(version.Load()) {
+			t.Errorf("unknown type reached upstream: %v", q)
+		}
+		_, _ = fmt.Fprintf(w, `{"code":1,"page":%s,"list":[]}`, q.Get("pg"))
+	}))
+	defer server.Close()
+	version.Store(1)
+	p := fixtureProvider(t, server.URL, server.Client())
+	for _, id := range []string{"9", "2"} {
+		if _, err := p.CatalogGenrePage(t.Context(), id, 1); err != errInvalidGenre {
+			t.Fatalf("unlisted genre %s: %v", id, err)
+		}
+	}
+	for page := 1; page <= 2; page++ {
+		if _, err := p.CatalogGenrePage(t.Context(), "1", page); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if classCalls.Load() != 1 || pageCalls.Load() != 2 {
+		t.Fatalf("initial requests: class %d, filtered %d", classCalls.Load(), pageCalls.Load())
+	}
+	version.Store(2)
+	genres, err := p.CatalogGenres(t.Context())
+	if err != nil || !slices.Equal(genres, []CatalogGenre{{ID: "2", Name: "剧情"}}) {
+		t.Fatalf("refresh = %v, %v", genres, err)
+	}
+	if _, err := p.CatalogGenrePage(t.Context(), "1", 2); err != errInvalidGenre {
+		t.Fatalf("deleted genre: %v", err)
+	}
+	if _, err := p.CatalogGenrePage(t.Context(), "2", 1); err != nil {
+		t.Fatal(err)
+	}
+	if classCalls.Load() != 2 || pageCalls.Load() != 3 {
+		t.Fatalf("requests after refresh: class %d, filtered %d", classCalls.Load(), pageCalls.Load())
+	}
+}

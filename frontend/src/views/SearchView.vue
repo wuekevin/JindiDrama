@@ -2,7 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
-import { catalogProviderName, loadCatalogHome, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
+import type { CatalogGenre } from '@/bindings'
+import { catalogProviderName, loadCatalogHome, loadCMSCatalogGenrePage, loadCMSCatalogGenres, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
@@ -37,14 +38,31 @@ const discovery = computed(() => searchDiscovery(route.query))
 const browseTopics = computed(() => discovery.value === 'topics')
 const feed = computed(() => discovery.value === 'topics' ? undefined : discovery.value)
 const topic = computed(() => typeof route.query.topic === 'string' ? route.query.topic.trim() : '')
+const genre = computed(() => route.query.genre)
 const catalogLabel = ref<string>()
 const discoveryTitle = computed(() => {
   if (feed.value === 'today' && catalogLabel.value) return catalogLabel.value
   if (feed.value) return feedLabels[feed.value]
-  return browseTopics.value ? '按题材浏览' : ''
+  return browseTopics.value ? (cmsTopics.value ? '按分类浏览' : '按题材浏览') : ''
 })
 const topics = ref<string[]>([])
 const knownTopic = computed(() => topics.value.includes(topic.value))
+const cmsGenres = ref<CatalogGenre[]>()
+const genreOptions = computed(() => {
+  const genres = cmsGenres.value ?? []
+  const counts = new Map<string, number>()
+  for (const { name } of genres) counts.set(name, (counts.get(name) ?? 0) + 1)
+  const labels = new Set(['全部分类', ...counts.keys()])
+  return genres.map(({ id, name }) => {
+    if (counts.get(name) === 1 && name !== '全部分类') return { id, name }
+    let label = `${name}（ID ${id}）`
+    for (let suffix = 2; labels.has(label); suffix++) label = `${name}（ID ${id} · ${suffix}）`
+    labels.add(label)
+    return { id, name: label }
+  })
+})
+const selectedGenre = computed(() => cmsGenres.value?.find(({ id }) => id === genre.value))
+const invalidCMSGenre = ref(false)
 const kind = computed(() => String(route.query.kind ?? ''))
 const status = computed(() => String(route.query.status ?? '') as SearchFilters['status'])
 const sort = computed(() => String(route.query.sort ?? 'comprehensive') as NonNullable<SearchFilters['sort']>)
@@ -56,6 +74,7 @@ const cmsPage = computed(() => {
   return value >= 1 && value <= MAX_CMS_PAGE ? value : 1
 })
 const cmsPagination = ref(false)
+const cmsTopics = computed(() => browseTopics.value && cmsPagination.value)
 const cmsHasMore = ref(false)
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
 const isDemo = ref(false)
@@ -64,6 +83,7 @@ const err = ref(''); const items = ref<Drama[]>([])
 let token = 0
 let providerKnown = false
 let providerName: string | undefined
+let lastGenreScope: string | undefined
 let lastCMSRequest: { scope: string; page: number } | undefined
 const patch = (o: Record<string, string | undefined>) => router.replace({ query: { ...route.query, ...o } })
 const errorMessage = (cause: unknown) => typeof cause === 'string' ? cause
@@ -74,14 +94,25 @@ function focusResults() {
 }
 function retry() {
   if (cmsPagination.value) focusResults()
-  void run()
+  void run(true)
 }
-async function run() {
+function showInvalidCMSGenre() {
+  invalidCMSGenre.value = true
+  items.value = []
+  state.value = 'empty'
+}
+async function run(isRetry = false) {
   const my = ++token
   state.value = 'loading'
   page.value = 1
   cmsHasMore.value = false
+  invalidCMSGenre.value = false
   localResultsOnly.value = false
+  const topicBrowse = browseTopics.value
+  if (!topicBrowse) {
+    cmsGenres.value = undefined
+    lastGenreScope = undefined
+  }
   if (route.query.state === 'loading') return
   try {
     const name = await catalogProviderName()
@@ -89,6 +120,11 @@ async function run() {
     const sourceChanged = providerKnown && name !== providerName
     providerKnown = true
     providerName = name
+    if (sourceChanged) {
+      cmsGenres.value = undefined
+      lastGenreScope = undefined
+      lastCMSRequest = undefined
+    }
     if (sourceChanged && route.query.page !== undefined && (cmsPagination.value || name === 'apple-cms')) {
       await patch({ page: undefined })
       return
@@ -98,18 +134,33 @@ async function run() {
     isDemo.value = demo
     const mode = route.query.state === 'error' ? 'error' : 'normal'
     const section = feed.value
-    const topicBrowse = browseTopics.value
     const selectedTopic = topic.value
-    cmsPagination.value = name === 'apple-cms' && (section === 'today' ||
-      (!section && !topicBrowse && !castOnly.value && kind.value !== '本地片库'))
+    cmsPagination.value = name === 'apple-cms' && (section === 'today' || topicBrowse ||
+      (!section && !castOnly.value && kind.value !== '本地片库'))
     let results: Drama[]
     let localOnly = false
     let tags: string[] = []
     let label: string | undefined
     if (cmsPagination.value) {
-      const keyword = section ? '' : q.value
+      const requestedGenre = genre.value
+      if (topicBrowse) {
+        const genreScope = typeof requestedGenre === 'string' && /^[1-9][0-9]{0,29}$/.test(requestedGenre)
+          ? requestedGenre : undefined
+        if (isRetry || cmsGenres.value === undefined || (genreScope && lastGenreScope !== genreScope)) {
+          const genres = await loadCMSCatalogGenres(mode)
+          if (my !== token) return
+          cmsGenres.value = genres
+        }
+        lastGenreScope = genreScope
+        if (requestedGenre !== undefined && !selectedGenre.value) {
+          showInvalidCMSGenre()
+          return
+        }
+      }
+      const genreID = topicBrowse ? selectedGenre.value?.id : undefined
+      const keyword = section || topicBrowse ? '' : q.value
       const requestedPage = cmsPage.value
-      const scope = section ? 'today' : `search:${keyword}`
+      const scope = topicBrowse ? `genre:${genreID ?? ''}` : section ? 'today' : `search:${keyword}`
       const pageChanged = lastCMSRequest?.scope === scope
         ? lastCMSRequest.page !== requestedPage
         : requestedPage > 1
@@ -121,14 +172,26 @@ async function run() {
         if (my !== token) return
         focusResults()
       }
-      const local = !section && requestedPage === 1 ? catalog.searchLocal(keyword) : []
+      const local = !section && !topicBrowse && requestedPage === 1 ? catalog.searchLocal(keyword) : []
       try {
-        const remote = await loadCMSCatalogPage(keyword, requestedPage, mode)
+        const remote = genreID
+          ? await loadCMSCatalogGenrePage(genreID, requestedPage, mode)
+          : await loadCMSCatalogPage(keyword, requestedPage, mode)
         if (my !== token) return
+        if (genreID && !remote.entries.length) {
+          const genres = await loadCMSCatalogGenres(mode)
+          if (my !== token) return
+          cmsGenres.value = genres
+          if (!selectedGenre.value) {
+            showInvalidCMSGenre()
+            return
+          }
+        }
         cmsHasMore.value = remote.hasMore
         results = [...local, ...remote.entries]
       } catch (error) {
         if (my !== token) return
+        if (topicBrowse) throw new Error('苹果 CMS 分类暂不可用')
         if (!local.length) throw error
         localOnly = true
         results = local
@@ -170,9 +233,10 @@ async function run() {
 watch([
   () => discovery.value ?? route.fullPath,
   () => browseTopics.value ? topic.value : '',
+  () => browseTopics.value ? genre.value : undefined,
   () => route.query.state,
-  () => feed.value === 'today' ? route.query.page : undefined,
-], ([key, selectedTopic, mode], [previousKey, previousTopic, previousMode]) => {
+  () => feed.value === 'today' || browseTopics.value ? route.query.page : undefined,
+], ([key, selectedTopic, , mode], [previousKey, previousTopic, , previousMode]) => {
   // Other providers already have the full discovery list in memory.
   if (key === previousKey && selectedTopic === previousTopic && mode === previousMode &&
       providerKnown && providerName !== 'apple-cms' && !cmsPagination.value) return
@@ -197,6 +261,9 @@ const selectTopic = (event: Event) => {
   const value = (event.target as HTMLSelectElement).value
   return patch({ topic: value || undefined, page: undefined })
 }
+function selectGenre(value: string) {
+  return router.push({ query: { ...route.query, genre: value || undefined, topic: undefined, page: undefined } })
+}
 const selectKind = (value: string) => patch(value === '本地片库'
   ? { kind: value, status: undefined, page: undefined }
   : { kind: value || undefined, page: undefined })
@@ -220,11 +287,19 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
     <div class="main">
       <header class="head">
         <h1 ref="heading" :tabindex="cmsPagination ? -1 : undefined"><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
-        <p v-if="state === 'ready' || state === 'empty'" class="count" data-testid="result-count">{{ cmsPagination ? '本页共' : '共找到' }} {{ items.length }} 部相关内容</p>
+        <p v-if="state === 'ready' || state === 'empty' && !invalidCMSGenre" class="count" data-testid="result-count">{{ cmsPagination ? '本页共' : '共找到' }} {{ items.length }} 部相关内容</p>
         <p v-if="localResultsOnly" class="count" role="status">主目录暂不可用，已显示本地片库的匹配结果。</p>
         <BaseButton v-if="cmsPagination && localResultsOnly" class="catalog-retry" variant="outline" @click="retry">重试</BaseButton>
       </header>
-      <label v-if="browseTopics" class="topic-filter">
+      <label v-if="cmsTopics" class="topic-filter">
+        分类
+        <select :value="selectedGenre?.id ?? ''" :disabled="!genreOptions.length" data-testid="genre-select" @change="selectGenre(($event.target as HTMLSelectElement).value)">
+          <option value="">全部分类</option>
+          <option v-for="{ id, name } in genreOptions" :key="id" :value="id">{{ name }}</option>
+        </select>
+      </label>
+      <p v-if="cmsTopics && cmsGenres?.length === 0" class="genre-status" role="status">片源未提供分类，可浏览全部目录。</p>
+      <label v-if="browseTopics && !cmsTopics" class="topic-filter">
         题材
         <select :value="knownTopic ? topic : ''" data-testid="topic-select" @change="selectTopic">
           <option value="">全部题材</option>
@@ -241,8 +316,12 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 
       <div v-if="state === 'loading'" class="list"><Skeleton v-for="i in 4" :key="i" style="height: 138px" /></div>
       <ErrorState v-else-if="state === 'error'" :message="err" @retry="retry" />
-      <EmptyState v-else-if="state === 'empty'" :title="cmsPagination && cmsPage > 1 ? '本页暂无短剧' : feed ? '暂无短剧' : browseTopics && topic && !knownTopic ? '目录没有这个题材' : '没有找到相关短剧'" :hint="discoveryTitle ? undefined : '换个关键词，或查看热搜关键词'">
-        <BaseButton v-if="!discoveryTitle || browseTopics && topic" variant="outline" @click="browseTopics ? patch({ topic: undefined, page: undefined }) : router.push({ name: 'search' })">清除筛选</BaseButton>
+      <EmptyState v-else-if="invalidCMSGenre" title="片源目录没有这个分类">
+        <BaseButton variant="outline" @click="selectGenre('')">查看全部分类</BaseButton>
+      </EmptyState>
+      <EmptyState v-else-if="state === 'empty'" :title="cmsPagination && cmsPage > 1 ? '本页暂无短剧' : feed ? '暂无短剧' : browseTopics && !cmsTopics && topic && !knownTopic ? '目录没有这个题材' : '没有找到相关短剧'" :hint="discoveryTitle ? undefined : '换个关键词，或查看热搜关键词'">
+        <BaseButton v-if="cmsTopics && selectedGenre" variant="outline" @click="selectGenre('')">查看全部分类</BaseButton>
+        <BaseButton v-else-if="!discoveryTitle || browseTopics && !cmsTopics && topic" variant="outline" @click="browseTopics ? patch({ topic: undefined, page: undefined }) : router.push({ name: 'search' })">清除筛选</BaseButton>
       </EmptyState>
       <ul v-else class="list">
         <li v-for="d in shown" :key="`${d.providerOnly ? 'catalog' : 'local'}:${d.id}`" class="item" data-testid="result-card">
@@ -257,7 +336,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
             <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id, d.providerOnly))">查看详情</BaseButton></div>
         </li>
       </ul>
-      <nav v-if="cmsPagination && state !== 'loading'" class="pager cms-pager" aria-label="分页">
+      <nav v-if="cmsPagination && !invalidCMSGenre && state !== 'loading'" class="pager cms-pager" aria-label="分页">
         <button v-if="cmsPage > 1" @click="selectPage(cmsPage - 1)">上一页</button>
         <span aria-current="page">第 {{ cmsPage }} 页</span>
         <button v-if="cmsHasMore && cmsPage < MAX_CMS_PAGE" @click="selectPage(cmsPage + 1)">下一页</button>
@@ -283,7 +362,8 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 .filters { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; padding-left: 0; }
 .discovery .list { margin-top: 18px; }
 .topic-filter { display: flex; align-items: center; gap: 12px; margin: 22px 0 16px 10px; }
-.topic-filter select { min-width: 0; background: var(--c-surface); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 6px 10px; }
+.topic-filter select { min-width: 0; max-width: 85%; background: var(--c-surface); color: var(--c-text); border: 1px solid var(--c-border-strong); border-radius: 8px; padding: 6px 10px; }
+.genre-status { margin: 0 0 16px 10px; color: var(--c-text-2); font-size: 15px; }
 .filters-last { margin-bottom: 16px; }
 .pill { height: 36px; padding: 0 22px; display: inline-flex; align-items: center; gap: 8px; border-radius: 18px; background: var(--c-surface); border: 1px solid var(--c-border-strong); font-size: 15px; &:hover { background: var(--c-surface-hover); } &.on { background: var(--g-accent); border-color: transparent; box-shadow: 0 4px 14px rgba(220,58,42,.35); } }
 .sorts { display: flex; align-items: center; gap: 0; margin: 18px 0 16px 0; font-size: 16px; .comp { display: inline-flex; align-items: center; gap: 6px; padding-right: 20px; } button { padding: 0 24px; border-left: 1px solid var(--c-border-strong); color: var(--c-text); line-height: 1; &.on { color: var(--c-accent-2); } &:first-of-type { border-left: 0; padding-left: 12px; } } }

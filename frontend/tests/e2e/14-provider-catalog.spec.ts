@@ -288,3 +288,232 @@ test('empty CMS pages can go back and unsafe hash page values resolve to page on
   }
   expect(await cmsPageCalls(page)).toEqual([['无结果', 2], ...Array.from({ length: 6 }, () => ['无结果', 1])])
 })
+
+const wideGenre = '90071992547409931234'
+type CMSGenreWindow = typeof window & {
+  cmsGenreCalls: string[]
+  releaseCMSGenrePage: () => void
+  deleteCMSGenre: (genre: string) => void
+  setNextCMSGenrePage: (outcome: 'empty' | 'error') => void
+}
+
+async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'retry-class' | 'late-page' = 'normal') {
+  await page.addInitScript(({ wideGenre, scenario }) => {
+    const row = (id: string, title: string, tags = ['剧情']) => ({
+      id: 'apple-cms:0123456789abcdef0123456789abcdef:' + id,
+      title, summary: '授权片源目录提供的短剧。', tags, episodeCount: 1, updatedTo: 1,
+    })
+    const allFirst = row('1', '未分类目录第一页')
+    const allSecond = row('2', '未分类目录第二页')
+    const first = row('3', '北海来信', ['海岛'])
+    const second = row('4', '北海归航', ['海岛'])
+    const other = row('5', '山中信号', ['海岛'])
+    const calls: string[] = []
+    const deleted = new Set<string>()
+    let nextOutcome: Parameters<CMSGenreWindow['setNextCMSGenrePage']>[0] | undefined
+    let classAttempts = 0
+    let otherAttempts = 0
+    Object.assign(window, {
+      cmsGenreCalls: calls,
+      deleteCMSGenre: (genre: string) => deleted.add(genre),
+      setNextCMSGenrePage: (outcome: typeof nextOutcome) => { nextOutcome = outcome },
+      go: { app: { App: {
+      StorageReady: async () => false,
+      ProviderName: async () => 'apple-cms',
+      Capabilities: async () => ({ catalog: 'ready', search: 'ready' }),
+      Home: async () => [allFirst],
+      HomeFeed: async () => ({ catalogLabel: '片源目录', todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
+      LicensedCatalog: async () => [{ ...row('20', '本地海岛短剧'), id: 'local-island', license: 'QA' }],
+      CatalogSearch: async () => { calls.push('search'); return [allFirst] },
+      CatalogPage: async (_query: string, pg: number) => {
+        calls.push('all:' + pg)
+        return { entries: [pg === 1 ? allFirst : allSecond], page: pg, hasMore: pg === 1 }
+      },
+      CatalogGenres: async () => {
+        calls.push('class')
+        if (scenario === 'retry-class' && ++classAttempts === 1) throw new Error('fixture upstream URL')
+        return scenario === 'no-class' ? [] : [
+          { id: wideGenre, name: '海岛' }, { id: '7', name: '海岛' }, { id: '8', name: `海岛（ID ${wideGenre}）` },
+        ].filter(({ id }) => !deleted.has(id))
+      },
+      CatalogGenrePage: async (genre: string, pg: number) => {
+        calls.push('genre:' + genre + ':' + pg)
+        const outcome = nextOutcome
+        nextOutcome = undefined
+        if (outcome === 'error') throw new Error('苹果 CMS 返回的短剧与请求分类不一致')
+        if (outcome === 'empty' || deleted.has(genre)) return { entries: [], page: pg, hasMore: false }
+        if (genre === '7' && scenario === 'late-page' && ++otherAttempts === 1) {
+          throw new Error('苹果 CMS 返回的短剧与请求分类不一致')
+        }
+        if (scenario === 'late-page' && genre === wideGenre && pg === 2) {
+          await new Promise<void>((resolve) => { Object.assign(window, { releaseCMSGenrePage: resolve }) })
+        }
+        return { entries: [genre === '7' ? other : pg === 1 ? first : second], page: pg, hasMore: genre === wideGenre && pg === 1 }
+      },
+      CatalogDrama: async (id: string) => {
+        calls.push('detail:' + id)
+        return [first, second, other].find((item) => item.id === id)
+      },
+      CatalogEpisodes: async (id: string) => [{ index: 1, available: true, dramaId: id }],
+    } } } })
+  }, { wideGenre, scenario })
+}
+
+const cmsGenreCalls = (page: Page) => page.evaluate(() => (window as CMSGenreWindow).cmsGenreCalls)
+
+test('CMS classifications come from class and restore the selected ID and page through history', async ({ page }, testInfo) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/home')
+  await page.getByText('分类', { exact: true }).click()
+  const heading = page.getByRole('heading', { name: '按分类浏览' })
+  const select = page.getByRole('combobox', { name: '分类' })
+  const cards = page.getByTestId('result-card')
+  await expect(heading).toBeVisible()
+  await expect(cards).toContainText('未分类目录第一页')
+  await expect(select.locator('option')).toHaveText([
+    '全部分类', `海岛（ID ${wideGenre} · 2）`, '海岛（ID 7）', `海岛（ID ${wideGenre}）`,
+  ])
+  expect(await cmsGenreCalls(page)).toEqual(['class', 'all:1'])
+
+  await select.selectOption(wideGenre)
+  await expect(page).toHaveURL(new RegExp('browse=topics&genre=' + wideGenre + '$'))
+  await expect(cards).toContainText('北海来信')
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(heading).toBeFocused()
+  await expect(page).toHaveURL(new RegExp('browse=topics&genre=' + wideGenre + '&page=2$'))
+  await expect(select).toHaveValue(wideGenre)
+  await expect(cards).toHaveCount(1)
+  await expect(cards).toContainText('北海归航')
+  await expect(page.getByRole('navigation', { name: '分页' })).toContainText('第 2 页')
+  expect(await cmsGenreCalls(page)).toEqual(['class', 'all:1', 'class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`])
+  await page.screenshot({ path: testInfo.outputPath('apple-cms-genre-page-2.png') })
+
+  await select.selectOption('7')
+  await expect(page).toHaveURL(/browse=topics&genre=7$/)
+  await expect(cards).toContainText('山中信号')
+  await page.goBack()
+  await expect(cards).toContainText('北海归航')
+  await expect(select).toHaveValue(wideGenre)
+  await page.goForward()
+  await expect(cards).toContainText('山中信号')
+  await expect(select).toHaveValue('7')
+  await page.goBack()
+  await expect(cards).toContainText('北海归航')
+  expect((await cmsGenreCalls(page)).filter((call) => call === 'class')).toHaveLength(6)
+  await page.reload()
+  await expect(cards).toContainText('北海归航')
+  await expect(select).toHaveValue(wideGenre)
+  expect(await cmsGenreCalls(page)).toEqual(['class', `genre:${wideGenre}:2`])
+  await cards.getByTestId('view-detail').click()
+  await expect(page).toHaveURL(/#\/catalog\/apple-cms%3A0123456789abcdef0123456789abcdef%3A4$/)
+  await expect(page.getByRole('heading', { name: '北海归航' })).toBeVisible()
+})
+
+test('CMS without class supports all pages and recovers from unavailable ID routes', async ({ page }) => {
+  await setupCMSGenres(page, 'no-class')
+  await page.goto('/#/search?browse=topics&genre=7&page=2')
+  await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  await expect(page.getByRole('status').filter({ hasText: '片源未提供分类' })).toBeVisible()
+  expect(await cmsGenreCalls(page)).toEqual(['class'])
+  await page.getByRole('button', { name: '查看全部分类' }).click()
+  await expect(page).toHaveURL(/browse=topics$/)
+  await expect(page.getByRole('combobox', { name: '分类' })).toHaveValue('')
+  await expect(page.getByTestId('result-card')).toContainText('未分类目录第一页')
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByTestId('result-card')).toContainText('未分类目录第二页')
+  expect(await cmsGenreCalls(page)).toEqual(['class', 'all:1', 'all:2'])
+})
+
+test('CMS invalid and expired classifications stay off the wire, and a failed class request retries', async ({ page }) => {
+  await setupCMSGenres(page, 'retry-class')
+  await page.goto('/#/search?browse=topics&genre=9')
+  await expect(page.getByTestId('error')).toContainText('苹果 CMS 分类暂不可用')
+  expect(await cmsGenreCalls(page)).toEqual(['class'])
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  for (const genre of ['0', '7&genre=9', '7%26t%3D9']) {
+    await page.evaluate((genre) => { location.hash = '/search?browse=topics&genre=' + genre }, genre)
+    await expect(page).toHaveURL(new RegExp('genre=' + genre + '$'))
+    await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  }
+  expect(await cmsGenreCalls(page)).toEqual(['class', 'class'])
+  await page.getByRole('button', { name: '查看全部分类' }).click()
+  await expect(page.getByTestId('result-card')).toContainText('未分类目录第一页')
+  expect(await cmsGenreCalls(page)).toEqual(['class', 'class', 'all:1'])
+})
+
+test('CMS switching classification discards a late page and retries a filter error', async ({ page }) => {
+  await setupCMSGenres(page, 'late-page')
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const cards = page.getByTestId('result-card')
+  await expect(cards).toContainText('北海来信')
+  await page.getByRole('button', { name: '下一页' }).click()
+  const initialCalls = ['class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`]
+  await expect.poll(() => cmsGenreCalls(page)).toEqual(initialCalls)
+  await expect(cards).toHaveCount(0)
+  await page.getByRole('combobox', { name: '分类' }).selectOption('7')
+  await expect(page.getByTestId('error')).toContainText('苹果 CMS 分类暂不可用')
+  await expect(cards).toHaveCount(0)
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(cards).toContainText('山中信号')
+  await page.evaluate(async () => {
+    (window as CMSGenreWindow).releaseCMSGenrePage()
+    await new Promise(requestAnimationFrame)
+  })
+  await expect(cards).toHaveCount(1)
+  await expect(cards).toContainText('山中信号')
+  await expect(page.getByRole('navigation', { name: '分页' })).toContainText('第 1 页')
+  expect(await cmsGenreCalls(page)).toEqual([...initialCalls, 'class', 'genre:7:1', 'class', 'genre:7:1'])
+})
+
+test('CMS re-entry refreshes a deleted genre while remaining on the search view', async ({ page }) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const cards = page.getByTestId('result-card')
+  await expect(cards).toContainText('北海来信')
+  await page.evaluate((id) => (window as CMSGenreWindow).deleteCMSGenre(id), wideGenre)
+  const input = page.getByTestId('search-input')
+  await input.fill('关键词')
+  await input.press('Enter')
+  await expect(cards).toContainText('未分类目录第一页')
+  await page.goBack()
+  await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  await expect(page.locator(`option[value="${wideGenre}"]`)).toHaveCount(0)
+  expect((await cmsGenreCalls(page)).filter((call) => call !== 'search')).toEqual([
+    'class', `genre:${wideGenre}:1`, 'all:1', 'class',
+  ])
+})
+
+test('CMS verifies empty pages and removes a deleted classification', async ({ page }) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const cards = page.getByTestId('result-card')
+  const next = page.getByRole('button', { name: '下一页' })
+  await expect(cards).toContainText('北海来信')
+  await page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('empty'))
+  await next.click()
+  await expect(page.getByTestId('empty')).toContainText('本页暂无短剧')
+  await page.getByRole('button', { name: '上一页' }).click()
+  await expect(cards).toContainText('北海来信')
+  await page.evaluate((id) => (window as CMSGenreWindow).deleteCMSGenre(id), wideGenre)
+  await next.click()
+  await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  await expect(page.locator(`option[value="${wideGenre}"]`)).toHaveCount(0)
+  expect(await cmsGenreCalls(page)).toEqual([
+    'class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class',
+    `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class',
+  ])
+})
+
+test('CMS retry refreshes a previously valid classification before sending a filter', async ({ page }) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  await expect(page.getByTestId('result-card')).toContainText('北海来信')
+  await page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('error'))
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByTestId('error')).toBeVisible()
+  await page.evaluate((id) => (window as CMSGenreWindow).deleteCMSGenre(id), wideGenre)
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
+  expect(await cmsGenreCalls(page)).toEqual(['class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class'])
+})

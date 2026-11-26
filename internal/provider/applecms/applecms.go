@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"jindi-drama/internal/provider"
@@ -31,12 +32,15 @@ const (
 )
 
 var (
-	errUpstream     = errors.New("苹果 CMS 目录暂不可用")
-	errInvalidPage  = errors.New("苹果 CMS 请求页码无效")
-	errPageMismatch = errors.New("苹果 CMS 返回的页码与请求不一致")
-	htmlTag         = regexp.MustCompile(`<[^>]*>`)
-	metadataURL     = regexp.MustCompile(`(?i)https?://[^\s\p{Z}<>"，。；！？、）】》]+`)
-	episodeLabel    = regexp.MustCompile(`^(?:([0-9]+)|第\s*([0-9]+)\s*集)$`)
+	errUpstream      = errors.New("苹果 CMS 目录暂不可用")
+	errInvalidPage   = errors.New("苹果 CMS 请求页码无效")
+	errPageMismatch  = errors.New("苹果 CMS 返回的页码与请求不一致")
+	errInvalidGenre  = errors.New("苹果 CMS 分类无效")
+	errGenreMismatch = errors.New("苹果 CMS 返回的短剧与请求分类不一致")
+	htmlTag          = regexp.MustCompile(`<[^>]*>`)
+	metadataURL      = regexp.MustCompile(`(?i)https?://[^\s\p{Z}<>"，。；！？、）】》]+`)
+	genreURL         = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*:)?//[^\s\p{Z}<>"，。；！？、）】》]+`)
+	episodeLabel     = regexp.MustCompile(`^(?:([0-9]+)|第\s*([0-9]+)\s*集)$`)
 )
 
 type Provider struct {
@@ -44,12 +48,19 @@ type Provider struct {
 	idPrefix string
 	client   *http.Client
 	media    func(string) (provider.MediaSource, bool)
+	genreMu  sync.Mutex
+	genreIDs map[string]bool
 }
 
 type CatalogPage struct {
 	Entries []provider.Drama `json:"entries"`
 	Page    int              `json:"page"`
 	HasMore bool             `json:"hasMore"`
+}
+
+type CatalogGenre struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 var _ provider.VideoProvider = (*Provider)(nil)
@@ -103,10 +114,87 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.Drama, 
 }
 
 func (p *Provider) CatalogPage(ctx context.Context, query string, page int) (CatalogPage, error) {
+	return p.catalogPage(ctx, strings.TrimSpace(query), "", page)
+}
+
+func (p *Provider) CatalogGenres(ctx context.Context) ([]CatalogGenre, error) {
+	p.genreMu.Lock()
+	defer p.genreMu.Unlock()
+	return p.refreshCatalogGenres(ctx)
+}
+
+// refreshCatalogGenres replaces the genre snapshot with genreMu held.
+func (p *Provider) refreshCatalogGenres(ctx context.Context) ([]CatalogGenre, error) {
+	data, err := p.request(ctx, url.Values{"ac": {"list"}, "pg": {"1"}})
+	if err != nil {
+		return nil, err
+	}
+	var classes []json.RawMessage
+	if len(data.Class) > 0 && json.Unmarshal(data.Class, &classes) != nil {
+		return nil, errUpstream
+	}
+	genres := make([]CatalogGenre, 0, min(len(classes), maxRecords))
+	seen := make(map[string]bool)
+	for _, raw := range classes {
+		var item struct {
+			ID   json.RawMessage `json:"type_id"`
+			Name string          `json:"type_name"`
+		}
+		if json.Unmarshal(raw, &item) != nil {
+			continue
+		}
+		id := genreID(scalar(item.ID).text())
+		name := genreText(item.Name)
+		if id == "" || name == "" || seen[id] {
+			continue
+		}
+		seen[id] = true
+		genres = append(genres, CatalogGenre{ID: id, Name: name})
+		if len(genres) == maxRecords {
+			break
+		}
+	}
+	p.genreIDs = seen
+	return genres, nil
+}
+
+func (p *Provider) requireCatalogGenre(ctx context.Context, id string) error {
+	p.genreMu.Lock()
+	defer p.genreMu.Unlock()
+	if p.genreIDs == nil {
+		if _, err := p.refreshCatalogGenres(ctx); err != nil {
+			return err
+		}
+	}
+	if !p.genreIDs[id] {
+		return errInvalidGenre
+	}
+	return nil
+}
+
+func (p *Provider) CatalogGenrePage(ctx context.Context, genre string, page int) (CatalogPage, error) {
+	id := genreID(genre)
+	if id == "" {
+		return CatalogPage{}, errInvalidGenre
+	}
+	return p.catalogPage(ctx, "", id, page)
+}
+
+func (p *Provider) catalogPage(ctx context.Context, keyword, genre string, page int) (CatalogPage, error) {
 	if page < 1 || page > maxPage {
 		return CatalogPage{}, errInvalidPage
 	}
-	data, err := p.request(ctx, strings.TrimSpace(query), "", page)
+	query := url.Values{"ac": {"detail"}, "pg": {strconv.Itoa(page)}}
+	if keyword != "" {
+		query.Set("wd", keyword)
+	}
+	if genre != "" {
+		if err := p.requireCatalogGenre(ctx, genre); err != nil {
+			return CatalogPage{}, err
+		}
+		query.Set("t", genre)
+	}
+	data, err := p.request(ctx, query)
 	if err != nil {
 		return CatalogPage{}, err
 	}
@@ -121,6 +209,9 @@ func (p *Provider) CatalogPage(ctx context.Context, query string, page int) (Cat
 	results := make([]provider.Drama, 0, len(data.List))
 	seen := make(map[string]bool)
 	for _, item := range data.List {
+		if genre != "" && genreID(scalar(item.TypeID).text()) != genre {
+			return CatalogPage{}, errGenreMismatch
+		}
 		id := scalar(item.ID).decimal(30)
 		title := metadataText(item.Name)
 		if id == "" || title == "" || seen[id] {
@@ -181,7 +272,7 @@ func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[i
 	if !ok || !decimalDigits(vodID, 30) {
 		return provider.Drama{}, nil, provider.ErrNotFound
 	}
-	data, err := p.request(ctx, "", vodID, 0)
+	data, err := p.request(ctx, url.Values{"ac": {"detail"}, "ids": {vodID}})
 	if err != nil {
 		return provider.Drama{}, nil, err
 	}
@@ -231,8 +322,16 @@ func decimalDigits(value string, limit int) bool {
 	}) < 0
 }
 
+func genreID(value string) string {
+	if decimalDigits(value, 30) {
+		return strings.TrimLeft(value, "0")
+	}
+	return ""
+}
+
 type record struct {
 	ID         json.RawMessage `json:"vod_id"`
+	TypeID     json.RawMessage `json:"type_id"`
 	Name       string          `json:"vod_name"`
 	Category   string          `json:"type_name"`
 	Summary    string          `json:"vod_content"`
@@ -250,20 +349,15 @@ type response struct {
 	Page      json.RawMessage `json:"page"`
 	PageCount json.RawMessage `json:"pagecount"`
 	List      []record        `json:"list"`
+	Class     json.RawMessage `json:"class"`
 }
 
-func (p *Provider) request(ctx context.Context, keyword, id string, page int) (response, error) {
+func (p *Provider) request(ctx context.Context, params url.Values) (response, error) {
 	endpoint := p.endpoint
 	query := endpoint.Query()
-	query.Set("ac", "detail")
 	query.Set("at", "json")
-	if id == "" {
-		query.Set("pg", strconv.Itoa(page))
-		if keyword != "" {
-			query.Set("wd", keyword)
-		}
-	} else {
-		query.Set("ids", id)
+	for key, values := range params {
+		query[key] = values
 	}
 	endpoint.RawQuery = query.Encode()
 
@@ -284,12 +378,20 @@ func (p *Provider) request(ctx context.Context, keyword, id string, page int) (r
 	if err != nil || len(body) > maxResponseBytes {
 		return response{}, errUpstream
 	}
-	var data response
-	if err := json.Unmarshal(body, &data); err != nil || scalar(data.Code).decimal(1) != "1" ||
-		data.List == nil || len(data.List) > maxRecords {
+	var wire struct {
+		response
+		List json.RawMessage `json:"list"`
+	}
+	if err := json.Unmarshal(body, &wire); err != nil || scalar(wire.Code).decimal(1) != "1" {
 		return response{}, errUpstream
 	}
-	return data, nil
+	if params.Get("ac") != "list" {
+		if json.Unmarshal(wire.List, &wire.response.List) != nil ||
+			wire.response.List == nil || len(wire.response.List) > maxRecords {
+			return response{}, errUpstream
+		}
+	}
+	return wire.response, nil
 }
 
 func plainText(value string) string {
@@ -298,6 +400,11 @@ func plainText(value string) string {
 
 func metadataText(value string) string {
 	return strings.TrimSpace(metadataURL.ReplaceAllString(plainText(value), ""))
+}
+
+func genreText(value string) string {
+	// Strip tags decoded from HTML entities and URLs split by markup.
+	return strings.TrimSpace(genreURL.ReplaceAllString(htmlTag.ReplaceAllString(metadataText(value), ""), ""))
 }
 
 func (item record) restricted() bool {
@@ -324,7 +431,7 @@ func (p *Provider) normalize(item record, id, title string) (provider.Drama, map
 		ID: p.idPrefix + id, Title: title, Tags: []string{},
 		Summary: metadataText(item.Summary), EpisodeCount: min(total, maxEpisodes),
 	}
-	if category := metadataText(item.Category); category != "" {
+	if category := genreText(item.Category); category != "" {
 		drama.Tags = append(drama.Tags, category)
 	}
 

@@ -1,6 +1,6 @@
 // 目录展示数据来自 Go Provider。浏览器预览使用内置演示目录。
 import type { Drama, HistoryEntry } from '@/types'
-import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadCatalogPage, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama } from '@/bindings'
+import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadCatalogGenrePage, loadCatalogGenres, loadCatalogPage, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama, type CatalogPage } from '@/bindings'
 import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKINGS, type CastMember, type DemoSeason } from './data'
 import { posterSvg } from './posters'
 
@@ -40,6 +40,32 @@ export const MAX_CMS_PAGE = 100_000
 export async function loadCMSCatalogPage(query: string, page: number, mode: 'normal' | 'error') {
   if (mode === 'error') throw new Error('苹果 CMS 目录暂不可用')
   const result = await loadCatalogPage(query.trim(), page)
+  return cmsPageResult(result, page)
+}
+
+export async function loadCMSCatalogGenres(mode: 'normal' | 'error') {
+  try {
+    if (mode === 'error') throw new Error()
+    await requireCapability('catalog')
+    const genres = await loadCatalogGenres()
+    if (!Array.isArray(genres) || genres.some((genre) => !genre || typeof genre.id !== 'string' ||
+      !/^[1-9][0-9]{0,29}$/.test(genre.id) || typeof genre.name !== 'string' || !genre.name)) throw new Error()
+    return genres
+  } catch {
+    throw new Error('苹果 CMS 分类暂不可用')
+  }
+}
+
+export async function loadCMSCatalogGenrePage(genre: string, page: number, mode: 'normal' | 'error') {
+  try {
+    if (mode === 'error') throw new Error()
+    return cmsPageResult(await loadCatalogGenrePage(genre, page), page)
+  } catch {
+    throw new Error('苹果 CMS 分类暂不可用')
+  }
+}
+
+function cmsPageResult(result: CatalogPage | undefined, page: number) {
   if (!result || result.page !== page || !Array.isArray(result.entries) || typeof result.hasMore !== 'boolean') {
     throw new Error('苹果 CMS 目录响应无效')
   }

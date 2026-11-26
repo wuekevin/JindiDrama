@@ -51,3 +51,21 @@ func (a *App) CatalogPage(query string, page int) (applecms.CatalogPage, error) 
 	}
 	return cms.CatalogPage(a.context(), query, page)
 }
+
+func (a *App) CatalogGenres() ([]applecms.CatalogGenre, error) {
+	ctx := a.context()
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok || cms.Capabilities(ctx)["catalog"] != provider.Ready {
+		return nil, provider.ErrNotAuthorized
+	}
+	return cms.CatalogGenres(ctx)
+}
+
+func (a *App) CatalogGenrePage(genre string, page int) (applecms.CatalogPage, error) {
+	ctx := a.context()
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok || cms.Capabilities(ctx)["catalog"] != provider.Ready {
+		return applecms.CatalogPage{}, provider.ErrNotAuthorized
+	}
+	return cms.CatalogGenrePage(ctx, genre, page)
+}

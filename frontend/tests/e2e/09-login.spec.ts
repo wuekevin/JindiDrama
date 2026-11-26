@@ -67,7 +67,13 @@ test.describe('09 账号登录', () => {
   test('qr expiry and refresh', async ({ page }) => { await page.getByTestId('tab-qr').click(); await page.getByTestId('sim-expire').click(); await expect(page.getByTestId('qr-overlay')).toContainText('已过期'); await page.getByTestId('qr-refresh').click(); await expect(page.getByTestId('qr-overlay')).toHaveCount(0) })
   test('session expired banner', async ({ page }) => { await page.goto('/#/login?state=expired'); await expect(page.getByTestId('expired')).toContainText('已过期') })
   test('keyboard: Enter submits form', async ({ page }) => { await page.getByTestId('phone').focus(); await page.keyboard.press('Enter'); await expect(page.getByTestId('err-phone')).toBeVisible() })
-  test('avatar opens login', async ({ page }) => { await page.goto('/#/home?static'); await page.getByTestId('avatar').click(); await expect(page).toHaveURL(/#\/login/) })
+  test('avatar opens login from home', async ({ page }) => {
+    await page.goto('/#/home?static')
+    await expect(page.getByTestId('page-home')).toBeVisible()
+    await page.getByTestId('avatar').click()
+    await expect(page).toHaveURL(/#\/login/)
+    await expect(page.getByTestId('page-login')).toBeVisible()
+  })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=page-login]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/09-${w}x${h}.png` }) })
 })
 
