@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+
+	"jindi-drama/internal/storage/sqlite"
 )
 
 const maxLocalCommentSnapshot = 256 * 1024
@@ -65,6 +67,61 @@ func (a *App) SaveLocalComments(dramaID string, episode int, snapshot string) er
 		return err
 	}
 	return a.store.SaveLocalComments(dramaID, episode, snapshot)
+}
+
+type localCommentState struct {
+	sqlite.LocalCommentState
+	Profile string `json:"profile"`
+}
+
+// LocalCommentsState identifies the open database without disclosing its path.
+func (a *App) LocalCommentsState(dramaID string, episode int) (localCommentState, error) {
+	a.awaitStartup()
+	if a.store == nil {
+		return localCommentState{}, ErrNoStore
+	}
+	profile := a.store.CommentProfile()
+	if profile == "" {
+		return localCommentState{}, ErrNoStore
+	}
+	current, err := a.store.LocalCommentsState(dramaID, episode)
+	if err != nil {
+		return localCommentState{}, err
+	}
+	if current.Revision != "" {
+		if err := validateLocalCommentSnapshot(current.Snapshot); err != nil {
+			return localCommentState{}, err
+		}
+	}
+	return localCommentState{LocalCommentState: current, Profile: profile}, nil
+}
+
+func (a *App) CompareAndSaveLocalComments(dramaID string, episode int, expected, snapshot, writeID string) (string, error) {
+	if a.store == nil {
+		return "", ErrNoStore
+	}
+	if (expected != "" && !isCommentToken(expected, 64)) || !isCommentToken(writeID, 32) {
+		return "", errInvalidLocalComments
+	}
+	if err := validateLocalCommentSnapshot(snapshot); err != nil {
+		return "", err
+	}
+	if err := a.validateInteractionEpisode(dramaID, episode); err != nil {
+		return "", err
+	}
+	return a.store.CompareAndSaveLocalComments(dramaID, episode, expected, snapshot, writeID)
+}
+
+func isCommentToken(value string, length int) bool {
+	if len(value) != length {
+		return false
+	}
+	for _, char := range value {
+		if !(char >= '0' && char <= '9') && !(char >= 'a' && char <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func validateLocalCommentSnapshot(snapshot string) error {

@@ -47,6 +47,8 @@ ALTER TABLE favorites DROP COLUMN sort_order;`},
 	{6, `CREATE TABLE library_receipts(writer TEXT PRIMARY KEY, revision INTEGER NOT NULL CHECK(revision > 0));`, `DROP TABLE library_receipts;`},
 	{historyEpisodeCountVersion, `ALTER TABLE history ADD COLUMN episode_count_at_watch INTEGER NOT NULL DEFAULT 0
 CHECK (episode_count_at_watch = 0 OR episode_count_at_watch BETWEEN episode AND 9007199254740991);`, `ALTER TABLE history DROP COLUMN episode_count_at_watch;`},
+	{8, `ALTER TABLE local_comments ADD COLUMN write_id TEXT NOT NULL DEFAULT '';
+UPDATE local_comments SET write_id=lower(hex(randomblob(16)));`, `ALTER TABLE local_comments DROP COLUMN write_id;`},
 }
 
 const (
@@ -55,8 +57,9 @@ const (
 )
 
 type Store struct {
-	db   *sql.DB
-	Path string
+	db            *sql.DB
+	Path          string
+	canonicalPath string
 }
 
 type HistoryEntry struct {
@@ -83,13 +86,23 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{db: db, Path: path}
+	if path != ":memory:" {
+		if err := db.QueryRow("SELECT file FROM pragma_database_list WHERE name='main'").Scan(&s.canonicalPath); err != nil {
+			db.Close()
+			return nil, err
+		}
+	}
 	for _, pragma := range []string{"PRAGMA journal_mode=WAL", "PRAGMA foreign_keys=ON"} {
 		if _, err := db.Exec(pragma); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("%s: %w", pragma, err)
 		}
 	}
-	if err := s.Migrate(len(migrations)); err != nil {
+	version, err := supportedVersion(db)
+	if err == nil && version < len(migrations) {
+		err = s.Migrate(len(migrations))
+	}
+	if err != nil {
 		db.Close()
 		return nil, err
 	}

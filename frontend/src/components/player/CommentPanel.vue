@@ -110,12 +110,13 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
         @input="err = ''" @compositionstart="editorComposing = true" @compositionend="editorComposing = false"
         @change="editorComposing = false" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
     <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button>
-      <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError" data-testid="comment-post" @click="submit()">发表评论</button></div>
+      <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError || c.saveConflict" data-testid="comment-post" @click="submit()">发表评论</button></div>
     <div v-show="emojiOpen" id="comment-emoji-choices" ref="emojiChoices" class="emoji-choices" role="group" aria-label="选择表情">
       <button v-for="emoji in emojis" :key="emoji.value" type="button" :aria-label="emoji.label" @mousedown.prevent @click="insertEmoji(emoji.value)">{{ emoji.value }}</button>
     </div>
     <p v-if="err" class="err" role="alert">{{ err }}</p>
-    <p v-if="c.saveError" class="err" role="alert">本地评论保存失败 <button @click="c.persist()">重试</button></p>
+    <p v-if="c.saveConflict" class="err" role="alert">本集评论已在其他位置更新，暂缓补写本机未确认的编辑。 <button @click="c.discardPending()">放弃待补写编辑</button></p>
+    <p v-if="c.saveError" class="err" role="alert">本地评论保存失败{{ c.saveNotDurable ? '，更改只保留在当前窗口，退出会丢失。' : '' }} <button @click="c.persist()">重试</button></p>
     <div class="list">
       <p v-if="c.loading" role="status">正在载入本集评论</p>
       <p v-else-if="c.readError" role="alert">本地评论读取失败 <button @click="c.load()">重试</button></p>
@@ -124,11 +125,11 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
         <i class="av a2" /><div class="body">
           <div class="who"><b>{{ cm.user ?? '未知用户' }}</b><span class="lv"><Crown :size="11" fill="currentColor" />Lv{{ cm.level ?? 1 }}</span><em v-if="cm.byAuthor" class="au">作者</em></div>
           <time v-if="cm.ago">{{ cm.ago }}</time><p>{{ cm.text }}</p>
-          <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked ?? false" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes ?? 0) }}</button>
+          <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked ?? false" :disabled="c.saveConflict" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes ?? 0) }}</button>
             <button class="reply-button" data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ replyCount(cm) }})</button>
             <span class="sp" /><div class="more"><button aria-label="更多" data-testid="more" @click="menuFor = menuFor === cm.id ? null : cm.id"><Ellipsis :size="18" /></button>
-              <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" @click="del(cm.id)">删除</button></li><li><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
-          <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user ?? '未知用户'}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" @click="sendReply(cm)">发送</button></div>
+              <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" :disabled="c.saveConflict" @click="del(cm.id)">删除</button></li><li><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
+          <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user ?? '未知用户'}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" :disabled="c.saveConflict" @click="sendReply(cm)">发送</button></div>
           <div v-if="cm.replies?.length && c.expanded.has(cm.id)" class="replies" data-testid="replies">
             <div v-for="r in cm.replies" :key="r.id" class="rp" data-testid="comment-reply">
               <i class="av a3" />
@@ -137,8 +138,8 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
                 <p>{{ r.text }}</p>
                 <div class="acts s">
                   <time v-if="r.ago">{{ r.ago }}</time>
-                  <button class="lk" :class="{ on: r.liked }" @click="c.like(r)"><ThumbsUp :size="13" :fill="r.liked ? 'currentColor' : 'none'" />{{ n(r.likes ?? 0) }}</button>
-                  <button v-if="r.mine === true" type="button" @click="deleteReply(cm.id, r.id, $event)">删除回复</button>
+                  <button class="lk" :class="{ on: r.liked }" :disabled="c.saveConflict" @click="c.like(r)"><ThumbsUp :size="13" :fill="r.liked ? 'currentColor' : 'none'" />{{ n(r.likes ?? 0) }}</button>
+                  <button v-if="r.mine === true" type="button" :disabled="c.saveConflict" @click="deleteReply(cm.id, r.id, $event)">删除回复</button>
                 </div>
               </div>
             </div>

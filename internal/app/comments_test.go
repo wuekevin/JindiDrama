@@ -114,3 +114,50 @@ func TestLocalCommentsRejectOversizedStoredSnapshot(t *testing.T) {
 		t.Fatalf("accepted oversized stored snapshot: length %d, %v", len(got), err)
 	}
 }
+
+func TestLocalCommentsRecoveryRejectsStaleRevision(t *testing.T) {
+	a := New()
+	if err := a.openStore(filepath.Join(t.TempDir(), "jindi.db")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+	initial, err := a.LocalCommentsState("d1", 32)
+	if err != nil || initial.Revision != "" || len(initial.Profile) != 64 {
+		t.Fatalf("initial comment state: %+v, %v", initial, err)
+	}
+	const original = `[{"id":"one","text":"original"}]`
+	const updated = `[{"id":"two","text":"updated"}]`
+	first := strings.Repeat("a", 32)
+	rev, err := a.CompareAndSaveLocalComments("d1", 32, "", original, first)
+	if err != nil || len(rev) != 64 {
+		t.Fatalf("initial write: %q, %v", rev, err)
+	}
+	got, err := a.CompareAndSaveLocalComments("d1", 32, "", original, first)
+	if err != nil || got != rev {
+		t.Fatalf("repeat write with lost acknowledgement: %q, %v", got, err)
+	}
+	if err := a.SaveLocalComments("d1", 32, original); err != nil {
+		t.Fatal(err)
+	}
+	got, err = a.CompareAndSaveLocalComments("d1", 32, rev, updated, strings.Repeat("b", 32))
+	if err != nil || got != "" {
+		t.Fatalf("accepted stale write after matching contents were saved at a new revision: %q, %v", got, err)
+	}
+	current, err := a.LocalCommentsState("d1", 32)
+	if err != nil || current.Revision == rev || current.Snapshot != original || current.Profile != initial.Profile {
+		t.Fatalf("current comment state: %+v, %v", current, err)
+	}
+	got, err = a.CompareAndSaveLocalComments("d1", 32, current.Revision, updated, strings.Repeat("b", 32))
+	if err != nil || len(got) != 64 {
+		t.Fatalf("current revision did not allow save: %q, %v", got, err)
+	}
+	other := New()
+	if err := other.openStore(filepath.Join(t.TempDir(), "jindi.db")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(other.close)
+	otherState, err := other.LocalCommentsState("d1", 32)
+	if err != nil || otherState.Profile == current.Profile || otherState.Revision != "" {
+		t.Fatalf("separate comment profile: %+v, %v", otherState, err)
+	}
+}

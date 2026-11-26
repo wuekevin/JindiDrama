@@ -1,4 +1,5 @@
 import { localId } from '@/localId'
+import { loadRecoverableComments, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
 import type { DemoQualityId } from '@/player/demoMedia'
 import { captureLibraryIntent, parseLibraryCache, replayLibraryBatch, type LibraryBatch, type LibraryCache, type LibraryReceipt, type LibraryState } from './libraryRecovery'
@@ -62,6 +63,8 @@ interface GoApp {
   LocalEpisodeLiked?(dramaId: string, episode: number): Promise<boolean>
   SetLocalEpisodeLiked?(dramaId: string, episode: number, liked: boolean): Promise<void>
   LocalComments(dramaId: string, episode: number): Promise<string>
+  LocalCommentsState?(dramaId: string, episode: number): Promise<CommentState>
+  CompareAndSaveLocalComments?(dramaId: string, episode: number, expected: string, snapshot: string, writeId: string): Promise<string>
   SaveLocalComments(dramaId: string, episode: number, snapshot: string): Promise<void>
   LocalDanmaku(dramaId: string, episode: number): Promise<LocalDanmaku[]>
   SendLocalDanmaku(dramaId: string, episode: number, offsetMs: number, text: string): Promise<LocalDanmaku>
@@ -157,15 +160,38 @@ export function saveEpisodeLike(dramaId: string, episode: number, liked: boolean
   return write
 }
 
-export const loadLocalComments = (dramaId: string, episode: number) => api()?.LocalComments(dramaId, episode)
+export function loadLocalComments(dramaId: string, episode: number): Promise<CommentLoad> | undefined {
+  const app = api()
+  if (!app) return
+  const recovery = commentRecoveryBridge(app)
+  if (recovery) return loadRecoverableComments(recovery, dramaId, episode, queueCommentWrite)
+  return app.LocalComments(dramaId, episode).then((snapshot) => ({ snapshot }))
+}
+
+function commentRecoveryBridge(app: GoApp) {
+  if (!app.LocalCommentsState || !app.CompareAndSaveLocalComments) return
+  return {
+    LocalCommentsState: app.LocalCommentsState.bind(app),
+    CompareAndSaveLocalComments: app.CompareAndSaveLocalComments.bind(app),
+  }
+}
+
 let localCommentWrites = Promise.resolve()
+function queueCommentWrite(task: () => Promise<CommentSaveIssue | undefined>) {
+  const write = localCommentWrites.then(task)
+  // A failed snapshot must not block the rest of the queue.
+  localCommentWrites = write.then(() => undefined, () => undefined)
+  return write
+}
 export function saveLocalComments(dramaId: string, episode: number, snapshot: string) {
   const app = api()
   if (!app) return
-  const write = localCommentWrites.then(() => app.SaveLocalComments(dramaId, episode, snapshot))
-  // The submitting store reports the failure. Later snapshots still need to run.
-  localCommentWrites = write.catch(() => {})
-  return write
+  const recovery = commentRecoveryBridge(app)
+  if (recovery) return queueCommentWrite(stageRecoverableComments(recovery, dramaId, episode, snapshot))
+  return queueCommentWrite(async () => {
+    await app.SaveLocalComments(dramaId, episode, snapshot)
+    return undefined
+  })
 }
 
 export const loadLocalDanmaku = (dramaId: string, episode: number) => api()?.LocalDanmaku(dramaId, episode)

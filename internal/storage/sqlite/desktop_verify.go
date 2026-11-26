@@ -118,7 +118,7 @@ func verifyDesktopBusinessSchema(tx *sql.Tx) error {
 	// cannot remove an entity used by the app and its own acceptance check.
 	rows, err := tx.Query(`
 SELECT f.drama_id, f.sort_order, h.drama_id, h.episode, h.position_ms, h.duration_ms, h.percent, h.episode_count_at_watch,
-       s.query, s.searched_at, cfg.key, cfg.value_json, c.drama_id, c.episode, c.snapshot,
+       s.query, s.searched_at, cfg.key, cfg.value_json, c.drama_id, c.episode, c.snapshot, c.write_id,
        d.drama_id, d.episode, d.offset_ms, d.text, r.writer, r.revision
 FROM favorites f, history h, search_history s, settings cfg,
      local_comments c, local_danmaku d, library_receipts r

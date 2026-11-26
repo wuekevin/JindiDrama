@@ -1,6 +1,7 @@
 import { localId } from '@/localId'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, toRaw } from 'vue'
+import { discardConflictedComments, type CommentSaveIssue } from '@/bindings/commentRecovery'
 import { loadLocalComments, saveLocalComments } from '@/bindings'
 
 export interface Reply {
@@ -74,12 +75,14 @@ export const useCommentStore = defineStore('comments', () => {
   }
   const pending = ref<Record<string, boolean>>({})
   const readErrors = ref<Record<string, boolean>>({})
-  const saveErrors = ref<Record<string, boolean>>({})
+  const saveIssues = ref<Partial<Record<string, CommentSaveIssue>>>({})
   const all = computed(() => byEp.value[key.value] ?? [])
   const loading = computed(() => !!pending.value[key.value])
   const readError = computed(() => !!readErrors.value[key.value])
-  const saveError = computed(() => !!saveErrors.value[key.value])
-  const canEdit = () => !loading.value && !readError.value && !!byEp.value[key.value]
+  const saveError = computed(() => saveIssues.value[key.value] === 'failed' || saveIssues.value[key.value] === 'not-durable')
+  const saveNotDurable = computed(() => saveIssues.value[key.value] === 'not-durable')
+  const saveConflict = computed(() => saveIssues.value[key.value] === 'conflict')
+  const canEdit = () => !loading.value && !readError.value && !saveConflict.value && !!byEp.value[key.value]
   function load() {
     const current = key.value
     if (byEp.value[current] || pending.value[current]) return
@@ -90,7 +93,8 @@ export const useCommentStore = defineStore('comments', () => {
       return
     }
     pending.value[current] = true
-    return request.then((snapshot) => {
+    return request.then(({ snapshot, issue }) => {
+      saveIssues.value[current] = issue
       byEp.value[current] = snapshot ? restoreComments(snapshot) : gen(current)
     }).catch(() => {
       readErrors.value[current] = true
@@ -104,16 +108,26 @@ export const useCommentStore = defineStore('comments', () => {
     expanded.value = new Set()
     return load()
   }
+  async function discardPending() {
+    const current = key.value
+    if (!saveConflict.value || !discardConflictedComments(episode.value.dramaId, episode.value.index)) return
+    delete byEp.value[current]
+    return load()
+  }
   async function persist() {
     if (!canEdit()) return
     const current = key.value
     const { dramaId, index } = episode.value
     const snapshot = snapshotComments(all.value)
     try {
-      await saveLocalComments(dramaId, index, snapshot)
-      saveErrors.value[current] = false
+      const issue = await saveLocalComments(dramaId, index, snapshot)
+      saveIssues.value[current] = issue
+      if (issue === 'conflict') {
+        delete byEp.value[current]
+        if (current === key.value) await load()
+      }
     } catch {
-      saveErrors.value[current] = true
+      saveIssues.value[current] = 'failed'
     }
   }
   const sorted = computed(() => { let l = [...all.value]; if (sort.value === 'author') l = l.filter((c) => c.byAuthor || c.mine); l.sort((a, b) => (sort.value === 'hot' ? (b.likes ?? 0) - (a.likes ?? 0) : (b.ts ?? 0) - (a.ts ?? 0))); return l })
@@ -151,5 +165,5 @@ export const useCommentStore = defineStore('comments', () => {
   }
 
   const toggleReplies = (id: string) => { const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s }
-  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, removeReply, validate, open, loading, readError, saveError, load, persist, expanded, toggleReplies }
+  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, removeReply, validate, open, loading, readError, saveError, saveConflict, saveNotDurable, load, persist, discardPending, expanded, toggleReplies }
 })

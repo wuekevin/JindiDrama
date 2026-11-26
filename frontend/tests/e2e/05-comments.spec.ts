@@ -167,6 +167,204 @@ test('desktop close waits for queued comment snapshots, including edits queued d
   await expect.poll(() => read('comment-close-ready')).toBe('yes')
 })
 
+async function installCommentRecoveryBridge(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    const profile = () => sessionStorage.getItem('comment-profile') ?? 'a'.repeat(64)
+    const snapshotKey = (id: string, episode: number) => `comment-fixture-${profile()}-${id}-${episode}`
+    const load = (id: string, episode: number) => {
+      const record = localStorage.getItem(snapshotKey(id, episode))
+      const state = record ? JSON.parse(record) : { snapshot: '', revision: '', writeId: '' }
+      return { ...state, profile: profile() }
+    }
+    const setItem = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) {
+      if (key.startsWith('jindi.comments.pending.v1.') && sessionStorage.getItem('comment-journal-disabled') === 'yes') {
+        throw new Error('WebView storage is unavailable')
+      }
+      setItem.call(this, key, value)
+    }
+    Object.assign(window, {
+      __JD_MEDIA: 'sim',
+      go: { app: { App: {
+        StorageReady: async () => false,
+        MarkFrontendReady: async () => {},
+        Drama: async () => undefined,
+        Episodes: async () => [],
+        LocalDanmaku: async () => [],
+        LocalCommentsState: async (id: string, episode: number) => load(id, episode),
+        CompareAndSaveLocalComments: async (id: string, episode: number, base: string, snapshot: string, writeId: string) => {
+          if (load(id, episode).revision !== base) return ''
+          const failure = sessionStorage.getItem('comment-failure')
+          if (failure === 'waiting') {
+            sessionStorage.setItem('comment-waiting', 'yes')
+            await new Promise<void>((resolve) => window.addEventListener('comment-release', () => resolve(), { once: true }))
+            if (load(id, episode).revision !== base) return ''
+          }
+          if (failure === 'locked') throw new Error('SQLite is locked')
+          const revision = writeId.repeat(2)
+          localStorage.setItem(snapshotKey(id, episode), JSON.stringify({ snapshot, revision, writeId }))
+          if (failure === 'unacknowledged') throw new Error('SQLite committed but the bridge disconnected')
+          return revision
+        },
+      } } },
+    })
+  })
+}
+
+test('desktop restores comments after a write failure and restart', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  await page.evaluate(() => {
+    localStorage.setItem(`comment-fixture-${'a'.repeat(64)}-d1-32`, JSON.stringify({
+      revision: 'b'.repeat(64),
+      writeId: 'c'.repeat(32),
+      snapshot: JSON.stringify([{
+        id: 'old', text: '此前保存的评论', likes: 3, replyTotal: 1,
+        replies: [{ id: 'old-reply', text: '此前保存的回复' }],
+      }]),
+    }))
+  })
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'locked'))
+  await page.getByTestId('comment-input').fill('写锁期间也要保留的评论')
+  await page.getByTestId('comment-post').click()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toContainText('本地评论保存失败')
+  const existing = page.getByTestId('comment').filter({ hasText: '此前保存的评论' })
+  await existing.getByTestId('reply-btn').click()
+  await existing.getByTestId('reply-input').fill('写锁期间写的回复')
+  await existing.getByTestId('reply-send').click()
+  await existing.getByTestId('like').click()
+
+
+  await page.evaluate(() => sessionStorage.setItem('comment-profile', 'b'.repeat(64)))
+  await page.reload()
+  await expect(page.getByTestId('comment').first()).toBeVisible()
+  await expect(page.getByText('写锁期间也要保留的评论')).toHaveCount(0)
+
+  await page.evaluate(() => {
+    sessionStorage.removeItem('comment-failure')
+    sessionStorage.removeItem('comment-profile')
+  })
+  await page.reload()
+  await expect(page.getByText('写锁期间也要保留的评论')).toBeVisible()
+  await expect(existing.getByTestId('like')).toHaveAttribute('aria-pressed', 'true')
+  await existing.getByTestId('toggle-replies').click()
+  await expect(existing.getByText('此前保存的回复')).toBeVisible()
+  await expect(existing.getByText('写锁期间写的回复')).toBeVisible()
+
+  await expect.poll(() => page.evaluate(() => localStorage.getItem(`comment-fixture-${'a'.repeat(64)}-d1-32`)))
+    .toContain('写锁期间也要保留的评论')
+  await expect.poll(() => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('jindi.comments.pending.v1.'))))
+    .toHaveLength(0)
+  await page.goto('/#/watch/d1/31?panel=comments&paused')
+  await expect(page.getByTestId('comment').first()).toBeVisible()
+  await expect(page.getByText('写锁期间也要保留的评论')).toHaveCount(0)
+})
+
+test('desktop restores the newer comment after an earlier write acknowledgement was lost', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  const input = page.getByTestId('comment-input')
+  const post = page.getByTestId('comment-post')
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'unacknowledged'))
+  await input.fill('已经写入且未收到回执')
+  await post.click()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toContainText('本地评论保存失败')
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'locked'))
+  await input.fill('同时保留随后一条评论')
+  await post.click()
+  await expect(page.getByText('同时保留随后一条评论')).toBeVisible()
+  await page.evaluate(() => sessionStorage.removeItem('comment-failure'))
+  await page.reload()
+  await expect(page.getByText('已经写入且未收到回执')).toBeVisible()
+  await expect(page.getByText('同时保留随后一条评论')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem(`comment-fixture-${'a'.repeat(64)}-d1-32`)))
+    .toContain('同时保留随后一条评论')
+})
+
+test('desktop preserves newer database comments when pending recovery conflicts', async ({ page }, testInfo) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'locked'))
+  await page.getByTestId('comment-input').fill('未确认的较旧评论')
+  await page.getByTestId('comment-post').click()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toContainText('本地评论保存失败')
+  await page.evaluate(() => {
+    sessionStorage.removeItem('comment-failure')
+    localStorage.setItem(`comment-fixture-${'a'.repeat(64)}-d1-32`, JSON.stringify({
+      revision: 'd'.repeat(64),
+      writeId: 'c'.repeat(32),
+      snapshot: JSON.stringify([{ id: 'existing', text: '另一处已经保存了新评论' }]),
+    }))
+  })
+  await page.reload()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toContainText('本集评论已在其他位置更新')
+  await expect(page.getByText('另一处已经保存了新评论')).toBeVisible()
+  await expect(page.getByText('未确认的较旧评论')).toHaveCount(0)
+  await page.getByTestId('comment-input').fill('不能覆盖新快照')
+  await expect(page.getByTestId('comment-post')).toBeDisabled()
+  const saved = await page.evaluate(() => localStorage.getItem(`comment-fixture-${'a'.repeat(64)}-d1-32`))
+  expect(saved).toContain('另一处已经保存了新评论')
+  expect(saved).not.toContain('未确认的较旧评论')
+  await page.getByTestId('comment-input').fill('')
+  await page.screenshot({ path: testInfo.outputPath('comment-recovery-conflict.png') })
+  await page.getByRole('button', { name: '放弃待补写编辑' }).click()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toHaveCount(0)
+  await page.getByTestId('comment-input').fill('重新发表的独立评论')
+  await page.getByTestId('comment-post').click()
+  await expect(page.getByText('重新发表的独立评论')).toBeVisible()
+  await expect(page.getByText('另一处已经保存了新评论')).toBeVisible()
+})
+
+
+test('desktop warns when both SQLite and the WebView recovery journal reject writes', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.evaluate(() => {
+    sessionStorage.setItem('comment-failure', 'locked')
+    sessionStorage.setItem('comment-journal-disabled', 'yes')
+  })
+  await page.getByTestId('comment-input').fill('暂时只留在窗口的评论')
+  await page.getByTestId('comment-post').click()
+  const alert = page.getByTestId('comment-panel').getByRole('alert')
+  await expect(alert).toContainText('更改只保留在当前窗口，退出会丢失')
+  await page.evaluate(() => sessionStorage.removeItem('comment-failure'))
+  await alert.getByRole('button', { name: '重试' }).click()
+  await expect(alert).toHaveCount(0)
+  await page.reload()
+  await expect(page.getByText('暂时只留在窗口的评论')).toBeVisible()
+})
+
+test('an acknowledged comment in one window does not remove another window pending edits', async ({ context, page }) => {
+  const other = await context.newPage()
+  await installCommentRecoveryBridge(page)
+  await installCommentRecoveryBridge(other)
+  const route = '/#/watch/d1/32?panel=comments&paused'
+  await page.goto(route)
+  await other.goto(route)
+  await expect(page.getByTestId('comment').first()).toBeVisible()
+  await expect(other.getByTestId('comment').first()).toBeVisible()
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'waiting'))
+  await page.getByTestId('comment-input').fill('先写入的窗口评论')
+  await page.getByTestId('comment-post').click()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('comment-waiting'))).toBe('yes')
+
+  await other.evaluate(() => sessionStorage.setItem('comment-failure', 'locked'))
+  await other.getByTestId('comment-input').fill('另一个窗口未提交的评论')
+  await other.getByTestId('comment-post').click()
+  await expect(other.getByTestId('comment-panel').getByRole('alert')).toContainText('本地评论保存失败')
+  await page.evaluate(() => window.dispatchEvent(new Event('comment-release')))
+  const pending = () => page.evaluate(() => Object.keys(localStorage)
+    .filter((key) => key.startsWith('jindi.comments.pending.v1.')).map((key) => localStorage.getItem(key)))
+  await expect.poll(pending).toHaveLength(1)
+  expect(await pending()).toEqual([expect.stringContaining('另一个窗口未提交的评论')])
+
+  await other.reload()
+  await expect(other.getByTestId('comment-panel').getByRole('alert')).toContainText('本集评论已在其他位置更新')
+  await expect(other.getByText('先写入的窗口评论')).toBeVisible()
+  await other.close()
+})
+
 test.describe('05 评论互动', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/watch/d1/32?panel=comments&t=192&paused'); await page.waitForSelector('[data-testid=comment]') })
   test('screenshot', async ({ page }) => { await expect(page.getByTestId('comment-total')).toContainText('3,217'); await page.screenshot({ path: '../design/rendered/05-评论互动.png' }) })
