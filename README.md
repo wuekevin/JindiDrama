@@ -90,6 +90,19 @@ GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-win
 
 ### 准备 GitHub Release
 
+#### 签名环境
+
+在 GitHub 仓库的「Settings → Environments」设置两个环境。先在每个环境的部署分支和标签规则中，仅允许已审核的发行分支或标签，再将签名凭据保存在对应环境的 Environment secrets 中。签名凭据应只配置在对应环境。
+
+| 环境 | 凭据 |
+|---|---|
+| `release-windows` | `WINDOWS_CERT_PFX`、`WINDOWS_CERT_PASSWORD` |
+| `release-macos` | `MACOS_CERT_P12`、`MACOS_CERT_PASSWORD`、`MACOS_SIGN_IDENTITY`、`APPLE_ID`、`APPLE_TEAM_ID`、`APPLE_APP_PASSWORD` |
+
+环境可按维护者安排要求人工审核。选择 `smoke` 时使用普通测试任务，无需配置签名环境。[GitHub 环境与保护规则](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
+
+#### 生成并核对交付包
+
 正式打包检查所选提交的完整 Git 历史。可先运行 `bash scripts/verify-distribution-source.sh`，再按照验收记录准备发行。
 
 1. 在拟发布提交上以 `release` 模式运行 `package` 工作流。签名、公证、双平台验收和下载复验全部通过后，会产生 `release-handoff-<版本>-attempt-<轮次>`。如果一轮失败，重跑全部任务或重新发起打包，使两个平台产物来自同一轮。下载交付包并解压到干净目录。
