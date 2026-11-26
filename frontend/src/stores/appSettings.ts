@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, watch } from 'vue'
 import { isPlaybackSpeed, normalizePlayMode, type PlayMode } from '@/player/preferences'
 import { normalizeDemoQuality, type DemoQuality } from '@/player/demoMedia'
-import { saveSetting, setWindowCloseSetting, LS, windowTrayAvailable } from '@/bindings'
+import { loadCachedSetting, saveSetting, setWindowCloseSetting, LS, windowTrayAvailable } from '@/bindings'
 const KEY = LS.app
 export const CLOSE_TO_TRAY = '隐藏到菜单栏'
 const windowsTray = /Windows/.test(navigator.userAgent)
@@ -51,7 +51,7 @@ function restoreShortcuts(saved: Record<string, unknown> = {}) {
 }
 export const useAppSettings = defineStore('appSettings', () => {
   let init: AppSettings = { ...DEFAULTS, shortcuts: { ...DEFAULT_SHORTCUTS } }
-  try { const r = localStorage.getItem(KEY); if (r) { const o = JSON.parse(r); init = { ...init, ...o, shortcuts: restoreShortcuts(o.shortcuts ?? {}) } } } catch { /* ignore */ }
+  try { const r = loadCachedSetting(KEY); if (r) { const o = JSON.parse(r); init = { ...init, ...o, shortcuts: restoreShortcuts(o.shortcuts ?? {}) } } } catch { /* ignore */ }
   if (!['最小化到任务栏', '退出程序', CLOSE_TO_TRAY].includes(init.closeAction)) init.closeAction = '退出程序'
   if (!isPlaybackSpeed(init.defaultSpeed)) init.defaultSpeed = DEFAULTS.defaultSpeed
   init.playMode = normalizePlayMode(init.playMode)

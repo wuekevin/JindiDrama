@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"jindi-drama/internal/storage/sqlite"
 )
@@ -112,5 +113,36 @@ func TestBackupSnapshotCannotReplaceConcurrentDestination(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 || entries[0].Name() != "backup.db" {
 		t.Fatalf("failed publication left staging files: %v, %v", entries, err)
+	}
+}
+
+func TestStorageReadyWaitsForStartup(t *testing.T) {
+	ready := make(chan struct{})
+	a := &App{startupDone: ready}
+	defer a.close()
+	started := make(chan struct{})
+	result := make(chan bool, 1)
+	go func() {
+		close(started)
+		result <- a.StorageReady()
+	}()
+	<-started
+	select {
+	case <-result:
+		t.Fatal("storage readiness returned before startup published its result")
+	case <-time.After(10 * time.Millisecond):
+	}
+	if err := a.openStore(filepath.Join(t.TempDir(), "ready.db")); err != nil {
+		close(ready)
+		t.Fatal(err)
+	}
+	close(ready)
+	select {
+	case ok := <-result:
+		if !ok {
+			t.Fatal("initialized SQLite store should be ready")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("storage readiness did not finish after startup")
 	}
 }

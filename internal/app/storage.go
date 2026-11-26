@@ -53,7 +53,10 @@ func (a *App) close() {
 
 var ErrNoStore = errors.New("本地存储未就绪")
 
-func (a *App) StorageReady() bool { return a.store != nil }
+func (a *App) StorageReady() bool {
+	a.awaitStartup()
+	return a.store != nil
+}
 
 func (a *App) Favorites() ([]string, error) {
 	if a.store == nil {

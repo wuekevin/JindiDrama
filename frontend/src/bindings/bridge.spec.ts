@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, waitForWindowWrites, LS, cacheStats, cacheSetLimit, logEvent } from './index'
+import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, loadCachedSetting, waitForWindowWrites, LS, cacheStats, cacheSetLimit, logEvent } from './index'
 const calls: string[] = []
 const receipt = { writer: expect.stringMatching(/^[a-f0-9]{32}$/), revision: expect.any(Number) }
 const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], History: async () => [{ dramaId: 'd9', episode: 7, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: 5 }], SearchHistory: async () => ['替嫁'],
@@ -630,7 +630,7 @@ it('serializes rapid player settings writes and waits for the last write before 
     const closing = waitForWindowWrites().then(() => { drained = true })
     expect(save.mock.calls).toEqual([['player', '{"volume":38}']])
     expect(drained).toBe(false)
-    expect(localStorage.getItem(LS.player)).toBe('{"volume":31}')
+    expect(loadCachedSetting(LS.player)).toBe('{"volume":31}')
     finishFirst()
     await vi.waitFor(() => expect(save.mock.calls).toEqual([['player', '{"volume":38}'], ['player', '{"volume":31}']]))
     expect(drained).toBe(false)
@@ -661,7 +661,7 @@ it('replays the latest cached player setting when the desktop write fails before
     await waitForWindowWrites()
     expect(stored).toBe('{"volume":18}')
     await prime()
-    expect(localStorage.getItem(LS.player)).toBe('{"volume":27}')
+    expect(loadCachedSetting(LS.player)).toBe('{"volume":27}')
     await waitForWindowWrites()
     expect(stored).toBe('{"volume":27}')
     await prime()
@@ -671,6 +671,139 @@ it('replays the latest cached player setting when the desktop write fails before
     await waitForWindowWrites()
     localStorage.removeItem('jindi.player.pending.v1')
     localStorage.removeItem(LS.player)
+    vi.unstubAllGlobals()
+  }
+})
+
+it('recovers desktop preferences and demo logout independently while retaining the native close action', async () => {
+  const latestApp = { theme: 'light', dpi: 150, closeAction: '隐藏到菜单栏' }
+  const latestAuth = { demo: false, name: '' }
+  const stored: Record<string, string> = {
+    app: '{"theme":"dark","dpi":100,"closeAction":"隐藏到菜单栏"}',
+    auth_demo: '{"demo":true,"name":"演示用户"}',
+  }
+  let blocked = true
+  const save = vi.fn(async (key: string, value: string) => {
+    if (blocked) throw new Error('database busy')
+    stored[key] = value
+  })
+  vi.stubGlobal('go', { app: { App: {
+    ...fake,
+    GetSetting: async (key: string) => stored[key] ?? '',
+    WindowCloseAction: async () => '最小化到任务栏',
+    SaveSetting: save,
+  } } })
+  try {
+    saveSetting(LS.app, latestApp)
+    saveSetting(LS.auth, latestAuth)
+    await waitForWindowWrites()
+    expect(JSON.parse(stored.app).theme).toBe('dark')
+    expect(JSON.parse(stored.auth_demo).demo).toBe(true)
+    blocked = false
+    await prime()
+    await waitForWindowWrites()
+    expect(JSON.parse(localStorage.getItem(LS.app)!)).toEqual({ ...latestApp, closeAction: '最小化到任务栏' })
+    expect(JSON.parse(localStorage.getItem(LS.auth)!)).toEqual(latestAuth)
+    expect(JSON.parse(stored.app)).toEqual({ ...latestApp, closeAction: '最小化到任务栏' })
+    expect(JSON.parse(stored.auth_demo)).toEqual(latestAuth)
+    expect(save).toHaveBeenCalledTimes(4)
+    await prime()
+    await waitForWindowWrites()
+    expect(save).toHaveBeenCalledTimes(4)
+  } finally {
+    await waitForWindowWrites()
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('lets demo logout save while an earlier app setting is blocked and drains the latest of each key', async () => {
+  let releaseApp!: () => void
+  const writingApp = new Promise<void>((resolve) => { releaseApp = resolve })
+  const save = vi.fn(async (key: string, value: string) => {
+    if (key === 'app' && JSON.parse(value).dpi === 110) await writingApp
+  })
+  vi.stubGlobal('go', { app: { App: { SaveSetting: save } } })
+  try {
+    saveSetting(LS.app, { dpi: 110 })
+    await vi.waitFor(() => expect(save.mock.calls).toEqual([['app', '{"dpi":110}']]))
+    saveSetting(LS.app, { dpi: 120 })
+    saveSetting(LS.app, { dpi: 150 })
+    saveSetting(LS.auth, { demo: false, name: '' })
+    let drained = false
+    const close = waitForWindowWrites().then(() => { drained = true })
+    await vi.waitFor(() => expect(save.mock.calls).toEqual([
+      ['app', '{"dpi":110}'], ['auth_demo', '{"demo":false,"name":""}'],
+    ]))
+    expect(drained).toBe(false)
+    releaseApp()
+    await close
+    expect(save.mock.calls).toEqual([
+      ['app', '{"dpi":110}'], ['auth_demo', '{"demo":false,"name":""}'], ['app', '{"dpi":150}'],
+    ])
+  } finally {
+    releaseApp()
+    await waitForWindowWrites()
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('does not overwrite a saved logout with a desktop read started earlier', async () => {
+  let finishRead!: (value: string) => void
+  const oldRead = new Promise<string>((resolve) => { finishRead = resolve })
+  const get = vi.fn(async (key: string) => key === 'auth_demo' ? oldRead : '')
+  const save = vi.fn(async () => {})
+  vi.stubGlobal('go', { app: { App: { ...fake, GetSetting: get, SaveSetting: save } } })
+  try {
+    const loaded = prime()
+    await vi.waitFor(() => expect(get).toHaveBeenCalledWith('auth_demo'))
+    saveSetting(LS.auth, { demo: false, name: '' })
+    await waitForWindowWrites()
+    finishRead('{"demo":true,"name":"旧会话"}')
+    await loaded
+    await waitForWindowWrites()
+    expect(loadCachedSetting(LS.auth)).toBe('{"demo":false,"name":""}')
+    expect(save.mock.calls).toEqual([['auth_demo', '{"demo":false,"name":""}']])
+  } finally {
+    finishRead('')
+    await waitForWindowWrites()
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('replays a player snapshot carrying the previous release pending marker', async () => {
+  localStorage.setItem(LS.player, '{"volume":37}')
+  localStorage.setItem('jindi.player.pending.v1', '1')
+  const save = vi.fn(async () => {})
+  vi.stubGlobal('go', { app: { App: { ...fake, SaveSetting: save } } })
+  try {
+    await prime()
+    await waitForWindowWrites()
+    expect(save.mock.calls).toEqual([['player', '{"volume":37}']])
+    expect(localStorage.getItem('jindi.player.pending.v1')).toBeNull()
+    expect(loadCachedSetting(LS.player)).toBe('{"volume":37}')
+  } finally {
+    await waitForWindowWrites()
+    localStorage.clear()
+    vi.unstubAllGlobals()
+  }
+})
+
+it('keeps the cached logout and its pending flag in one atomic storage write', async () => {
+  const save = vi.fn(async () => { throw new Error('database busy') })
+  vi.stubGlobal('go', { app: { App: { SaveSetting: save } } })
+  const writes = vi.spyOn(Storage.prototype, 'setItem')
+  try {
+    saveSetting(LS.auth, { demo: false, name: '' })
+    await waitForWindowWrites()
+    expect(writes.mock.calls).toHaveLength(1)
+    expect(writes.mock.calls[0][0]).toBe(LS.auth)
+    expect(loadCachedSetting(LS.auth)).toBe('{"demo":false,"name":""}')
+  } finally {
+    writes.mockRestore()
+    localStorage.clear()
     vi.unstubAllGlobals()
   }
 })
