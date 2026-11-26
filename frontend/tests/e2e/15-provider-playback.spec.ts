@@ -789,6 +789,55 @@ test('CMS retries truncated network streams without losing the saved position', 
   }
 })
 
+for (const scenario of ['playing', 'paused', 'blocked'] as const) {
+  test(`CMS fallback preserves playback intent when ${scenario}`, async ({ page }, testInfo) => {
+    const desktop = await cmsLibraryFixture(page)
+    await page.goto(cmsRoute + '/play/1')
+    const video = historyVideo(page, 1)
+    await playHistoryVideo(video)
+    await video.evaluate((media: HTMLVideoElement) => {
+      media.currentTime = 6
+      media.muted = true
+    })
+    await expect.poll(() => position(video)).toBeGreaterThanOrEqual(6)
+    if (scenario === 'paused') {
+      await video.evaluate((media: HTMLVideoElement) => media.pause())
+    }
+    if (scenario === 'blocked') {
+      await page.evaluate(() => {
+        const nativePlay = HTMLMediaElement.prototype.play
+        let rejected = false
+        HTMLMediaElement.prototype.play = function () {
+          if (!rejected && this.src.endsWith('/1')) {
+            rejected = true
+            return Promise.reject(new DOMException('Playback requires a user gesture', 'NotAllowedError'))
+          }
+          return nativePlay.call(this)
+        }
+      })
+    }
+    const checkpoint = await failWithMediaError(video)
+    await expect(video).toHaveAttribute('src', /\/1$/)
+    if (scenario === 'playing') {
+      await expect(video).toHaveJSProperty('paused', false)
+      await expect(video).toHaveJSProperty('muted', true)
+      await expect.poll(() => position(video)).toBeGreaterThan(checkpoint + 0.15)
+    } else {
+      await expect.poll(() => position(video)).toBeCloseTo(checkpoint, 1)
+      await expect(video).toHaveJSProperty('paused', true)
+      if (scenario === 'blocked') {
+        const notice = page.getByRole('status').filter({ hasText: '已切换到备用源，请点击播放。' })
+        await expect(notice).toBeVisible()
+        await page.screenshot({ path: testInfo.outputPath('cms-fallback-manual.png') })
+        await playHistoryVideo(video)
+        await expect(notice).toHaveCount(0)
+      }
+    }
+    expect(desktop.rows()[0].episode).toBe(1)
+    expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+  })
+}
+
 test('CMS native volume carries across a fallback and a manual episode change', async ({ page }) => {
   await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')

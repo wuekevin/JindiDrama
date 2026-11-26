@@ -68,11 +68,12 @@ type MediaHistory = {
   saved?: Progress
 }
 type Advance = { fromGeneration: number; path: string; muted: boolean }
+type AutoStart = { reason: 'next' | 'fallback'; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
 let preferenceMedia: HTMLVideoElement | undefined
 let nextEpisode: Advance | undefined
-const autoStart = shallowRef<Advance>()
+const autoStart = shallowRef<AutoStart>()
 let manualNavigation: ReturnType<typeof router.push> | undefined
 let closing = false
 
@@ -120,11 +121,12 @@ function onPlayable(event: Event) {
 
 function startWhenReady(current: MediaHistory) {
   const { media } = current
-  if (!autoStart.value || current.autoAttempted || current.pending || current.restoring || media.seeking ||
+  const start = autoStart.value
+  if (!start || current.autoAttempted || current.pending || current.restoring || media.seeking ||
       media.readyState < HTMLMediaElement.HAVE_METADATA || closing || !isCurrentHistory(current)) return
   current.autoAttempted = true
-  media.muted = autoStart.value.muted
-  startMedia(current, '已切换到下一集，请点击播放。')
+  media.muted = start.muted
+  startMedia(current, start.reason === 'next' ? '已切换到下一集，请点击播放。' : '已切换到备用源，请点击播放。')
 }
 
 function startMedia(current: MediaHistory, fallback: string) {
@@ -327,7 +329,7 @@ async function load() {
   const automatic = !closing && nextEpisode?.fromGeneration === generation && nextEpisode.path === path
     ? nextEpisode : undefined
   nextEpisode = undefined
-  autoStart.value = automatic
+  autoStart.value = automatic && { reason: 'next', muted: automatic.muted }
   const current = ++generation
   playbackPath = path
   const targetId = id.value
@@ -393,13 +395,16 @@ function failMedia(media: HTMLVideoElement, choice: MediaSource) {
     expireTicket()
     return
   }
+  const resumeBackup = watchTarget && !closing && !manualNavigation && !media.paused && !media.ended
+  const muted = media.muted
   stopMedia(true)
   if (selected.value + 1 < sources.value.length) {
+    if (resumeBackup && !autoStart.value) autoStart.value = { reason: 'fallback', muted }
     selected.value++
     return
   }
   state.value = 'error'
-  error.value = autoStart.value ? '下一集媒体加载失败，请重试。' : '媒体加载失败，请重试。'
+  error.value = autoStart.value?.reason === 'next' ? '下一集媒体加载失败，请重试。' : '媒体加载失败，请重试。'
   autoStart.value = undefined
   sources.value = []
   releaseLease()
