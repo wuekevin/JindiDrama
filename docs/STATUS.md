@@ -623,3 +623,8 @@
 - 关键词搜索、片源目录和分类加载失败时，若该范围上次成功加载了结果，则继续展示这些结果，分别标明请求失败的页码和实际显示的页码。重试请求原页，返回更新 URL。切换关键词、分类或片源时清除旧结果，分类被删除时清除快照。
 - 前端类型检查、生产构建、122 项 Vitest、搜索与片源目录 38 项 Playwright、Go vet 和 Go 全量测试通过。对照设计稿复核默认窗口与 1280×860、220% 缩放。此次使用浏览器合成片源。[BMad 记录](../_bmad-output/plan-e02-cms-page-recovery.md) · [默认截图](../build/bin/qa-cms-page-recovery/cms-page-recovery-default.png) · [220% 截图](../build/bin/qa-cms-page-recovery/cms-page-recovery-220.png)
 - 同日复核已授权的 .44 批次。GitHub 四项 smoke 状态成功，两份原始 ZIP 的 SHA-256 与 GitHub 摘要一致，归档的 Windows 7 项和 macOS 6 项再次核验通过。此修复留待后续集中打包。[.44 工作流](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269)
+
+## E13 发行草稿核对签名打包轮次（2026-11-27）
+
+- `--verify-release-draft` 新增该轮次的 GitHub Actions 任务 JSON 参数。核对交付说明对应仓库、运行、轮次和提交，要求 Windows 与 macOS 签名打包、Windows 下载复验、Intel 原生复验和正式交付包组装五项均成功。签名矩阵采用显式任务名，README 记录查询与校验步骤。[GitHub 指定轮次任务 API](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
+- Node 22 和 26 各通过 13 项发行工具测试，覆盖缺失、重复、任务失败、跳过及错误仓库或轮次。只读核对已有 .44 GitHub smoke 响应的实际字段及组装任务被跳过。打包 YAML 语法与发行源码历史检查通过。真实签名任务和线上草稿仍待正式发行环境验收。[BMad 记录](../_bmad-output/plan-e13-release-attempt.md)

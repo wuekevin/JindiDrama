@@ -139,7 +139,7 @@ async function verifyReleaseTag(tag, directory) {
     throw new Error('Release handoff version or build commit does not match the local release tag')
   }
   console.log('Release tag ' + tag + ' matches build commit ' + revision)
-  return { checksums, manifestFile, repository, revision, notes }
+  return { checksums, manifestFile, repository, revision, notes, run, attempt }
 }
 
 function remoteReleaseRevision(repository, tag) {
@@ -172,8 +172,35 @@ function normalizedReleaseBody(body) {
   return body.replace(/\r\n/g, '\n').trimEnd()
 }
 
-async function verifyReleaseDraft(tag, directory, metadataFile) {
-  const { checksums, manifestFile, repository, revision, notes } = await verifyReleaseTag(tag, directory)
+async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt }) {
+  const response = JSON.parse(await readFile(jobsFile, 'utf8'))
+  if (!Array.isArray(response?.jobs) || response.total_count !== response.jobs.length) {
+    throw new Error('Expected the complete GitHub Actions jobs response for the release attempt')
+  }
+  const runURL = `https://api.github.com/repos/${repository}/actions/runs/${run}`.toLowerCase()
+  const required = [
+    'package-release (windows-latest)',
+    'package-release (macos-latest)',
+    'verify-windows-download',
+    'verify-macos-intel',
+    'assemble-release',
+  ]
+  for (const name of required) {
+    const matching = response.jobs.filter((job) => job?.name === name)
+    if (matching.length !== 1) throw new Error(`Expected one release job named ${name}`)
+    const [job] = matching
+    if (job.workflow_name !== 'package' || typeof job.run_url !== 'string' || job.run_url.toLowerCase() !== runURL ||
+        String(job.run_id) !== run || String(job.run_attempt) !== attempt || job.head_sha !== revision ||
+        job.status !== 'completed' || job.conclusion !== 'success') {
+      throw new Error(`Release job ${name} must have succeeded for build ${run} attempt ${attempt} at ${revision}`)
+    }
+  }
+  console.log(`GitHub Actions build ${run} attempt ${attempt} matches all ${required.length} successful release jobs`)
+}
+
+async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile) {
+  const handoff = await verifyReleaseTag(tag, directory)
+  const { checksums, manifestFile, repository, revision, notes } = handoff
   const draft = JSON.parse(await readFile(metadataFile, 'utf8'))
   const prerelease = tag.split('+', 1)[0].includes('-')
   if (draft?.draft !== true || draft.tag_name !== tag || draft.prerelease !== prerelease ||
@@ -203,6 +230,7 @@ async function verifyReleaseDraft(tag, directory, metadataFile) {
   for (const name of checksums.keys()) {
     if (!seen.has(name)) throw new Error(`Missing draft asset: ${name}`)
   }
+  await verifyReleaseJobs(jobsFile, handoff)
   if (remoteReleaseRevision(repository, tag) !== revision) {
     throw new Error('GitHub release tag does not match the handoff build commit')
   }
@@ -229,11 +257,11 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verifyHostedPackage(directory, platform)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
-  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 1) {
-    await verifyReleaseDraft(platform, directory, extra[0])
+  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 2) {
+    await verifyReleaseDraft(platform, directory, extra[0], extra[1])
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json> <github-jobs.json>')
   }
 }

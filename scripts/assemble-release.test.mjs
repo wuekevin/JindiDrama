@@ -68,7 +68,7 @@ function git(cwd, ...args) {
   return result.stdout.trim()
 }
 
-test('verifies the handoff against local and GitHub tags, draft notes, and uploaded assets', async (t) => {
+test('verifies the handoff against GitHub release jobs, tags, draft notes and uploaded assets', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'jindi-release-tag-'))
   t.after(() => rm(cwd, { recursive: true, force: true }))
   git(cwd, 'init', '--quiet', '--object-format=sha1')
@@ -118,13 +118,36 @@ test('verifies the handoff against local and GitHub tags, draft notes, and uploa
     tag_name: version, draft: true, prerelease: true, assets, body,
   }
   const draftFile = join(cwd, 'draft.json')
-  async function checkDraft(data) {
+  const jobsFile = join(cwd, 'release-jobs.json')
+  const jobs = [
+    'package-release (windows-latest)', 'package-release (macos-latest)',
+    'verify-windows-download', 'verify-macos-intel', 'assemble-release',
+  ].map((name) => ({
+    name, workflow_name: 'package', run_id: Number(runID), run_attempt: Number(attempt), head_sha: sha,
+    run_url: 'https://api.github.com/repos/' + repository + '/actions/runs/' + runID,
+    status: 'completed', conclusion: 'success',
+  }))
+  async function checkDraft(data, releaseJobs = jobs, total = releaseJobs.length) {
     await writeFile(draftFile, JSON.stringify(data))
-    return run(checksums, ['--verify-release-draft', version, output, draftFile], { cwd })
+    await writeFile(jobsFile, JSON.stringify({ total_count: total, jobs: releaseJobs }))
+    return run(checksums, ['--verify-release-draft', version, output, draftFile, jobsFile], { cwd })
   }
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
+  assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs/)
+  assert.match((await checkDraft(draft, jobs, jobs.length + 1)).stderr, /complete GitHub Actions jobs response/)
+  assert.match((await checkDraft(draft, jobs.slice(1))).stderr, /Expected one release job named package-release/)
+  assert.match((await checkDraft(draft, [...jobs, jobs.at(-1)])).stderr, /Expected one release job named assemble-release/)
+  for (const wrong of [
+    { run_attempt: 1 }, { run_id: 67890 }, { head_sha: wrongSHA }, { workflow_name: 'CI' },
+    { run_url: 'https://api.github.com/repos/example/Other/actions/runs/' + runID },
+    { status: 'in_progress' }, { conclusion: 'failure' }, { conclusion: 'skipped' },
+  ]) {
+    const rejected = await checkDraft(draft, [...jobs.slice(0, -1), { ...jobs.at(-1), ...wrong }])
+    assert.equal(rejected.status, 1)
+    assert.match(rejected.stderr, /Release job assemble-release must have succeeded/)
+  }
   assert.match(validDraft.stdout, new RegExp('GitHub release tag .* matches build commit ' + sha))
   const normalizedDraft = await checkDraft({ ...draft, body: body.trimEnd().replace(/\n/g, '\r\n') })
   assert.equal(normalizedDraft.status, 0, normalizedDraft.stderr)

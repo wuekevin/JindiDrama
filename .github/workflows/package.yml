@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   package-release:
+    name: package-release (${{ matrix.os }})
     if: inputs.mode == 'release'
     strategy:
       fail-fast: false
