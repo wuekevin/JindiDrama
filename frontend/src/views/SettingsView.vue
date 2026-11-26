@@ -248,8 +248,28 @@ function onKey(e: KeyboardEvent) {
   rec.value = ''
 }
 const updates = useDesktopUpdates()
-const { channel, channelBusy, channelAvailable, checking, downloading, canDownload, lastCheck, upd } = storeToRefs(updates)
+const { channel, channelBusy, channelAvailable, checking, downloading, savedUpdatePath, canDownload, lastCheck, upd } = storeToRefs(updates)
 if (desktop) void updates.loadChannel()
+const savedUpdate = ref<HTMLElement>()
+watch(savedUpdatePath, (path) => {
+  if (path) savedUpdate.value?.scrollIntoView({ block: 'nearest' })
+}, { flush: 'post' })
+
+async function copyUpdatePath() {
+  const path = savedUpdatePath.value
+  if (!path) return
+  const runtime = (window as Window & { runtime?: { ClipboardSetText?(text: string): Promise<boolean> } }).runtime
+  try {
+    if (runtime?.ClipboardSetText) {
+      if (!(await runtime.ClipboardSetText(path))) throw new Error('clipboard')
+    } else {
+      await navigator.clipboard.writeText(path)
+    }
+    toast.push('安装包路径已复制', 'success')
+  } catch {
+    toast.push('无法写入剪贴板', 'error')
+  }
+}
 const autostartPending = ref(false)
 const autostartReadFailed = ref(false)
 async function loadAutostart() {
@@ -368,7 +388,14 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
               <button ref="backupButton" data-testid="create-backup" :disabled="backupBusy" @click="createBackup"><Download :size="16" />{{ backupBusy ? '备份中…' : '创建数据备份' }}<ChevronRight :size="14" /></button>
               <button v-if="canRestore" ref="restoreButton" :disabled="backupBusy" @click="openRestore"><FolderOpen :size="16" />从备份恢复收藏和历史<ChevronRight :size="14" /></button>
               <button ref="privacyButton" data-testid="privacy-notice" @click="showPrivacy = true"><CircleHelp :size="16" />隐私与反馈<ChevronRight :size="14" /></button>
-            </div></div></section>
+            </div>
+          </div>
+          <div v-if="savedUpdatePath" ref="savedUpdate" class="saved-update" data-testid="saved-update">
+            <p role="status">安装包已校验并保存，可手动安装</p>
+            <code>{{ savedUpdatePath }}</code>
+            <BaseButton variant="outline" size="sm" @click="copyUpdatePath">复制保存路径</BaseButton>
+          </div>
+        </section>
       </div>
     </div>
     <PrivacyNoticeDialog :open="showPrivacy" :return-focus="privacyButton" @close="showPrivacy = false" />
@@ -470,6 +497,14 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
   }
 }
 .backup-path { overflow-wrap: anywhere; }
+.saved-update {
+  display: grid;
+  gap: 8px;
+  padding: 12px 8px;
+  border-top: 1px solid var(--c-border);
+  code { color: var(--c-text-2); overflow-wrap: anywhere; user-select: text; }
+  button { justify-self: start; }
+}
 .release-notes-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 12px; }
 .release-notes-text { max-height: 52vh; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; h4 { margin-bottom: 8px; } }
 .spin { animation: sp 1s linear infinite; } @keyframes sp { to { transform: rotate(360deg); } }

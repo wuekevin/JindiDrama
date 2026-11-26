@@ -14,18 +14,24 @@ import (
 
 // DownloadUpdate saves the package bound to the last verified release check.
 func (a *App) DownloadUpdate(releaseURL string) (bool, error) {
+	path, err := a.DownloadUpdateFile(releaseURL)
+	return path != "", err
+}
+
+// DownloadUpdateFile returns the published path after validation, or an empty path on cancellation.
+func (a *App) DownloadUpdateFile(releaseURL string) (string, error) {
 	if a.ctx == nil {
-		return false, errors.New("窗口尚未就绪")
+		return "", errors.New("窗口尚未就绪")
 	}
 	a.updateMu.Lock()
 	asset := a.releaseAsset
 	if asset == nil || releaseURL != a.releaseURL {
 		a.updateMu.Unlock()
-		return false, errors.New("安装包已变更，请重新检查更新")
+		return "", errors.New("安装包已变更，请重新检查更新")
 	}
 	if !a.beginMediaExport() {
 		a.updateMu.Unlock()
-		return false, errors.New("已有保存操作进行中，或窗口正在关闭")
+		return "", errors.New("已有保存操作进行中，或窗口正在关闭")
 	}
 	ctx, cancel := context.WithCancel(a.context())
 	a.cancelUpdate = cancel
@@ -46,25 +52,29 @@ func (a *App) DownloadUpdate(releaseURL string) (bool, error) {
 		CanCreateDirectories: true,
 	})
 	if err != nil {
-		return false, errors.New("无法打开系统保存对话框")
+		return "", errors.New("无法打开系统保存对话框")
 	}
 	if path == "" || ctx.Err() != nil {
-		return false, nil
+		return "", nil
 	}
 	if !strings.EqualFold(filepath.Ext(path), ext) {
-		return false, errors.New("请选择以 " + ext + " 结尾的文件名")
+		return "", errors.New("请选择以 " + ext + " 结尾的文件名")
 	}
 	a.updateMu.Lock()
 	current := asset == a.releaseAsset
 	a.updateMu.Unlock()
 	if !current {
-		return false, errors.New("安装包已变更，请重新检查更新")
+		return "", errors.New("安装包已变更，请重新检查更新")
 	}
-	return saveUpdate(ctx, path, asset.Download, func(publish func() error) error {
+	saved, err := saveUpdate(ctx, path, asset.Download, func(publish func() error) error {
 		a.updateMu.Lock()
 		defer a.updateMu.Unlock()
 		return publish()
 	})
+	if err != nil || !saved {
+		return "", err
+	}
+	return path, nil
 }
 
 func (a *App) CancelUpdateDownload() {

@@ -12,6 +12,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
   const channelAvailable = ref(false)
   const checking = ref(false)
   const downloading = ref(false)
+  const savedUpdatePath = ref('')
   const lastCheck = ref<number | null>(null)
   const upd = ref<UpdateResult | null>(null)
   const checkMessage = ref('')
@@ -62,6 +63,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     try {
       await setUpdateChannel(next)
       channel.value = next
+      savedUpdatePath.value = ''
       upd.value = null
       checkMessage.value = ''
       restoreLastCheck()
@@ -77,6 +79,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
   async function check(showToast = true) {
     if (checking.value || channelBusy.value || downloading.value) return
     checking.value = true
+    savedUpdatePath.value = ''
     upd.value = null
     checkMessage.value = ''
     function report(message: string, kind: 'info' | 'success' | 'error') {
@@ -118,7 +121,9 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     if (!candidate || !canDownload.value || checking.value || channelBusy.value || downloading.value) return
     downloading.value = true
     try {
-      if (await downloadUpdate(candidate.url)) toast.push('安装包已校验并保存，可手动安装', 'success')
+      const saved = await downloadUpdate(candidate.url)
+      if (typeof saved === 'string' && saved) savedUpdatePath.value = saved
+      else if (saved === true) toast.push('安装包已校验并保存，可手动安装', 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '无法下载更新'
       toast.push(message, 'error')
@@ -131,5 +136,5 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     try { await cancelUpdateDownload() } catch { toast.push('无法取消下载，请稍后重试', 'error') }
   }
 
-  return { channel, channelBusy, channelAvailable, checking, downloading, canDownload, lastCheck, upd, checkMessage, noticeKey, unread, acknowledge, loadChannel, chooseChannel, check, openRelease, download, cancelDownload }
+  return { channel, channelBusy, channelAvailable, checking, downloading, savedUpdatePath, canDownload, lastCheck, upd, checkMessage, noticeKey, unread, acknowledge, loadChannel, chooseChannel, check, openRelease, download, cancelDownload }
 })

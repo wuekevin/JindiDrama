@@ -371,35 +371,48 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await expect(backupButton).toBeFocused()
 })
 
-test('downloads a verified update through the desktop bridge and lets the user retry after cancelling', async ({ page }) => {
+test('downloads a verified update through the desktop bridge and shows its path after a cancelled attempt', async ({ page }, testInfo) => {
   const url = 'https://github.com/wuekevin/JindiDrama/releases/tag/v1.2.3'
   let attempts = 0
   let cancelled = 0
-  let firstComplete!: (saved: boolean) => void
+  const savedPath = '/native/downloads/' + '带空格 的更新目录/'.repeat(12) + '金帝短剧.zip'
+  let firstComplete!: (saved: string) => void
+  let copied = ''
+  await page.exposeFunction('copyUpdatePathFixture', (value: string) => { copied = value; return true })
   await page.exposeFunction('downloadUpdateFixture', (release: string) => {
     if (release !== url) throw new Error('wrong candidate')
     attempts++
-    if (attempts === 1) return new Promise<boolean>((resolve) => { firstComplete = resolve })
-    return true
+    if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve })
+    return savedPath
   })
-  await page.exposeFunction('cancelUpdateFixture', () => { cancelled++; firstComplete(false) })
+  await page.exposeFunction('cancelUpdateFixture', () => { cancelled++; firstComplete('') })
   await page.addInitScript(({ url }) => {
-    const desktop = window as unknown as { downloadUpdateFixture(url: string): Promise<boolean>; cancelUpdateFixture(): Promise<void> }
-    Object.assign(window, { go: { app: { App: {
-      StorageReady: async () => false,
-      AppVersion: async () => 'v0.1.0',
-      CacheStats: async () => ({ bytes: 0, files: 0, max: 2 * 1024 ** 3, path: '/native/cache' }),
-      AutostartEnabled: async () => false,
-      UpdateChannel: async () => 'stable',
-      CheckUpdate: async () => ({ current: 'v0.1.0', latest: 'v1.2.3', channel: 'stable', hasUpdate: true, url, downloadName: 'JindiDrama-macos-universal.zip' }),
-      DownloadUpdate: desktop.downloadUpdateFixture,
-      CancelUpdateDownload: desktop.cancelUpdateFixture,
-    } } } })
+    const desktop = window as unknown as {
+      downloadUpdateFixture(url: string): Promise<string>
+      cancelUpdateFixture(): Promise<void>
+      copyUpdatePathFixture(value: string): Promise<boolean>
+    }
+    Object.assign(window, {
+      runtime: { ClipboardSetText: desktop.copyUpdatePathFixture },
+      go: { app: { App: {
+        StorageReady: async () => false,
+        AppVersion: async () => 'v0.1.0',
+        CacheStats: async () => ({ bytes: 0, files: 0, max: 2 * 1024 ** 3, path: '/native/cache' }),
+        AutostartEnabled: async () => false,
+        UpdateChannel: async () => 'stable',
+        SetUpdateChannel: async () => {},
+        CheckUpdate: async () => ({ current: 'v0.1.0', latest: 'v1.2.3', channel: 'stable', hasUpdate: true, url, downloadName: 'JindiDrama-macos-universal.zip' }),
+        DownloadUpdateFile: desktop.downloadUpdateFixture,
+        CancelUpdateDownload: desktop.cancelUpdateFixture,
+      } } },
+    })
   }, { url })
   await page.goto('/#/settings')
   const check = page.getByTestId('check-update')
   const download = page.getByRole('button', { name: '校验并下载安装包' })
   const cancel = page.getByRole('button', { name: '取消下载' })
+  const saved = page.getByTestId('saved-update')
+  const copy = page.getByRole('button', { name: '复制保存路径' })
   await expect(download).toHaveCount(0)
   await check.click()
   await expect(page.getByTestId('open-release')).toBeVisible()
@@ -410,12 +423,31 @@ test('downloads a verified update through the desktop bridge and lets the user r
   await cancel.click()
   await expect(download).toBeEnabled()
   expect(cancelled).toBe(1)
+  await expect(saved).toHaveCount(0)
   await download.click()
-  await expect(page.getByTestId('toast').last()).toContainText('安装包已校验并保存')
+  await expect(saved.getByRole('status')).toContainText('安装包已校验并保存')
   expect(attempts).toBe(2)
-  await page.getByRole('button', { name: '关于与更新', exact: true }).click()
-  await page.getByTestId('open-release').scrollIntoViewIfNeeded()
-  await page.screenshot({ path: '../design/rendered/10-校验下载更新.png' })
+  await expect(saved.locator('code')).toHaveText(savedPath)
+  await expect(copy).toBeInViewport()
+  await expect(page.getByTestId('toast').filter({ hasText: '发现新版本' })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('update-saved-default.png') })
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((el) => el.style.setProperty('--user-zoom', '2.2'))
+  await copy.focus()
+  await expect(copy).toBeInViewport()
+  const savedBounds = (await saved.boundingBox())!
+  expect(savedBounds.x + savedBounds.width).toBeLessThanOrEqual(1280)
+  await page.screenshot({ path: testInfo.outputPath('update-saved-220.png') })
+  await copy.press('Enter')
+  await expect(page.getByTestId('toast').last()).toContainText('安装包路径已复制')
+  expect(copied).toBe(savedPath)
+
+  await check.click()
+  await expect(saved).toHaveCount(0)
+  await download.click()
+  await expect(saved.locator('code')).toHaveText(savedPath)
+  await page.getByTestId('update-channel').selectOption('preview')
+  await expect(saved).toHaveCount(0)
 })
 
 test('restores missing library rows from a selected backup and keeps existing records', async ({ page }) => {

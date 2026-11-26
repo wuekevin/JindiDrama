@@ -645,3 +645,9 @@
 
 - 点击「返回第 N 页」时，从同一片源和浏览范围的内存结果恢复剧目及分页按钮。更新路由页码，将焦点移回标题。显式翻页或重试照常访问片源。
 - 用持续失败的目录夹具在旧版复现。修复后核对回到第 1、2 页都没有新增目录请求，并验证上下一页、故障恢复后的重试和 URL。38 项搜索与片源 Playwright、122 项 Vitest、类型检查、生产构建、Go vet 和 Go 全量测试通过。[BMad 记录](../_bmad-output/plan-e02-cms-offline-return.md) · [断线返回截图](../build/bin/qa-cms-offline-return/cms-directory-offline-return.png)
+
+## E13 设置显示安装包保存位置（2026-11-27）
+
+- 设置页在更新包校验并保存后滚动到本机保存路径，支持复制完整路径，安装仍由用户手动进行。路径仅保存于当前会话。取消和失败时不产生新回执，重新检查或切换渠道时清除旧路径。旧桌面布尔型桥接仍受支持。
+- 使用 Chromium 桌面桥夹具核对取消、重新保存、中文和空格路径、键盘复制、重新检查与切换渠道。对照设置设计稿复验默认窗口及 1280×860、220% 缩放下的长路径换行和操作。[默认截图](../build/bin/qa-update-save-location/update-saved-default.png) · [220% 截图](../build/bin/qa-update-save-location/update-saved-220.png)
+- 前端类型检查、生产构建、122 项 Vitest、44 项设置 Playwright 和回执关键用例复跑通过。Go App/更新模块测试及 vet、Windows x64 生产交叉编译通过。真实签名 Release 下载与原生剪贴板联调仍待验收。[BMad 记录](../_bmad-output/plan-e13-update-save-location.md)

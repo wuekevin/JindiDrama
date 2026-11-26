@@ -136,6 +136,7 @@ interface GoApp {
   ProviderName?(): Promise<string>
   AppVersion(): Promise<string>; CheckUpdate(): Promise<UpdateResult>; OpenReleasePage(url: string): Promise<void>
   DownloadUpdate?(releaseURL: string): Promise<boolean>
+  DownloadUpdateFile?(releaseURL: string): Promise<string>
   CancelUpdateDownload?(): Promise<void>
   UpdateChannel(): Promise<UpdateChannel>; SetUpdateChannel(channel: UpdateChannel): Promise<void>
   LogEvent(level: string, component: string, msg: string): Promise<void>; DiagnosticsTail(n: number): Promise<string[]>
@@ -1029,8 +1030,14 @@ export const appVersion = () => api()?.AppVersion() ?? Promise.resolve('v0.1.0')
 /** 检查更新：仅桌面端可用（浏览器预览返回 null）。 */
 export const checkUpdate = (): Promise<UpdateResult | null> => api()?.CheckUpdate() ?? Promise.resolve(null)
 export const openReleasePage = (url: string) => api()?.OpenReleasePage(url) ?? Promise.resolve()
-export const supportsUpdateDownload = () => !!(api()?.DownloadUpdate && api()?.CancelUpdateDownload)
-export const downloadUpdate = (url: string) => api()?.DownloadUpdate?.(url) ?? Promise.resolve(false)
+export function supportsUpdateDownload() {
+  const bridge = api()
+  return !!((bridge?.DownloadUpdateFile || bridge?.DownloadUpdate) && bridge.CancelUpdateDownload)
+}
+export function downloadUpdate(url: string) {
+  const bridge = api()
+  return bridge?.DownloadUpdateFile?.(url) ?? bridge?.DownloadUpdate?.(url) ?? Promise.resolve(false)
+}
 export const cancelUpdateDownload = () => api()?.CancelUpdateDownload?.() ?? Promise.resolve()
 
 /** 开机启动：仅桌面端有效；浏览器预览返回 null / 不报错。 */
