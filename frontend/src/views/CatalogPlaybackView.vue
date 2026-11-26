@@ -16,6 +16,7 @@ import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
+import { usePlaybackShortcuts } from '@/player/usePlaybackShortcuts'
 import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useCommentStore } from '@/stores/comments'
@@ -51,6 +52,7 @@ const localPanel = ref<LocalPanel>()
 const commentTrigger = ref<HTMLButtonElement>()
 const danmakuTrigger = ref<HTMLButtonElement>()
 const panelRegion = ref<HTMLElement>()
+const stage = ref<HTMLElement>()
 const video = ref<HTMLVideoElement>()
 const { mine, danmakuDraft, sendDm, recoveringDanmaku, pendingDanmakuRecovery, retryDanmakuRecovery } =
   useLocalEpisodeDanmaku(id, episode, () => canInteract.value)
@@ -337,6 +339,46 @@ function selectEpisode(index: number) {
   void navigation.then(settled, settled)
 }
 
+function togglePlayback() {
+  const current = mediaHistory
+  if (!current || !isCurrentHistory(current)) return
+  if (current.media.paused) startMedia(current, '无法开始播放，请使用视频播放按钮。')
+  else current.media.pause()
+}
+
+function seekBy(seconds: number) {
+  const media = video.value
+  if (!media || !Number.isFinite(media.duration) || !media.seekable.length) return
+  const next = Math.min(Math.max(0, media.currentTime + seconds), media.duration)
+  media.currentTime = seekablePosition(media.seekable, next, media.currentTime)
+}
+
+function selectAdjacentEpisode(step: number) {
+  const next = episode.value + step
+  if (availableCatalogEpisode(detail.value, next)) selectEpisode(next)
+}
+
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else if (stage.value) await stage.value.requestFullscreen()
+  } catch {
+    playbackNotice.value = '当前环境不支持全屏，请使用视频的全屏按钮。'
+  }
+}
+
+usePlaybackShortcuts({
+  playPause: togglePlayback,
+  forward: () => seekBy(10),
+  back: () => seekBy(-10),
+  next: () => selectAdjacentEpisode(1),
+  prev: () => selectAdjacentEpisode(-1),
+  fullscreen: toggleFullscreen,
+  danmaku: () => { settings.danmaku.enabled = !settings.danmaku.enabled },
+}, {
+  enabled: () => canInteract.value && !closing && state.value === 'ready' && Date.now() < expiresAt,
+})
+
 function stopMedia(failed = false) {
   cancelAnimationFrame(danmakuFrame)
   clearTimeout(stallTimer)
@@ -609,7 +651,7 @@ onBeforeUnmount(() => {
     <RouterLink class="back" :to="detailRoute(id, true)"><ChevronLeft :size="18" />返回详情</RouterLink>
     <h1 v-if="detail">{{ detail.drama.title }}</h1>
     <p v-if="episode" class="episode-label">第{{ episode }}集</p>
-    <div class="stage">
+    <div ref="stage" class="stage">
       <Skeleton v-if="state === 'loading'" class="loading" />
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline :preload="autoStart ? 'auto' : 'metadata'"
@@ -630,10 +672,11 @@ onBeforeUnmount(() => {
         <button ref="commentTrigger" type="button" :aria-expanded="localPanel === 'comments'" @click="toggleLocalPanel('comments')">本机评论</button>
         <button ref="danmakuTrigger" type="button" :aria-expanded="localPanel === 'danmaku'" @click="toggleLocalPanel('danmaku')">本机弹幕</button>
       </div>
-      <div v-if="localPanel === 'comments'" ref="panelRegion" class="local-comment-panel">
+      <div v-if="localPanel === 'comments'" ref="panelRegion" class="local-comment-panel" data-player-shortcuts-ignore>
         <CommentPanel local-only @close="toggleLocalPanel('comments')" />
       </div>
-      <div v-else-if="localPanel === 'danmaku'" ref="panelRegion" class="local-danmaku-panel" tabindex="-1" @keydown.esc="toggleLocalPanel('danmaku')">
+      <div v-else-if="localPanel === 'danmaku'" ref="panelRegion" class="local-danmaku-panel" tabindex="-1"
+        data-player-shortcuts-ignore @keydown.esc="toggleLocalPanel('danmaku')">
         <DanmakuSettings local-only :time="mediaTime" :current-time="currentPosition" :draft="danmakuDraft"
           :send-danmaku="sendDm" :local-items="mine" :pending-recovery="pendingDanmakuRecovery"
           :recovering="recoveringDanmaku" :retry-recovery="retryDanmakuRecovery" />
@@ -649,6 +692,10 @@ h1 { font-size: 28px; overflow-wrap: anywhere; }
 .episode-label { color: var(--c-text-2); }
 .stage { --danmaku-top: 8px; --danmaku-bottom: 60px; position: relative; min-height: 260px; display: grid; place-items: center; border-radius: 18px; overflow: hidden; background: var(--c-surface-solid); }
 video { display: block; width: 100%; max-width: 960px; max-height: 65vh; background: #000; }
+.stage:fullscreen { border-radius: 0; background: #000; }
+.stage:fullscreen video {
+  position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain;
+}
 .loading { width: 100%; min-height: 360px; }
 .episode-nav, .local-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .episode-nav button, .local-actions button {

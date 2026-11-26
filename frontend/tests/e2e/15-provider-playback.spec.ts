@@ -25,6 +25,7 @@ type SavedDanmaku = { id: number; offsetMs: number; text: string }
 type CatalogState = {
   id: string; provider: string; available: number[]
   playMode?: PlayMode
+  shortcuts?: Record<string, string>
   holdPlaybackEpisode?: number
   home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
@@ -96,7 +97,10 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       SendLocalDanmakuOnce: (id: string, episode: number, offset: number, text: string, requestId: string) =>
         desktop.saveCMSDanmaku?.(id, episode, offset, text, requestId),
       GetSetting: async (key: string) => key === 'app'
-        ? JSON.stringify({ startPage: '上次观看', playMode: libraryFixture ? (await desktop.readDesktopCatalog()).playMode : undefined })
+        ? JSON.stringify({
+          startPage: '上次观看',
+          ...(libraryFixture ? await desktop.readDesktopCatalog().then(({ playMode, shortcuts }) => ({ playMode, shortcuts })) : {}),
+        })
         : '',
       ProviderName: async () => {
         if (!libraryFixture) return cms ? 'apple-cms' : 'authorized-fixture'
@@ -589,6 +593,59 @@ const durationMs = (video: ReturnType<typeof historyVideo>) => video.evaluate((m
 const position = (video: ReturnType<typeof historyVideo>) => video.evaluate((media: HTMLVideoElement) =>
   media.seeking ? -1 : media.currentTime,
 )
+
+test('CMS shortcut bindings operate the native video and leave local editors alone', async ({ page }, testInfo) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.shortcuts = { playPause: 'K', fullscreen: 'G' }
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(1000)
+
+  await page.keyboard.press('k')
+  await expect(video).toHaveJSProperty('paused', false)
+  await page.keyboard.press('k')
+  await expect(video).toHaveJSProperty('paused', true)
+  const before = await position(video)
+  await page.keyboard.press('ArrowRight')
+  await expect.poll(() => position(video)).toBeCloseTo(before + 10, 1)
+  await page.keyboard.press('ArrowLeft')
+  await expect.poll(() => position(video)).toBeCloseTo(before, 1)
+
+  await page.keyboard.press('g')
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.classList.contains('stage'))).toBe(true)
+  await expect(video).toHaveCSS('object-fit', 'contain')
+  await expect.poll(() => video.evaluate((media) => {
+    const bounds = media.getBoundingClientRect()
+    return bounds.width <= window.innerWidth + 1 && bounds.height <= window.innerHeight + 1
+  })).toBe(true)
+  await page.screenshot({ path: testInfo.outputPath('cms-shortcut-fullscreen.png') })
+  await page.keyboard.press('g')
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null)
+
+  await page.getByRole('button', { name: '本机弹幕', exact: true }).click()
+  const panel = page.getByTestId('danmaku-settings')
+  const input = panel.getByTestId('dm-input')
+  await input.focus()
+  await page.keyboard.press('k')
+  await page.keyboard.press('d')
+  await page.keyboard.press('ArrowRight')
+  await expect(input).toHaveValue('kd')
+  await expect(panel.getByTestId('dm-enabled')).toHaveAttribute('aria-checked', 'true')
+  await expect(video).toHaveJSProperty('paused', true)
+  await expect.poll(() => position(video)).toBeCloseTo(before, 1)
+  await input.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await page.keyboard.press('d')
+  await page.getByRole('button', { name: '本机弹幕', exact: true }).click()
+  await expect(panel.getByTestId('dm-enabled')).toHaveAttribute('aria-checked', 'false')
+  await page.keyboard.press('Escape')
+
+  await page.keyboard.press('Control+ArrowRight')
+  await expect(page).toHaveURL(/\/play\/2$/)
+  await expect(historyVideo(page, 2)).toHaveJSProperty('paused', true)
+  await page.keyboard.press('Control+ArrowLeft')
+  await expect(page).toHaveURL(/\/play\/1$/)
+})
 
 test('CMS overlays local danmaku at the native media position and keeps episodes isolated', async ({ page }, testInfo) => {
   const saved = new Map<string, SavedDanmaku[]>()

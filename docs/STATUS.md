@@ -493,3 +493,10 @@
 - CMS 播放页的「本机弹幕」以实际播放位置发送，复用弹幕轨道、显示偏好、关键词屏蔽、SQLite 幂等保存、离线补写与关闭窗口写入。按片源、剧目和分集隔离，发送时不会联系片源。演示播放继续复用原有行为。
 - Chromium 验证 3 秒处发送、跳到 4 秒后叠加显示、换集清除、刷新读回。本机原生 Wails 使用合成片源，目录进入故障模式后仍保存 1370 毫秒的弹幕时点，保存未访问目录。正常退出并重启后第 1 集有记录，第 2 集为空，SQLite 完整性通过。
 - 前端生产构建、122 项 Vitest、94 项弹幕及目录播放 Playwright、Go vet、Go 全量与本机互动态竞态检查通过。已按设计稿复核本机弹幕设置和轨道显示。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e12-cms-local-danmaku.md)
+
+## E10 苹果 CMS 播放快捷键（2026-11-27）
+
+- 苹果 CMS 播放页读取已保存的播放暂停、快进快退、相邻分集、全屏和弹幕快捷键。快进快退按 10 秒在可寻址范围内调整。编辑评论或弹幕及使用输入法时，播放器交由输入控件处理按键。
+- 生产前端构建、122 项 Vitest、197 项播放、互动、设置与目录 Playwright 通过。全屏样式定稿后复跑 CMS 快捷键用例，竖屏样片按原比例显示，左右保留黑边。Go vet 和 Go 全量通过。
+- Apple Silicon 使用原生 Wails、WKWebView 和本机合成的授权接口夹具，实测自定义 K 播放暂停、暂停时右方向键快进约 10 秒、F 进入和退出全屏、评论输入 K 时保持暂停，以及正常退出后 SQLite 完整性。真实公网授权片源仍待联调。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e10-cms-playback-shortcuts.md)
+- [全屏截图](../build/bin/qa-cms-shortcuts/chromium-fullscreen.png) · [原生验收](../build/bin/qa-cms-shortcuts/apple-silicon.txt)

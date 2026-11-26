@@ -91,9 +91,12 @@ func main() {
 		Bind:               []interface{}{a},
 		Windows:            &windows.Options{WebviewIsTransparent: false, WindowIsTranslucent: false, WindowClassName: app.WindowsMainWindowClass},
 		Mac: &mac.Options{
-			OnUrlOpen:   links.open,
-			TitleBar:    mac.TitleBarHiddenInset(),
-			Preferences: &mac.Preferences{EnableAutoplayWithoutUserAction: mac.Enabled},
+			OnUrlOpen: links.open,
+			TitleBar:  mac.TitleBarHiddenInset(),
+			Preferences: &mac.Preferences{
+				EnableAutoplayWithoutUserAction: mac.Enabled,
+				FullscreenEnabled:               mac.Enabled,
+			},
 		},
 	})
 	if err != nil {

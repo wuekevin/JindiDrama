@@ -9,15 +9,14 @@ import type { Drama } from '@/types'
 import type { DanmakuItem } from '@/player/danmaku'
 import { useSettingsStore } from '@/stores/player'
 import { useToastStore } from '@/stores/toast'
-import { normalizeKey, useAppSettings } from '@/stores/appSettings'
 import { exportDemoScreenshot, hasBridge } from '@/bindings'
 import { usePictureInPicture } from '@/player/pictureInPicture'
+import { usePlaybackShortcuts } from '@/player/usePlaybackShortcuts'
 import DanmakuLayer from './DanmakuLayer.vue'
 
 const props = defineProps<{ player: ReturnType<typeof usePlayer>; drama: Drama; items: DanmakuItem[]; variant: 'tall' | 'wide' | 'danmaku'; episode: number; hasNext: boolean; exporting?: boolean; title?: string }>()
 const emit = defineEmits<{ next: []; prev: []; back: []; comments: []; danmakuPanel: []; download: [] }>()
 const s = useSettingsStore(); const toast = useToastStore(); const root = ref<HTMLElement>()
-const preferences = useAppSettings()
 const screenshotBusy = ref(false)
 const header = ref<HTMLElement>()
 const footer = ref<HTMLElement>()
@@ -154,24 +153,7 @@ const actions: Record<string, () => void> = {
   screenshot: captureScreenshot,
 }
 
-function key(e: KeyboardEvent) {
-  const target = e.target
-  if (e.defaultPrevented || e.isComposing || !(target instanceof HTMLElement) ||
-      target.isContentEditable || target.closest('input,textarea,select,[data-player-scroll]') || document.querySelector('[aria-modal=true]')) return
-  if (e.key === 'Escape') {
-    menu.value = ''
-    return
-  }
-  if (e.key === ' ' && target.closest('button,a[href],summary,[role=button]')) return
-  const pressed = normalizeKey(e)
-  if (!pressed) return
-  const action = Object.keys(actions).find((name) => preferences.s.shortcuts[name] === pressed)
-  if (!action) return
-  e.preventDefault()
-  if (!e.repeat || action === 'forward' || action === 'back') actions[action]()
-}
-onMounted(() => window.addEventListener('keydown', key))
-onBeforeUnmount(() => window.removeEventListener('keydown', key))
+usePlaybackShortcuts(actions, { escape: () => { menu.value = '' } })
 
 function seekKey(e: KeyboardEvent) {
   if (e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || e.isComposing) return
