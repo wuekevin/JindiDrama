@@ -2,11 +2,54 @@ package app
 
 import (
 	"errors"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"jindi-drama/internal/provider"
+	"jindi-drama/internal/provider/applecms"
 )
+
+func TestAppleCMSLocalCommentsUseOnlyTheConfiguredLocalIdentity(t *testing.T) {
+	a := New()
+	client := &http.Client{Transport: catalogRoundTripper(func(*http.Request) (*http.Response, error) {
+		t.Error("local comments must not contact the CMS")
+		return nil, errors.New("offline")
+	})}
+	if err := configureAppleCMS(a, "https://catalog.example.test/", client); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "jindi.db")
+	if err := a.openStore(db); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+	const id = "apple-cms:c5133cb26d2d4113a54fdc9761b904fe:202603"
+	const snapshot = `[{"id":"my-local","text":"只保存在本机"}]`
+	const foreign = "apple-cms:ffffffffffffffffffffffffffffffff:202603"
+	if err := a.SaveLocalComments(foreign, 1, snapshot); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("foreign source: %v", err)
+	}
+	if err := a.SaveLocalComments(id, applecms.MaxEpisodes+1, snapshot); !errors.Is(err, provider.ErrEpisodeUnavailable) {
+		t.Fatalf("out of range episode: %v", err)
+	}
+	revision, err := a.CompareAndSaveLocalComments(id, 1, "", snapshot, strings.Repeat("b", 32))
+	if err != nil || revision == "" {
+		t.Fatalf("local comment: %q, %v", revision, err)
+	}
+	a.close()
+	if err := a.openStore(db); err != nil {
+		t.Fatal(err)
+	}
+	if state, err := a.LocalCommentsState(id, 1); err != nil || state.Snapshot != snapshot || state.Revision != revision {
+		t.Fatalf("after restart: %+v, %v", state, err)
+	}
+	if state, err := a.LocalCommentsState(id, 2); err != nil || state.Snapshot != "" || state.Revision != "" {
+		t.Fatalf("different episode: %+v, %v", state, err)
+	}
+}
 
 func TestLocalCommentsProfileBelongsToOpenedDatabase(t *testing.T) {
 	dir := t.TempDir()

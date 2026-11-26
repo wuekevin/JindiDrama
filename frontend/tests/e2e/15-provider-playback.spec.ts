@@ -44,6 +44,8 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       readDesktopCatalog(): Promise<CatalogState & { history: HistoryRow[]; favorites: string[] }>
       saveDesktopCatalog(changes: LibraryChanges): Promise<{ favorites: string[]; history: HistoryRow[] }>
       waitForCMSDetails(): Promise<void>
+      readCMSComments(id: string, episode: number): Promise<string>
+      saveCMSComments(id: string, episode: number, snapshot: string): Promise<void>
     }
     if (hls || libraryFixture) {
       // Chromium on macOS can use the system HLS decoder. Exercise MSE here.
@@ -85,6 +87,8 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       Favorites: async () => libraryFixture ? (await desktop.readDesktopCatalog()).favorites : [],
       History: async () => (await desktop.readDesktopCatalog()).history,
       SearchHistory: async () => [],
+      LocalComments: (id: string, episode: number) => desktop.readCMSComments(id, episode),
+      SaveLocalComments: (id: string, episode: number, snapshot: string) => desktop.saveCMSComments(id, episode, snapshot),
       GetSetting: async (key: string) => key === 'app'
         ? JSON.stringify({ startPage: '上次观看', playMode: libraryFixture ? (await desktop.readDesktopCatalog()).playMode : undefined })
         : '',
@@ -533,6 +537,46 @@ async function cmsLibraryFixture(page: Page, initial: HistoryRow[] = [], initial
 }
 
 const historyVideo = (page: Page, episode: number) => page.getByLabel('第' + episode + '集视频')
+
+test('CMS local comments start empty and persist independently for each episode', async ({ page }, testInfo) => {
+  const snapshots = new Map<string, string>()
+  await page.exposeFunction('readCMSComments', (id: string, episode: number) => snapshots.get(id + ':' + episode) ?? '')
+  await page.exposeFunction('saveCMSComments', (id: string, episode: number, snapshot: string) => {
+    snapshots.set(id + ':' + episode, snapshot)
+  })
+  const desktop = await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const open = page.getByRole('button', { name: '本机评论', exact: true })
+  const panel = page.getByRole('complementary', { name: '本机评论' })
+  await open.click()
+  await expect(panel).toBeFocused()
+  await expect(panel.getByTestId('comment-total')).toHaveText('(0)')
+  await expect(panel.getByText('暂无评论')).toBeVisible()
+  await expect(panel.getByTestId('csort-author')).toHaveCount(0)
+  desktop.catalog.offline = true
+  await panel.getByTestId('comment-input').fill('第 1 集的本机笔记')
+  await panel.getByTestId('comment-post').click()
+  await expect(panel.getByTestId('comment-total')).toHaveText('(1)')
+  await expect.poll(() => snapshots.get(cmsId + ':1')).toContain('第 1 集的本机笔记')
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+  await panel.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('cms-local-comments.png') })
+  await panel.press('Escape')
+  await expect(open).toBeFocused()
+
+  desktop.catalog.offline = false
+  await page.getByRole('button', { name: '第2集' }).click()
+  await open.click()
+  await expect(panel.getByText('暂无评论')).toBeVisible()
+  await expect(panel.getByTestId('comment-total')).toHaveText('(0)')
+  await page.getByRole('button', { name: '第1集' }).click()
+  await page.reload()
+  await open.click()
+  await expect(panel.getByTestId('comment')).toContainText('第 1 集的本机笔记')
+  await expect(panel.getByTestId('comment-total')).toHaveText('(1)')
+  expect(snapshots.has(cmsId + ':2')).toBe(false)
+})
+
 const durationMs = (video: ReturnType<typeof historyVideo>) => video.evaluate((media: HTMLVideoElement) =>
   Math.round(media.duration * 1000),
 )

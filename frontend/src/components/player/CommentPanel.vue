@@ -5,6 +5,7 @@ import { useCommentStore, MAX_LEN, replyCount, type Comment } from '@/stores/com
 import { useToastStore } from '@/stores/toast'
 import { EmptyState } from '@/components/ui'
 const emit = defineEmits<{ close: [] }>()
+const props = defineProps<{ localOnly?: boolean }>()
 const c = useCommentStore(); const toast = useToastStore()
 const err = ref('')
 const replyFor = ref<string | null>(null)
@@ -26,6 +27,7 @@ const emojis = [
   { label: '赞', value: '👍' },
 ]
 const tabs = [{ k: 'new', l: '最新' }, { k: 'hot', l: '最热' }, { k: 'author', l: '只看作者' }] as const
+const sorts = computed(() => props.localOnly ? tabs.filter(({ k }) => k !== 'author') : tabs)
 const n = (v: number) => (v >= 10000 ? (v / 10000).toFixed(1) + '万' : String(v))
 const over = computed(() => draft.text.length > MAX_LEN)
 const composing = (event?: KeyboardEvent) => event?.isComposing || event?.keyCode === 229
@@ -77,7 +79,7 @@ function submit(event?: KeyboardEvent) {
   err.value = error ?? ''
   if (!error) {
     draft.text = ''
-    toast.push('评论已发布（本地演示，不会同步到红果）', 'success')
+    toast.push(props.localOnly ? '已添加本机评论' : '评论已发布（本地演示，不会同步到红果）', 'success')
   }
 }
 function sendReply(cm: Comment, event?: KeyboardEvent) {
@@ -101,15 +103,15 @@ async function deleteReply(commentId: string, replyId: string, event: MouseEvent
 const dummy = () => toast.push('该功能在演示模式下暂不可用')
 </script>
 <template>
-  <aside class="cp on-dark" role="complementary" aria-label="本集评论" tabindex="-1" data-testid="comment-panel"
+  <aside class="cp on-dark" role="complementary" :aria-label="localOnly ? '本机评论' : '本集评论'" tabindex="-1" data-testid="comment-panel"
     @keydown.esc="closeOnEscape" @focusout="closePickerOnFocusExit">
-    <header><h2>本集评论 <small data-testid="comment-total">({{ c.total.toLocaleString() }})</small></h2><button aria-label="关闭评论" data-testid="comment-close" @click="emit('close')"><X :size="24" /></button></header>
-    <div class="sorts"><button v-for="t in tabs" :key="t.k" :class="{ on: c.sort === t.k }" :data-testid="`csort-${t.k}`" @click="c.sort = t.k">{{ t.l }}</button></div>
+    <header><h2>{{ localOnly ? '本机评论' : '本集评论' }} <small data-testid="comment-total">({{ c.total.toLocaleString() }})</small></h2><button aria-label="关闭评论" data-testid="comment-close" @click="emit('close')"><X :size="24" /></button></header>
+    <div class="sorts"><button v-for="t in sorts" :key="t.k" :class="{ on: c.sort === t.k }" :data-testid="`csort-${t.k}`" @click="c.sort = t.k">{{ t.l }}</button></div>
     <div class="editor"><i class="av" />
       <div class="box"><textarea ref="editor" v-model="draft.text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input"
         @input="err = ''" @compositionstart="editorComposing = true" @compositionend="editorComposing = false"
         @change="editorComposing = false" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
-    <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button>
+    <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button><template v-if="!localOnly"><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button></template>
       <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError || c.saveConflict" data-testid="comment-post" @click="submit()">发表评论</button></div>
     <div v-show="emojiOpen" id="comment-emoji-choices" ref="emojiChoices" class="emoji-choices" role="group" aria-label="选择表情">
       <button v-for="emoji in emojis" :key="emoji.value" type="button" :aria-label="emoji.label" @mousedown.prevent @click="insertEmoji(emoji.value)">{{ emoji.value }}</button>
@@ -132,18 +134,18 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
       <EmptyState v-else-if="!c.visible.length" title="暂无评论" hint="来发表第一条评论吧" />
       <article v-for="cm in c.visible" :key="cm.id" class="cm" data-testid="comment">
         <i class="av a2" /><div class="body">
-          <div class="who"><b>{{ cm.user ?? '未知用户' }}</b><span class="lv"><Crown :size="11" fill="currentColor" />Lv{{ cm.level ?? 1 }}</span><em v-if="cm.byAuthor" class="au">作者</em></div>
+          <div class="who"><b>{{ cm.user ?? '未知用户' }}</b><span v-if="!localOnly" class="lv"><Crown :size="11" fill="currentColor" />Lv{{ cm.level ?? 1 }}</span><em v-if="!localOnly && cm.byAuthor" class="au">作者</em></div>
           <time v-if="cm.ago">{{ cm.ago }}</time><p>{{ cm.text }}</p>
           <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked ?? false" :disabled="c.saveConflict" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes ?? 0) }}</button>
             <button class="reply-button" data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ replyCount(cm) }})</button>
             <span class="sp" /><div class="more"><button aria-label="更多" data-testid="more" @click="menuFor = menuFor === cm.id ? null : cm.id"><Ellipsis :size="18" /></button>
-              <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" :disabled="c.saveConflict" @click="del(cm.id)">删除</button></li><li><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
+              <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" :disabled="c.saveConflict" @click="del(cm.id)">删除</button></li><li v-if="!localOnly"><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
           <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user ?? '未知用户'}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" :disabled="c.saveConflict" @click="sendReply(cm)">发送</button></div>
           <div v-if="cm.replies?.length && c.expanded.has(cm.id)" class="replies" data-testid="replies">
             <div v-for="r in cm.replies" :key="r.id" class="rp" data-testid="comment-reply">
               <i class="av a3" />
               <div>
-                <div class="who"><b>{{ r.user ?? '未知用户' }}</b><span class="lv"><Crown :size="10" fill="currentColor" />Lv{{ r.level ?? 1 }}</span></div>
+                <div class="who"><b>{{ r.user ?? '未知用户' }}</b><span v-if="!localOnly" class="lv"><Crown :size="10" fill="currentColor" />Lv{{ r.level ?? 1 }}</span></div>
                 <p>{{ r.text }}</p>
                 <div class="acts s">
                   <time v-if="r.ago">{{ r.ago }}</time>

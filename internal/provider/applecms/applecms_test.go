@@ -121,7 +121,7 @@ func TestRestrictedCatalogItemsAndEpisodeBound(t *testing.T) {
 			p := fixtureProvider(t, server.URL, server.Client())
 			id := p.idPrefix + "42"
 			rows, err := p.Episodes(t.Context(), id)
-			if err != nil || len(rows) != maxEpisodes || rows[1].Available {
+			if err != nil || len(rows) != MaxEpisodes || rows[1].Available {
 				t.Fatalf("limited episode result: %d, %v", len(rows), err)
 			}
 			if ticket, err := p.ResolvePlayback(t.Context(), id, 2); !errors.Is(err, provider.ErrEpisodeUnavailable) || ticket.Kind != "" {

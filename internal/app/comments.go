@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"math"
+	"strings"
 
+	"jindi-drama/internal/provider"
+	"jindi-drama/internal/provider/applecms"
 	"jindi-drama/internal/storage/sqlite"
 )
 
@@ -63,7 +66,7 @@ func (a *App) SaveLocalComments(dramaID string, episode int, snapshot string) er
 	if err := validateLocalCommentSnapshot(snapshot); err != nil {
 		return err
 	}
-	if err := a.validateInteractionEpisode(dramaID, episode); err != nil {
+	if err := a.validateLocalCommentEpisode(dramaID, episode); err != nil {
 		return err
 	}
 	return a.store.SaveLocalComments(dramaID, episode, snapshot)
@@ -111,10 +114,26 @@ func (a *App) CompareAndSaveLocalComments(dramaID string, episode int, expected,
 	if err := validateLocalCommentSnapshot(snapshot); err != nil {
 		return "", err
 	}
-	if err := a.validateInteractionEpisode(dramaID, episode); err != nil {
+	if err := a.validateLocalCommentEpisode(dramaID, episode); err != nil {
 		return "", err
 	}
 	return a.store.CompareAndSaveLocalComments(dramaID, episode, expected, snapshot, writeID)
+}
+
+func (a *App) validateLocalCommentEpisode(dramaID string, episode int) error {
+	if !strings.HasPrefix(dramaID, "apple-cms:") {
+		return a.validateInteractionEpisode(dramaID, episode)
+	}
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok || !cms.OwnsDramaID(dramaID) {
+		return provider.ErrNotFound
+	}
+	if episode < 1 || episode > applecms.MaxEpisodes {
+		return provider.ErrEpisodeUnavailable
+	}
+	// A verified catalog page exposes the editor. Saving notes only uses
+	// local identity and remains available during upstream outages.
+	return nil
 }
 
 func validLocalWriteID(value string, length int) bool {

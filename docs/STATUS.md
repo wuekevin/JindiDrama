@@ -481,3 +481,9 @@
 - 打包和浏览器回归的 68 个前端生产文件哈希一致。374 项全量 Playwright、122 项 Vitest、Go vet 和 Go 全量、Node 22 与 Python macOS 发行工具各 13 项通过。本轮只执行本地打包。
 - 正式签名、公证、Windows 和 Intel Mac 当前批次原生、真实授权公网片源仍待验收。本地包 Windows 未签名，macOS 采用 ad-hoc 签名。核对 GitHub 发行环境、仓库级签名凭据和 Release 数量均为 0。
 - [Windows SHA-256](../build/bin/smoke-20261127.42/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.42/macos/SHA256SUMS.txt) · [原生验收](../build/bin/smoke-20261127.42/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-cms-release-batch42.md)
+
+## E12 苹果 CMS 分集本机评论（2026-11-27）
+
+- 苹果 CMS 播放页在可播分集提供「本机评论」。复用本地快照、SQLite 版本检查、保存恢复和退出写入队列。评论以配置片源、剧目和分集为键，初次打开是空列表。Go 保存只使用当前片源的本地标识和分集范围，不联系上游。
+- 新增回归验证可从空列表添加、换集隔离、刷新恢复，关闭面板时焦点返回入口。Go SQLite 回归核对跨片源拒绝、非法分集、无上游请求与重开数据库。Go vet、Go 全量与评论竞态、前端生产构建、122 项 Vitest 和 102 项评论与目录播放 Playwright 通过。
+- Apple Silicon 的原生 Wails 合成片源在打开第 1 集后切到 HTTP 503 故障模式。仍成功保存评论，未新增目录请求。正常退出并重启后回读成功，第 2 集为空，SQLite 完整性通过。Windows amd64 生产交叉构建通过。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e12-cms-local-comments.md)

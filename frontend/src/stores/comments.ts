@@ -1,4 +1,5 @@
 import { localId } from '@/localId'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, toRaw } from 'vue'
 import { discardConflictedComments, type CommentSaveIssue, type LegacyCommentBackup } from '@/bindings/commentRecovery'
@@ -94,9 +95,11 @@ export const useCommentStore = defineStore('comments', () => {
     const current = key.value
     if (byEp.value[current] || pending.value[current]) return
     readErrors.value[current] = false
-    const request = loadLocalComments(episode.value.dramaId, episode.value.index)
+    const { dramaId, index } = episode.value
+    const initialComments = () => isAppleCMSDramaId(dramaId) ? [] : gen(current)
+    const request = loadLocalComments(dramaId, index)
     if (!request) {
-      byEp.value[current] = gen(current)
+      byEp.value[current] = initialComments()
       return
     }
     pending.value[current] = true
@@ -104,7 +107,7 @@ export const useCommentStore = defineStore('comments', () => {
       saveIssues.value[current] = issue
       backups.value[current] = savedBackups ?? []
       backupTargets.value[current] = canRestoreBackup === true
-      byEp.value[current] = snapshot ? restoreComments(snapshot) : gen(current)
+      byEp.value[current] = snapshot ? restoreComments(snapshot) : initialComments()
     }).catch(() => {
       readErrors.value[current] = true
     }).finally(() => {
@@ -113,6 +116,7 @@ export const useCommentStore = defineStore('comments', () => {
   }
   function open(dramaId: string, ep: number) {
     episode.value = { dramaId, index: ep }
+    if (isAppleCMSDramaId(dramaId) && sort.value === 'author') sort.value = 'new'
     shown.value = 4
     expanded.value = new Set()
     return load()
@@ -156,7 +160,8 @@ export const useCommentStore = defineStore('comments', () => {
   }
   const sorted = computed(() => { let l = [...all.value]; if (sort.value === 'author') l = l.filter((c) => c.byAuthor || c.mine); l.sort((a, b) => (sort.value === 'hot' ? (b.likes ?? 0) - (a.likes ?? 0) : (b.ts ?? 0) - (a.ts ?? 0))); return l })
   const visible = computed(() => sorted.value.slice(0, shown.value))
-  const total = computed(() => 3217 + all.value.filter((c) => c.mine).length)
+  const total = computed(() => isAppleCMSDramaId(episode.value.dramaId)
+    ? all.value.length : 3217 + all.value.filter((c) => c.mine).length)
   const hasMore = computed(() => shown.value < sorted.value.length)
   const loadMore = () => { shown.value += 4 }
   function validate(text: string): string | null { const t = text.trim(); if (!t) return '评论不能为空'; if (t.length > MAX_LEN) return `评论不能超过 ${MAX_LEN} 字`; return null }

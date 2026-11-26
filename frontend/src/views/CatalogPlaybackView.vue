@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import type Hls from 'hls.js'
@@ -7,6 +7,7 @@ import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { ErrorState } from '@/components/ui'
+import CommentPanel from '@/components/player/CommentPanel.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
@@ -14,6 +15,7 @@ import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
+import { useCommentStore } from '@/stores/comments'
 import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import type { HistoryEntry } from '@/types'
@@ -34,10 +36,16 @@ const episode = computed(() => {
 const preferences = useAppSettings()
 const settings = useSettingsStore()
 const library = useLibraryStore()
+const comments = useCommentStore()
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const error = ref('')
 const playbackNotice = ref('')
 const detail = ref<DramaDetail>()
+const canComment = computed(() => detail.value?.appleCMS && detail.value.catalogPlayback &&
+  !!availableCatalogEpisode(detail.value, episode.value))
+const showComments = ref(false)
+const commentTrigger = ref<HTMLButtonElement>()
+const commentRegion = ref<HTMLElement>()
 const video = ref<HTMLVideoElement>()
 const sources = ref<MediaSource[]>([])
 const selected = ref(0)
@@ -526,7 +534,21 @@ function onMediaPreferenceChange(event: Event) {
   if (event.currentTarget === preferenceMedia) syncMediaPreferences()
 }
 
-watch(() => route.path, load, { immediate: true })
+async function toggleComments() {
+  showComments.value = !showComments.value
+  if (!showComments.value) {
+    commentTrigger.value?.focus()
+    return
+  }
+  void comments.open(id.value, episode.value)
+  await nextTick()
+  commentRegion.value?.querySelector<HTMLElement>('[data-testid="comment-panel"]')?.focus()
+}
+
+watch(() => route.path, () => {
+  showComments.value = false
+  void load()
+}, { immediate: true })
 window.addEventListener('pagehide', onWindowClose)
 window.addEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
 window.addEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
@@ -563,6 +585,12 @@ onBeforeUnmount(() => {
         :aria-current="item.index === episode ? 'page' : undefined"
         @click="selectEpisode(item.index)">第{{ item.index }}集</button>
     </nav>
+    <div v-if="canComment" class="local-comments">
+      <button ref="commentTrigger" type="button" :aria-expanded="showComments" @click="toggleComments">本机评论</button>
+      <div v-if="showComments" ref="commentRegion" class="local-comment-panel">
+        <CommentPanel local-only @close="toggleComments" />
+      </div>
+    </div>
   </article>
 </template>
 
@@ -575,9 +603,10 @@ h1 { font-size: 28px; overflow-wrap: anywhere; }
 video { display: block; width: 100%; max-width: 960px; max-height: 65vh; background: #000; }
 .loading { width: 100%; min-height: 360px; }
 .episode-nav { display: flex; gap: 10px; flex-wrap: wrap; }
-.episode-nav button {
+.episode-nav button, .local-comments > button {
   border-radius: var(--r-pill); min-height: 38px; padding: 0 16px; background: var(--c-surface-hover);
   &[aria-current='page'] { background: var(--g-accent); color: #fff; }
   &:disabled { opacity: .45; cursor: not-allowed; }
 }
+.local-comment-panel { width: min(100%, 640px); height: min(560px, 75vh); min-height: 290px; margin-top: 12px; }
 </style>

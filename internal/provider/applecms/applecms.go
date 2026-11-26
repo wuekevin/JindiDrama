@@ -25,7 +25,8 @@ const (
 	maxResponseBytes = 8 << 20
 	maxRecords       = 500
 	maxPage          = 100000
-	maxEpisodes      = 1000
+	// MaxEpisodes bounds episode indices from an Apple CMS catalog.
+	MaxEpisodes      = 1000
 	maxRoutes        = 32
 	maxMediaSources  = 4
 	ticketLifetime   = 15 * time.Minute
@@ -271,7 +272,7 @@ func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail,
 }
 
 func (p *Provider) ResolvePlayback(ctx context.Context, id string, index int) (provider.PlaybackTicket, error) {
-	if index < 1 || index > maxEpisodes {
+	if index < 1 || index > MaxEpisodes {
 		return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
 	}
 	_, sources, err := p.detail(ctx, id)
@@ -514,7 +515,7 @@ func (p *Provider) normalize(item record, id, title string) (provider.Drama, map
 	total, _ := strconv.Atoi(scalar(item.Total).decimal(9))
 	drama := provider.Drama{
 		ID: p.idPrefix + id, Title: title, Tags: []string{},
-		Summary: metadataText(item.Summary), EpisodeCount: min(total, maxEpisodes),
+		Summary: metadataText(item.Summary), EpisodeCount: min(total, MaxEpisodes),
 		CoverURL: p.coverURL(item.Picture),
 	}
 	if category := genreText(item.Category); category != "" {
@@ -535,7 +536,7 @@ func (p *Provider) normalize(item record, id, title string) (provider.Drama, map
 				continue
 			}
 			index, err := strconv.Atoi(match[1] + match[2])
-			if err != nil || index < 1 || index > maxEpisodes {
+			if err != nil || index < 1 || index > MaxEpisodes {
 				continue
 			}
 			drama.EpisodeCount = max(drama.EpisodeCount, index)
