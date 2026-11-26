@@ -22,6 +22,10 @@ export function detailRoute(id: string, activeCatalog = false) {
   return id.startsWith('local-') ? { name: 'licensed', query: { id } } : `/drama/${encodeURIComponent(id)}`
 }
 
+export function catalogPlaybackRoute(id: string, episode: number) {
+  return { name: 'catalog-play', params: { id, episode } }
+}
+
 export function playbackRoute(id: string, episode: number, autoplay = false) {
   return id.startsWith('local-')
     ? { name: 'licensed', query: { id, ep: String(episode), autoplay: autoplay ? '1' : undefined } }

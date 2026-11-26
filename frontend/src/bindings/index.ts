@@ -71,6 +71,7 @@ interface GoApp {
   CatalogSearch?(query: string): Promise<CatalogDrama[]>
   CatalogDrama?(id: string): Promise<CatalogDrama>
   CatalogEpisodes?(id: string): Promise<Episode[]>
+  CatalogPlayback?(id: string, episode: number): Promise<PlaybackTicket>
 
   Search(query: string): Promise<CatalogDrama[]>
   Drama(id: string): Promise<CatalogDrama>
@@ -185,6 +186,8 @@ export const activeProviderName = () => api()?.ProviderName?.()
 export const searchProvider = (query: string) => api()?.Search(query)
 export const searchActiveCatalog = (query: string) => api()?.CatalogSearch?.(query)
 export const loadCatalogDrama = (id: string) => api()?.CatalogDrama?.(id)
+export const hasCatalogPlayback = () => typeof api()?.CatalogPlayback === 'function'
+export const resolveCatalogPlayback = (id: string, episode: number) => api()?.CatalogPlayback?.(id, episode)
 export const loadProviderEpisodes = (id: string) => api()?.Episodes(id)
 export function loadProviderDetail(id: string, activeCatalog = false) {
   const app = api()

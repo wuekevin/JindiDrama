@@ -1,6 +1,6 @@
 // 目录展示数据来自 Go Provider。浏览器预览使用内置演示目录。
 import type { Drama, HistoryEntry } from '@/types'
-import { activeProviderName, hasProviderCapabilities, loadCatalogDrama, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama } from '@/bindings'
+import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama } from '@/bindings'
 import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKINGS, type CastMember, type DemoSeason } from './data'
 import { posterSvg } from './posters'
 
@@ -15,9 +15,11 @@ export async function usesDemoCatalog() {
 }
 
 async function requireCapability(capability: 'catalog' | 'search') {
-  if ((await loadProviderCapabilities())?.[capability] !== 'ready') {
+  const capabilities = await loadProviderCapabilities()
+  if (capabilities?.[capability] !== 'ready') {
     throw new Error(capability === 'catalog' ? '目录暂不可用' : '搜索暂不可用')
   }
+  return capabilities
 }
 
 function providerCard(drama: CatalogDrama): Drama {
@@ -133,7 +135,7 @@ export async function searchDramas(q: string, f: SearchFilters = {}, mode: 'norm
 }
 
 export interface DemoHighlight { id: number; title: string; dur: string }
-export interface DramaDetail { drama: Drama; episodes: { index: number; available: boolean }[]; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
+export interface DramaDetail { drama: Drama; episodes: { id?: string; index: number; available: boolean }[]; catalogPlayback?: boolean; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
 const DEMO_HIGHLIGHTS: DemoHighlight[] = [1, 2, 3].map((id) => ({ id, title: `演示片段 ${id}`, dur: '00:24' }))
 export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', catalogRoute = false): Promise<DramaDetail | null> {
   await delay(120)
@@ -141,14 +143,18 @@ export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', c
   const demo = await usesDemoCatalog()
   if (catalogRoute) {
     if (demo) return null
-    await requireCapability('catalog')
+    const capabilities = await requireCapability('catalog')
     try {
       const detail = await loadProviderDetail(id, true)
       if (!detail) throw new Error('目录暂不可用')
       const [record, episodes] = detail
       if (record?.id !== id) return null
+      const drama = providerCard(record)
       return {
-        drama: providerCard(record), episodes: episodes ?? [],
+        drama, episodes: (episodes ?? []).filter(({ dramaId, index }) =>
+          dramaId === id && Number.isInteger(index) && index > 0 && index <= drama.episodeCount,
+        ).map((episode) => ({ ...episode, available: episode.available && episode.index <= drama.updatedTo })),
+        catalogPlayback: capabilities.playback === 'ready' && hasCatalogPlayback(),
         cast: [], long: record.summary, seasons: [], highlights: [],
       }
     } catch (error) {

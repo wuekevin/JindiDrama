@@ -31,6 +31,7 @@ export const router = createRouter({
     { path: '/search', name: 'search', component: () => import('@/views/SearchView.vue'), meta: { nav: 'home' } },
     { path: '/drama/:id', name: 'drama', component: () => import('@/views/DramaDetailView.vue'), meta: { nav: 'home' } },
     { path: '/catalog/:id', name: 'catalog', component: () => import('@/views/DramaDetailView.vue'), meta: { nav: 'home' } },
+    { path: '/catalog/:id/play/:episode', name: 'catalog-play', component: () => import('@/views/CatalogPlaybackView.vue'), meta: { nav: 'home' } },
     { path: '/watch/:dramaId/:episodeId', name: 'watch', component: () => import('@/views/WatchView.vue'), meta: { nav: 'home' } },
     { path: '/favorites', name: 'favorites', component: () => import('@/views/FavoritesView.vue'), meta: { nav: 'favorites' } },
     { path: '/history', name: 'history', component: () => import('@/views/HistoryView.vue'), meta: { nav: 'history' } },

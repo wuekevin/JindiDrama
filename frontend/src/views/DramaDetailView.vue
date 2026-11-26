@@ -10,7 +10,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
 import { copyShareLink } from '@/router/shareLinks'
-import { continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { catalogPlaybackRoute, continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -98,7 +98,15 @@ const continuation = computed(() => {
   }
   return { episode: history.episode, percent: history.percent, label: history.percent === 100 ? '重播本集' : '继续观看' }
 })
-const watchEp = (ep: number) => { if (detail.value?.drama.providerOnly) return; if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
+const firstAvailableEpisode = computed(() => detail.value?.episodes.find(({ available }) => available)?.index)
+const watchEp = (ep: number) => {
+  if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return }
+  if (detail.value?.drama.providerOnly) {
+    if (detail.value.catalogPlayback) void router.push(catalogPlaybackRoute(id.value, ep))
+    return
+  }
+  void router.push(`/watch/${id.value}/${ep}`)
+}
 const progressOf = (ep: number) => (hist.value && hist.value.episode === ep ? hist.value.percent : ep < (hist.value?.episode ?? 0) ? 100 : 0)
 function fav() { void lib.notifySaved(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏') }
 const share = () => copyShareLink(`/drama/${id.value}`)
@@ -132,7 +140,12 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
             </RouterLink>
           </div>
           <p class="status"><b>更新状态</b><template v-if="detail.schedule"> {{ detail.schedule }} <u>|</u></template> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
-          <p v-if="detail.drama.providerOnly" class="status">当前目录仅提供剧目信息，播放暂不可用。</p>
+          <div v-if="detail.drama.providerOnly">
+            <div v-if="detail.catalogPlayback && firstAvailableEpisode" class="cta">
+              <BaseButton size="lg" data-testid="catalog-watch-now" @click="watchEp(firstAvailableEpisode)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
+            </div>
+            <p v-else class="status">当前剧目播放暂不可用。</p>
+          </div>
           <div v-else class="cta">
             <BaseButton size="lg" data-testid="watch-now" @click="watchEp(1)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
             <button v-if="continuation" class="cont" data-testid="continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
@@ -147,7 +160,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
           <header><div class="tabs"><button :class="{ on: tab === 'eps' }" data-testid="tab-eps" @click="tab = 'eps'">选集</button><button v-if="detail.highlights.length" :class="{ on: tab === 'clips' }" data-testid="tab-clips" @click="tab = 'clips'">精彩片段</button></div><span class="range">{{ groups[group]?.label }}<ChevronDown :size="14" /></span></header>
           <template v-if="tab === 'eps'">
             <div class="groups"><button v-for="(g, i) in groups" :key="g.label" :class="{ on: i === group }" data-testid="ep-group" @click="group = i">{{ g.label }}</button></div>
-            <div class="grid"><button v-for="{ index: ep, available } in eps" :key="ep" class="ep" :class="{ cur: hist?.episode === ep, lock: !available }" data-testid="ep" :aria-label="`第${ep}集`" :disabled="detail.drama.providerOnly" @click="watchEp(ep)">
+            <div class="grid"><button v-for="{ index: ep, available } in eps" :key="ep" class="ep" :class="{ cur: hist?.episode === ep, lock: !available }" data-testid="ep" :aria-label="`第${ep}集`" :disabled="detail.drama.providerOnly && (!detail.catalogPlayback || !available)" @click="watchEp(ep)">
               <Play v-if="!detail.drama.providerOnly && ep === 1 && !hist" :size="14" fill="currentColor" /><template v-else><Flame v-if="!detail.drama.providerOnly && epHot(ep)" :size="13" color="#ff6a3d" fill="#ff6a3d" />{{ ep }}</template>
               <i v-if="progressOf(ep) > 0 && progressOf(ep) < 100" class="pg" :style="{ width: progressOf(ep) + '%' }" /></button></div>
           </template>

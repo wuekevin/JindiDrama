@@ -188,5 +188,9 @@ func (a *App) Episodes(dramaID string) ([]provider.Episode, error) {
 }
 
 func (a *App) ResolvePlayback(dramaID string, episode int) (provider.PlaybackTicket, error) {
-	return a.providerForDrama(dramaID).ResolvePlayback(a.context(), dramaID, episode)
+	p := a.providerForDrama(dramaID)
+	if _, local := p.(*licensed.DemoProvider); !local && p.Name() != registry.Mock {
+		return provider.PlaybackTicket{}, provider.ErrNotAuthorized
+	}
+	return p.ResolvePlayback(a.context(), dramaID, episode)
 }
