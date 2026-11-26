@@ -1,4 +1,5 @@
 import fs from 'node:fs'
+import { createServer } from 'node:http'
 import type { Page } from '@playwright/test'
 import { test, expect } from './fixtures'
 import type { PlayMode } from '../../src/player/preferences'
@@ -686,6 +687,83 @@ test('CMS media fallback captures the final played position and ignores events f
   await page.getByRole('link', { name: '返回详情' }).click()
   await expect.poll(() => desktop.rows()[0]?.episode).toBe(2)
   expect(desktop.rows()[0].positionMs).toBeGreaterThanOrEqual(9000)
+})
+
+test('CMS retries truncated network streams without losing the saved position', async ({ page }) => {
+  const bookmark = { dramaId: cmsId, episode: 1, percent: 20, watchedAt: 1000,
+    positionMs: 5000, durationMs: 24000, episodeCountAtWatch: 3 }
+  const desktop = await cmsLibraryFixture(page, [bookmark])
+  let recovered = false
+  const requested: string[] = []
+  const server = createServer((request, response) => {
+    const path = request.url ?? ''
+    requested.push(path)
+    const sample = samples.webm
+    const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range ?? '')
+    const start = Number(range?.[1] ?? 0)
+    const end = range?.[2] ? Math.min(Number(range[2]), sample.length - 1) : sample.length - 1
+    const body = sample.subarray(start, end + 1)
+    response.setHeader('Content-Type', 'video/webm')
+    response.setHeader('Content-Length', body.length)
+    response.setHeader('Accept-Ranges', 'bytes')
+    if (range) {
+      response.statusCode = 206
+      response.setHeader('Content-Range', `bytes ${start}-${end}/${sample.length}`)
+    }
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    if (recovered && path.endsWith('/1')) {
+      response.end(body)
+      return
+    }
+    response.write(body.subarray(0, Math.min(512, Math.floor(body.length / 2))), () => response.destroy())
+  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', resolve)
+    })
+    const address = server.address()
+    if (!address || typeof address === 'string') throw new Error('Expected a TCP media fixture')
+    await page.goto(cmsRoute)
+    await page.evaluate((port) => {
+      type Ticket = { sources: { src: string }[] }
+      type Desktop = { CatalogPlayback(id: string, episode: number): Promise<Ticket> }
+      const app = (window as unknown as { go: { app: { App: Desktop } } }).go.app.App
+      const playback = app.CatalogPlayback.bind(app)
+      app.CatalogPlayback = async (id, episode) => {
+        const ticket = await playback(id, episode)
+        for (const source of ticket.sources) source.src = `http://127.0.0.1:${port}${new URL(source.src).pathname}`
+        return ticket
+      }
+    }, address.port)
+
+    await page.getByRole('button', { name: '第1集', exact: true }).click()
+    await expect(page.getByTestId('error')).toContainText('媒体加载失败')
+    const beforeRetry = [...requested]
+    expect(beforeRetry.some((path) => path.endsWith('/0'))).toBe(true)
+    expect(beforeRetry.some((path) => path.endsWith('/1'))).toBe(true)
+    expect(desktop.rows()).toEqual([bookmark])
+
+    recovered = true
+    await page.getByRole('button', { name: '重试' }).click()
+    const video = historyVideo(page, 1)
+    await expect(video).toHaveAttribute('src', /\/1$/)
+    const retryPath = new URL((await video.getAttribute('src'))!).pathname
+    expect(beforeRetry).not.toContain(retryPath)
+    await expect.poll(() => position(video)).toBeCloseTo(5, 1)
+    expect(await calls(page)).toEqual([1, 1].map((episode) => 'catalog:' + cmsId + ':' + episode))
+    await playHistoryVideo(video)
+    await page.getByRole('link', { name: '返回详情' }).click()
+    await expect.poll(() => desktop.rows()[0].positionMs).toBeGreaterThan(5000)
+  } finally {
+    await new Promise<void>((resolve) => {
+      server.close(() => resolve())
+      server.closeAllConnections()
+    })
+  }
 })
 
 test('CMS native volume carries across a fallback and a manual episode change', async ({ page }) => {
