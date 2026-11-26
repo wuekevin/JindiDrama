@@ -690,3 +690,8 @@
 
 - 设置页分别提示 GitHub 限流、临时故障、资源移除、访问权限问题、下载超时和本地写入失败。提示只显示可执行的处理建议，远程响应内容和系统写入错误不进入界面。成功下载仍须通过文件大小和 SHA-256 校验。[GitHub 限流文档](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#exceeding-the-rate-limit)
 - Go 回归覆盖响应状态、请求及传输超时、本地写入失败、暂存清理和完整性校验。Go vet、Go 全量和更新与应用竞态测试通过。前端生产构建和 44 项设置页 Playwright 通过，覆盖取消后遇到写入错误、提示处理方法和再次下载保存成功。正式 Release 安装包下载仍待签名版本端到端验收。[浏览器日志](../build/bin/qa-update-download-recovery/e2e.log) · [BMad 记录](../_bmad-output/plan-e13-update-download-recovery.md)
+
+## E12 苹果 CMS 试看范围（2026-11-27）
+
+- 苹果 CMS 适配器识别 `vod_trysee`。设置了试看时长或字段格式无效的短剧仍可浏览详情与分集，分集不可播放。申请整集播放时重新读取详情。只有新详情允许时才签发本机媒体票据。字段省略、为空或为零时仍按付费、密码和其他现有授权条件处理。[苹果 CMS 字段文档](https://github.com/magicblack/maccms10/wiki/%E6%A0%87%E7%AD%BE%E6%96%87%E6%A1%A3)
+- 旧版夹具复现了带试看字段时仍签发整集票据。修复后，Provider 验证合法零值和无效格式，应用验证从可播放切换到有试看限制时保留详情、拒发票据并保持零媒体请求。Go vet、全量测试和 App/CMS 竞态测试通过。已纳入本地候选，真实授权公网片源仍待联调。[BMad 记录](../_bmad-output/plan-e12-cms-trial-rights.md)

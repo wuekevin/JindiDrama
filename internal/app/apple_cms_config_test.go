@@ -59,7 +59,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
-	var thirdEpisodeRemoved atomic.Bool
+	var thirdEpisodeRemoved, trialRestricted atomic.Bool
 	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Scheme != "https" {
 			t.Errorf("invalid scheme: %s", req.URL.Scheme)
@@ -81,8 +81,12 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			if thirdEpisodeRemoved.Load() {
 				third = ""
 			}
+			trial := ""
+			if trialRestricted.Load() {
+				trial = `"vod_trysee":2,`
+			}
 			body := `{
-				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4",
+				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4",` + trial + `
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
 				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]
 			}`
@@ -152,6 +156,20 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		t.Fatalf("removed episode playback: %+v, %v, %d GETs", removed, err, detailCalls.Load()-beforeDetail)
 	}
 	thirdEpisodeRemoved.Store(false)
+
+	trialRestricted.Store(true)
+	beforeTrial := detailCalls.Load()
+	restricted, err := a.CatalogPlayback(id, 3)
+	if !errors.Is(err, provider.ErrEpisodeUnavailable) || restricted.Kind != "" ||
+		restricted.LeaseID != "" || len(restricted.Sources) != 0 || detailCalls.Load()-beforeTrial != 1 || mediaCalls.Load() != 0 {
+		t.Fatalf("trial-restricted playback: %+v, %v", restricted, err)
+	}
+	detailWithTrial, err := a.CatalogDetail(id)
+	if err != nil || detailWithTrial.Drama.Title != drama.Title || len(detailWithTrial.Episodes) != 4 ||
+		detailWithTrial.Episodes[2].Available || detailWithTrial.Episodes[3].Available {
+		t.Fatalf("trial-restricted title and episodes: %+v, %v", detailWithTrial, err)
+	}
+	trialRestricted.Store(false)
 
 	for _, attempt := range []struct {
 		id    string

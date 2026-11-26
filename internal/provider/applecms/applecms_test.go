@@ -133,7 +133,10 @@ func TestCreditNamesRejectsInvalidFieldsAndBoundsEntries(t *testing.T) {
 }
 
 func TestRestrictedCatalogItemsAndEpisodeBound(t *testing.T) {
-	for _, restriction := range []string{`"locked":true`, `"locked":"1"`, `"vod_points":1`, `"vod_points_play":"1"`, `"vod_pwd":"password"`, `"vod_pwd_play":"password"`} {
+	for _, restriction := range []string{
+		`"locked":true`, `"locked":"1"`, `"vod_points":1`, `"vod_points_play":"1"`, `"vod_pwd":"password"`, `"vod_pwd_play":"password"`,
+		`"vod_trysee":2`, `"vod_trysee":" 2 "`, `"vod_trysee":"unknown"`, `"vod_trysee":-1`, `"vod_trysee":{}`,
+	} {
 		t.Run(restriction, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				_, _ = fmt.Fprintf(w, `{"code":1,"list":[{"vod_id":"42","vod_name":"海岛","vod_total":1000000,"vod_play_url":"2$https://media.example.test/episode.mp4",%s}]}`, restriction)
@@ -147,6 +150,22 @@ func TestRestrictedCatalogItemsAndEpisodeBound(t *testing.T) {
 			}
 			if ticket, err := p.ResolvePlayback(t.Context(), id, 2); !errors.Is(err, provider.ErrEpisodeUnavailable) || ticket.Kind != "" {
 				t.Fatalf("restricted ticket escaped: %+v, %v", ticket, err)
+			}
+		})
+	}
+}
+
+func TestCMSAllowsPlaybackWithoutATrialLimit(t *testing.T) {
+	for _, value := range []string{`null`, `""`, `0`, `" 0 "`} {
+		t.Run(value, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = fmt.Fprintf(w, `{"code":1,"list":[{"vod_id":"42","vod_name":"海岛","vod_trysee":%s,"vod_play_url":"1$https://media.example.test/episode.mp4"}]}`, value)
+			}))
+			defer server.Close()
+			p := fixtureProvider(t, server.URL, server.Client())
+			ticket, err := p.ResolvePlayback(t.Context(), p.idPrefix+"42", 1)
+			if err != nil || len(ticket.Sources) != 1 {
+				t.Fatalf("no trial restriction expected: %+v, %v", ticket, err)
 			}
 		})
 	}

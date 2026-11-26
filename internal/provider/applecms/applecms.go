@@ -371,21 +371,22 @@ func genreID(value string) string {
 }
 
 type record struct {
-	ID         json.RawMessage `json:"vod_id"`
-	TypeID     json.RawMessage `json:"type_id"`
-	Name       string          `json:"vod_name"`
-	Picture    json.RawMessage `json:"vod_pic"`
-	Category   string          `json:"type_name"`
-	Summary    string          `json:"vod_content"`
-	Actor      json.RawMessage `json:"vod_actor"`
-	Director   json.RawMessage `json:"vod_director"`
-	Total      json.RawMessage `json:"vod_total"`
-	PlayURL    string          `json:"vod_play_url"`
-	Locked     json.RawMessage `json:"locked"`
-	PlayPoints json.RawMessage `json:"vod_points_play"`
-	Points     json.RawMessage `json:"vod_points"`
-	PlayPass   json.RawMessage `json:"vod_pwd_play"`
-	Pass       json.RawMessage `json:"vod_pwd"`
+	ID           json.RawMessage `json:"vod_id"`
+	TypeID       json.RawMessage `json:"type_id"`
+	Name         string          `json:"vod_name"`
+	Picture      json.RawMessage `json:"vod_pic"`
+	Category     string          `json:"type_name"`
+	Summary      string          `json:"vod_content"`
+	Actor        json.RawMessage `json:"vod_actor"`
+	Director     json.RawMessage `json:"vod_director"`
+	Total        json.RawMessage `json:"vod_total"`
+	PlayURL      string          `json:"vod_play_url"`
+	Locked       json.RawMessage `json:"locked"`
+	TrialMinutes json.RawMessage `json:"vod_trysee"`
+	PlayPoints   json.RawMessage `json:"vod_points_play"`
+	Points       json.RawMessage `json:"vod_points"`
+	PlayPass     json.RawMessage `json:"vod_pwd_play"`
+	Pass         json.RawMessage `json:"vod_pwd"`
 }
 
 type response struct {
@@ -514,6 +515,12 @@ func (item record) restricted() bool {
 	case "", "false", "0":
 	default:
 		return true
+	}
+	// This provider can serve full media only, so any trial limit blocks playback.
+	if trial := strings.TrimSpace(scalar(item.TrialMinutes).text()); trial != "" {
+		if minutes, err := strconv.ParseUint(trial, 10, 64); err != nil || minutes != 0 {
+			return true
+		}
 	}
 	for _, value := range []json.RawMessage{item.PlayPoints, item.Points} {
 		text := strings.TrimSpace(scalar(value).text())
