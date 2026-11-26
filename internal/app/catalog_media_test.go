@@ -26,7 +26,7 @@ func testCatalogRelay(t *testing.T, upstream catalogRoundTripper) *catalogMediaR
 	t.Helper()
 	client := newCatalogMediaClient()
 	client.Transport = upstream
-	relay, err := startCatalogMediaRelay(client)
+	relay, err := startCatalogMediaRelay(client, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

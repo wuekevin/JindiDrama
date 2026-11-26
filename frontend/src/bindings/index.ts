@@ -7,7 +7,7 @@ import type { DemoQualityId } from '@/player/demoMedia'
 import { captureLibraryIntent, parseLibraryCache, replayLibraryBatch, type LibraryBatch, type LibraryCache, type LibraryReceipt, type LibraryState } from './libraryRecovery'
 import type { Capability, CapabilityState, HistoryEntry } from '@/types'
 import type { Episode, PlaybackTicket } from '../../../contracts/provider-contracts'
-export type CatalogDrama = Pick<import('@/types').Drama, 'id' | 'title' | 'summary' | 'tags' | 'episodeCount' | 'updatedTo'>
+export type CatalogDrama = Pick<import('@/types').Drama, 'id' | 'title' | 'summary' | 'tags' | 'episodeCount' | 'updatedTo'> & { cover?: string }
 
 export interface CatalogPage {
   entries: CatalogDrama[]

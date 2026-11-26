@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs'
 import type { Page } from '@playwright/test'
+import { PNG } from 'pngjs'
 import { test, expect } from './fixtures'
 
 const providerId = 'catalog:2026/001'
@@ -516,4 +518,147 @@ test('CMS retry refreshes a previously valid classification before sending a fil
   await page.getByRole('button', { name: '重试' }).click()
   await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')
   expect(await cmsGenreCalls(page)).toEqual(['class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class'])
+})
+
+test('CMS covers use application paths and fall back without hiding detail or playback', async ({ page }, testInfo) => {
+  const origin = 'http://127.0.0.1:45671'
+  const coverURL = (id: number) => origin + '/catalog-cover/' + id.toString(16).padStart(32, '0')
+  const approved = coverURL(1)
+  const failed = coverURL(2)
+  const leaseId = 'A'.repeat(26)
+  const videoURL = origin + '/catalog-media/' + leaseId + '/0'
+  const external = 'https://covers.example.test/photo.png?signature=fixture-only'
+  const offscreen = coverURL(7)
+
+  await page.addInitScript(({ approved, failed, external, offscreen, leaseId, videoURL }) => {
+    const row = (id: number, title: string, cover?: string) => ({
+      id: 'apple-cms:0123456789abcdef0123456789abcdef:' + id,
+      title, cover, summary: '授权封面测试短剧。', tags: ['海岛'], episodeCount: 1, updatedTo: 1,
+    })
+    const valid = row(1, '港湾晚霞', approved)
+    const broken = row(2, '夜航来信', failed)
+    const entries = [
+      valid, broken, row(3, '未经校验的封面', external), row(4, '无封面短剧'),
+      row(5, '带参数的封面', approved + '?extra=1'), row(6, '外站封面', external.replace('https:', '')),
+    ]
+    const offscreenRow = row(7, '首页未渲染短剧', offscreen)
+    const unsafePaths = [
+      approved.replace('127.0.0.1', 'localhost'),
+      approved.replace('127.0.0.1', 'user:pass@127.0.0.1'),
+      approved.replace(':45671', ':65536'),
+      approved.replace(':45671', ''),
+      new URL(approved).pathname,
+      approved + '#fragment',
+    ].map((cover, index) => row(10 + index, '无效封面路径 ' + index, cover))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      ProviderName: async () => 'apple-cms',
+      Capabilities: async () => ({ catalog: 'ready', search: 'ready', playback: 'ready' }),
+      Home: async () => [...entries, offscreenRow],
+      HomeFeed: async () => ({ catalogLabel: '片源目录', todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
+      CatalogSearch: async () => entries,
+      CatalogPage: async (_keyword: string, currentPage: number) => ({ entries: [...entries, ...unsafePaths], page: currentPage, hasMore: false }),
+      CatalogGenres: async () => [{ id: '7', name: '海岛' }],
+      CatalogGenrePage: async (_genre: string, currentPage: number) => ({
+        entries: currentPage === 1 ? [valid] : [broken], page: currentPage, hasMore: currentPage === 1,
+      }),
+      CatalogDrama: async (id: string) => entries.find((entry) => entry.id === id),
+      CatalogEpisodes: async (id: string) => [{ id: id + ':1', index: 1, available: true, dramaId: id }],
+      CatalogPlayback: async (id: string, index: number) => {
+        if (id !== broken.id || index !== 1) throw new Error('未知测试剧集')
+        return {
+          kind: 'authorized', episodeId: id + ':1', leaseId,
+          expiresAt: new Date(Date.now() + 120_000).toISOString(),
+          sources: [{ src: videoURL, type: 'video/webm' }],
+        }
+      },
+    } } } })
+  }, { approved, failed, external, offscreen, leaseId, videoURL })
+
+  const image = new PNG({ width: 36, height: 54 })
+  for (let index = 0; index < image.data.length; index += 4) {
+    const row = Math.floor(index / 4 / image.width)
+    const [r, g, b] = row < 26 ? [232, 131, 106] : row < 31 ? [255, 213, 145] : [39, 94, 121]
+    image.data.set([r, g, b, 255], index)
+  }
+  const png = PNG.sync.write(image)
+  const requests: string[] = []
+  const externalRequests: string[] = []
+  await page.route('**/catalog-cover/**', async (route) => {
+    const url = route.request().url()
+    requests.push(url)
+    if (url === approved) {
+      await route.fulfill({ contentType: 'image/png', headers: { 'Access-Control-Allow-Origin': '*' }, body: png })
+    } else {
+      await route.fulfill({ status: 502, body: 'Bad Gateway' })
+    }
+  })
+  await page.route('**/covers.example.test/**', async (route) => {
+    externalRequests.push(route.request().url())
+    await route.abort()
+  })
+
+  const sample = readFileSync(new URL('../../public/demo/demo-1.webm', import.meta.url))
+  await page.route(videoURL, async (route) => {
+    const headers = { 'content-type': 'video/webm', 'accept-ranges': 'bytes' }
+    const range = /^bytes=(\d+)-(\d*)$/.exec(route.request().headers()['range'] ?? '')
+    if (range) {
+      const start = Number(range[1])
+      const end = range[2] ? Math.min(sample.length - 1, Number(range[2])) : sample.length - 1
+      await route.fulfill({
+        status: 206, headers: { ...headers, 'content-range': `bytes ${start}-${end}/${sample.length}` },
+        body: sample.subarray(start, end + 1),
+      })
+      return
+    }
+    await route.fulfill({ headers, body: sample })
+  })
+
+  const byAlt = (alt: string) => page.getByAltText(alt, { exact: true })
+  const placeholder = /^data:image\/svg\+xml/
+  await page.goto('/#/home')
+  const homeCover = byAlt('港湾晚霞')
+  await expect(homeCover).toHaveAttribute('src', approved)
+  await expect(homeCover).toHaveAttribute('loading', 'lazy')
+  await expect(homeCover).toHaveAttribute('crossorigin', 'anonymous')
+  await expect(homeCover).toHaveJSProperty('naturalWidth', 36)
+  for (const title of ['夜航来信', '未经校验的封面', '无封面短剧', '带参数的封面', '外站封面']) {
+    await expect(byAlt(title)).toHaveAttribute('src', placeholder)
+  }
+  expect(requests).toContain(approved)
+  expect(requests).toContain(failed)
+  expect(requests).not.toContain(offscreen)
+  await page.screenshot({ path: testInfo.outputPath('apple-cms-cover-home.png') })
+  const homeImage = await homeCover.elementHandle()
+  await page.getByTestId('drama-card').filter({ hasText: '港湾晚霞' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('港湾晚霞')
+  expect(await homeImage.getAttribute('src')).toBeNull()
+  await expect(byAlt('港湾晚霞')).toHaveJSProperty('naturalWidth', 36)
+
+  await page.goto(searchRoute('海岛'))
+  const results = page.getByTestId('result-card')
+  await expect(results.getByAltText('港湾晚霞')).toHaveJSProperty('naturalWidth', 36)
+  const brokenCard = results.filter({ hasText: '夜航来信' })
+  await expect(brokenCard.getByAltText('夜航来信')).toHaveAttribute('src', placeholder)
+  await expect(results.getByAltText('未经校验的封面')).toHaveAttribute('src', placeholder)
+  for (let index = 0; index < 6; index++) {
+    await expect(results.getByAltText('无效封面路径 ' + index)).toHaveAttribute('src', placeholder)
+  }
+  await brokenCard.getByTestId('view-detail').click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('夜航来信')
+  await expect(byAlt('夜航来信')).toHaveAttribute('src', placeholder)
+  await expect.poll(() => byAlt('夜航来信').evaluate((image) => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+  await page.getByTestId('catalog-watch-now').click()
+  const video = page.getByLabel('第1集视频')
+  await expect(video).toHaveAttribute('src', videoURL)
+  await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).videoWidth)).toBeGreaterThan(0)
+  await video.evaluate((element) => (element as HTMLVideoElement).play())
+  await expect.poll(() => video.evaluate((element) => (element as HTMLVideoElement).currentTime)).toBeGreaterThan(0.1)
+
+  await page.goto('/#/search?browse=topics&genre=7')
+  await expect(results.getByAltText('港湾晚霞')).toHaveJSProperty('naturalWidth', 36)
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(results.getByAltText('夜航来信')).toHaveAttribute('src', placeholder)
+  expect(externalRequests).toEqual([])
+  expect([...new Set(requests)].sort()).toEqual([approved, failed])
 })

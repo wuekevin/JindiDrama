@@ -31,17 +31,23 @@ type catalogMediaRelay struct {
 	leases map[string]catalogMediaLease
 	host   string
 	server *http.Server
+	cancel context.CancelFunc
 	client *http.Client
+	covers *catalogCoverService
 	closed bool
 }
 
-func startCatalogMediaRelay(client *http.Client) (*catalogMediaRelay, error) {
+func startCatalogMediaRelay(client *http.Client, covers *catalogCoverService) (*catalogMediaRelay, error) {
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
 	}
-	r := &catalogMediaRelay{host: listener.Addr().String(), client: client, leases: make(map[string]catalogMediaLease)}
-	r.server = &http.Server{Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second}
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &catalogMediaRelay{host: listener.Addr().String(), cancel: cancel, client: client, covers: covers, leases: make(map[string]catalogMediaLease)}
+	r.server = &http.Server{
+		Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second,
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
 	go func() { _ = r.server.Serve(listener) }()
 	return r, nil
 }
@@ -107,6 +113,7 @@ func (r *catalogMediaRelay) close() {
 		delete(r.leases, token)
 	}
 	r.mu.Unlock()
+	r.cancel()
 	_ = r.server.Close()
 	r.client.CloseIdleConnections()
 }
@@ -114,6 +121,10 @@ func (r *catalogMediaRelay) close() {
 func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if token, isCover := strings.CutPrefix(req.URL.Path, catalogCoverPath); isCover {
+		r.serveCover(w, req, token)
+		return
+	}
 	suffix, pathOK := strings.CutPrefix(req.URL.Path, catalogMediaPath)
 	token, address, slash := strings.Cut(suffix, "/")
 	if req.Host != r.host || req.URL.RawQuery != "" || req.URL.ForceQuery || req.URL.RawPath != "" || !pathOK || !slash {
@@ -325,20 +336,28 @@ func validCatalogResponseRange(res *http.Response, requestRange string) bool {
 	return start == requestedStart && end == min(total-1, requestedEnd)
 }
 
-func (a *App) issueCatalogMedia(ticket provider.PlaybackTicket, expiry time.Time) (provider.PlaybackTicket, error) {
+func (a *App) catalogRelay() (*catalogMediaRelay, error) {
 	a.catalogMediaMu.Lock()
 	defer a.catalogMediaMu.Unlock()
 	if a.catalogMediaClosed {
-		return provider.PlaybackTicket{}, errCatalogPlaybackUnavailable
+		return nil, errCatalogPlaybackUnavailable
 	}
 	if a.catalogMedia == nil {
-		relay, err := startCatalogMediaRelay(newCatalogMediaClient())
+		relay, err := startCatalogMediaRelay(newCatalogMediaClient(), a.catalogCovers)
 		if err != nil {
-			return provider.PlaybackTicket{}, errCatalogPlaybackUnavailable
+			return nil, errCatalogPlaybackUnavailable
 		}
 		a.catalogMedia = relay
 	}
-	return a.catalogMedia.issue(ticket, expiry)
+	return a.catalogMedia, nil
+}
+
+func (a *App) issueCatalogMedia(ticket provider.PlaybackTicket, expiry time.Time) (provider.PlaybackTicket, error) {
+	relay, err := a.catalogRelay()
+	if err != nil {
+		return provider.PlaybackTicket{}, err
+	}
+	return relay.issue(ticket, expiry)
 }
 
 func (a *App) ReleaseCatalogPlayback(leaseID string) {

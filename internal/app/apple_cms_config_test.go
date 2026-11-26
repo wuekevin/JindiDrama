@@ -96,7 +96,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	if err := configureAppleCMS(a, "https://"+upstream+"?access=synthetic-catalog-token", client); err != nil {
 		t.Fatal(err)
 	}
-	relay, err := startCatalogMediaRelay(client)
+	relay, err := startCatalogMediaRelay(client, a.catalogCovers)
 	if err != nil {
 		t.Fatal(err)
 	}

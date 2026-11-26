@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { Drama } from '@/types'
+import { fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
 defineProps<{ drama: Drama; badge?: string }>()
 defineEmits<{ open: [id: string] }>()
 </script>
 <template>
   <button class="card on-dark" :aria-label="`${drama.title}，${drama.episodeCount}集`" data-testid="drama-card" @click="$emit('open', drama.id)">
-    <img :src="drama.cover" :alt="drama.title" draggable="false" />
+    <img v-cancel-catalog-cover :crossorigin="drama.providerOnly ? 'anonymous' : undefined" :src="drama.cover" :alt="drama.title" :loading="drama.providerOnly ? 'lazy' : undefined" draggable="false" @error="fallbackCatalogCover" />
     <span v-if="badge" class="badge">{{ badge }}</span>
     <span class="shade" />
     <span class="info"><b class="clamp-2">{{ drama.title }}</b><em>{{ drama.tags.slice(0, 2).join(' · ') }} · {{ drama.episodeCount }}集</em></span>

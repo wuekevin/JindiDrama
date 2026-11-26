@@ -1,4 +1,5 @@
 // 目录展示数据来自 Go Provider。浏览器预览使用内置演示目录。
+import type { ObjectDirective } from 'vue'
 import type { Drama, HistoryEntry } from '@/types'
 import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadCatalogGenrePage, loadCatalogGenres, loadCatalogPage, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama, type CatalogPage } from '@/bindings'
 import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKINGS, type CastMember, type DemoSeason } from './data'
@@ -8,6 +9,27 @@ const delay = (ms = 120) => new Promise((r) => setTimeout(r, ms))
 export interface HomePayload { catalogLabel?: string; banners: typeof BANNERS; categories: typeof CATEGORIES; todayNew: Drama[]; rankings: Record<'hot'|'rise'|'new', Drama[]> }
 
 const catalogCover = posterSvg({ hue: 218, hue2: 229, seed: 4 })
+const catalogCoverURL = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/catalog-cover\/[0-9a-f]{32}$/
+
+function isCatalogCover(value: unknown): value is string {
+  const match = typeof value === 'string' ? catalogCoverURL.exec(value) : null
+  if (!match) return false
+  const port = Number(match[1])
+  return port !== 80 && port <= 65535
+}
+
+export const vCancelCatalogCover: ObjectDirective<HTMLImageElement> = {
+  beforeUnmount(image) {
+    if (isCatalogCover(image.getAttribute('src'))) image.removeAttribute('src')
+  },
+}
+
+export function fallbackCatalogCover(event: Event) {
+  const image = event.currentTarget
+  if (image instanceof HTMLImageElement && isCatalogCover(image.getAttribute('src'))) {
+    image.src = catalogCover
+  }
+}
 
 export async function catalogProviderName() {
   const name = activeProviderName()
@@ -31,7 +53,7 @@ function providerCard(drama: CatalogDrama): Drama {
   return {
     id: drama.id, title: drama.title, summary: drama.summary, tags: drama.tags ?? [],
     episodeCount: count, updatedTo: Math.max(0, Math.min(count, drama.updatedTo)),
-    cover: catalogCover, providerOnly: true, heat: 0, finished: false,
+    cover: isCatalogCover(drama.cover) ? drama.cover : catalogCover, providerOnly: true, heat: 0, finished: false,
   }
 }
 
@@ -210,7 +232,7 @@ export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', c
   const fixture = byId(id)
   if (!fixture) return null
   const desktopDetail = await loadProviderDetail(id)
-  const d = desktopDetail ? { ...fixture, ...desktopDetail[0] } : fixture
+  const d = desktopDetail ? { ...fixture, ...desktopDetail[0], cover: fixture.cover } : fixture
   const episodes = desktopDetail?.[1] ?? Array.from({ length: d.episodeCount }, (_, i) => ({
     index: i + 1, available: i < d.updatedTo,
   }))

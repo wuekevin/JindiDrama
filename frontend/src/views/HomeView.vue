@@ -9,6 +9,7 @@ import { useSearchStore } from '@/stores/search'
 import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import NewDramaCard from '@/components/NewDramaCard.vue'
+import { fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
 import { ProgressBar, EmptyState, ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -86,7 +87,7 @@ const autoplay = computed(() => route.query.static === undefined)
           <button class="link" data-testid="full-ranking" @click="router.push({ name: 'search', query: { feed: tab } })">完整榜单<ChevronRight :size="15" /></button></div>
         <ol class="rank-list">
           <li v-for="(d, i) in ranking" :key="d.id"><button class="ri" data-testid="rank-item" @click="openDrama(d.id, d.providerOnly)">
-            <span class="cov"><img :src="d.cover" :alt="d.title" /><b class="no" :class="rankClass(i)">{{ i + 1 }}</b></span>
+            <span class="cov"><img v-cancel-catalog-cover :crossorigin="d.providerOnly ? 'anonymous' : undefined" :src="d.cover" :alt="d.title" :loading="d.providerOnly ? 'lazy' : undefined" @error="fallbackCatalogCover" /><b class="no" :class="rankClass(i)">{{ i + 1 }}</b></span>
             <span class="rt"><strong class="clamp-2">{{ d.title }}</strong><em v-if="!d.providerOnly"><Flame :size="14" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></span>
           </button></li>
         </ol>

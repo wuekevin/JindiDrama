@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ChevronLeft, ChevronDown, ChevronUp, ChevronRight, Star, CirclePlay, Heart, Play, Plus, Check, Share2, Flame, Crown, RefreshCw, Landmark, Swords, Sprout, Sparkles } from 'lucide-vue-next'
-import { getDetail, groupEpisodes, epHot, type DemoHighlight, type DramaDetail } from '@/mocks/provider'
+import { fallbackCatalogCover, vCancelCatalogCover, getDetail, groupEpisodes, epHot, type DemoHighlight, type DramaDetail } from '@/mocks/provider'
 import { useRelatedDramas } from '@/mocks/recommendations'
 import { demoClipSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
@@ -123,7 +123,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
     <EmptyState v-else-if="state === 'notfound'" title="没有找到这部短剧"><BaseButton variant="outline" @click="router.push('/home')">回到首页</BaseButton></EmptyState>
     <template v-else-if="detail">
       <section class="top">
-        <div class="poster"><img :src="detail.drama.cover" :alt="detail.drama.title" /><span v-if="!detail.drama.providerOnly" class="badge"><Crown :size="13" fill="currentColor" />独播</span><b class="pt">{{ detail.drama.title }}</b></div>
+        <div class="poster"><img v-cancel-catalog-cover :crossorigin="detail.drama.providerOnly ? 'anonymous' : undefined" :src="detail.drama.cover" :alt="detail.drama.title" @error="fallbackCatalogCover" /><span v-if="!detail.drama.providerOnly" class="badge"><Crown :size="13" fill="currentColor" />独播</span><b class="pt">{{ detail.drama.title }}</b></div>
         <div class="meta">
           <h1 ref="detailHeading" tabindex="-1">{{ detail.drama.title }}<span v-if="!detail.drama.providerOnly" class="heat"><Flame :size="20" color="#ff6a3d" fill="#ff6a3d" />{{ detail.drama.heat.toFixed(1) }}万热度</span></h1>
           <div v-if="!detail.drama.providerOnly" class="stats"><span class="score"><Star :size="19" color="#f4b740" fill="#f4b740" /><b>{{ detail.rating }}</b> 分</span><i /><span><CirclePlay :size="17" />{{ detail.plays }}</span><i /><span><Heart :size="17" />{{ detail.favs }}</span></div>

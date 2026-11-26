@@ -412,3 +412,39 @@ func TestCatalogGenrePageUsesLatestClassSnapshot(t *testing.T) {
 		t.Fatalf("requests after refresh: class %d, filtered %d", classCalls.Load(), pageCalls.Load())
 	}
 }
+
+func TestCatalogCoverMetadataIsOptionalAndResolvedAgainstEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"code":1,"list":[
+			{"vod_id":1,"vod_name":"相对路径","vod_pic":"../covers/a.png?sig=cover"},
+			{"vod_id":2,"vod_name":"外部地址","vod_pic":"https://cdn.example.test/b.webp?sig=cover"},
+			{"vod_id":3,"vod_name":"站点路径","vod_pic":"/covers/c.jpeg"},
+			{"vod_id":4,"vod_name":"缺少封面"},
+			{"vod_id":5,"vod_name":"无效封面","vod_pic":{"malformed":true}},
+			{"vod_id":6,"vod_name":"无效路径","vod_pic":"cover%zz"},
+			{"vod_id":7,"vod_name":"查询封面","vod_pic":"?sig=cover"},
+			{"vod_id":8,"vod_name":"空查询","vod_pic":"?"},
+			{"vod_id":9,"vod_name":"无效片段","vod_pic":"#cover"},
+			{"vod_id":10,"vod_name":"空封面","vod_pic":""}
+		]}`)
+	}))
+	defer server.Close()
+	p := fixtureProvider(t, server.URL+"/api/v1/vod?sig=catalog", server.Client())
+	dramas, err := p.Home(t.Context())
+	expected := []string{
+		server.URL + "/api/covers/a.png?sig=cover",
+		"https://cdn.example.test/b.webp?sig=cover",
+		server.URL + "/covers/c.jpeg",
+		"", "", "",
+		server.URL + "/api/v1/vod?sig=cover",
+		"", "", "",
+	}
+	if err != nil || len(dramas) != len(expected) {
+		t.Fatalf("optional picture changes catalog results: got %d records, err=%v", len(dramas), err)
+	}
+	for i, drama := range dramas {
+		if drama.CoverURL != expected[i] || drama.Cover != "" {
+			t.Errorf("unexpected cover metadata for record %d", i+1)
+		}
+	}
+}

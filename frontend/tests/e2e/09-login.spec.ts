@@ -10,6 +10,7 @@ test.describe('09 账号登录', () => {
     const dialog = page.getByRole('dialog', { name: '金帝短剧隐私说明' })
     await expect(dialog).toContainText('演示登录不会发送短信')
     await expect(dialog).toContainText('并发送为该片源输入的搜索词以获取结果')
+    await expect(dialog).toContainText('浏览剧目时会从片源提供的地址加载封面')
     await expect(dialog).toContainText('应用不会向片源同步本机观看历史、收藏、搜索历史')
     await expect(dialog.getByText('适用范围', { exact: false })).toBeFocused()
     await page.screenshot({ path: '../design/rendered/09-演示登录隐私说明.png' })

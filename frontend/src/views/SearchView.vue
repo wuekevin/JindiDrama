@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
 import type { CatalogGenre } from '@/bindings'
-import { catalogProviderName, loadCatalogHome, loadCMSCatalogGenrePage, loadCMSCatalogGenres, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
+import { catalogProviderName, fallbackCatalogCover, vCancelCatalogCover, loadCatalogHome, loadCMSCatalogGenrePage, loadCMSCatalogGenres, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
@@ -325,7 +325,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
       </EmptyState>
       <ul v-else class="list">
         <li v-for="d in shown" :key="`${d.providerOnly ? 'catalog' : 'local'}:${d.id}`" class="item" data-testid="result-card">
-          <button class="cover" :aria-label="`${d.providerOnly ? '查看' : '播放'}${d.title}`" @click="d.providerOnly ? router.push(detailRoute(d.id, true)) : watchIt(d.id)"><img :src="d.cover" :alt="d.title" /><i v-if="!d.providerOnly" class="pb"><Play :size="12" fill="currentColor" /></i></button>
+          <button class="cover" :aria-label="`${d.providerOnly ? '查看' : '播放'}${d.title}`" @click="d.providerOnly ? router.push(detailRoute(d.id, true)) : watchIt(d.id)"><img v-cancel-catalog-cover :crossorigin="d.providerOnly ? 'anonymous' : undefined" :src="d.cover" :alt="d.title" :loading="d.providerOnly ? 'lazy' : undefined" @error="fallbackCatalogCover" /><i v-if="!d.providerOnly" class="pb"><Play :size="12" fill="currentColor" /></i></button>
           <div class="info">
             <div class="t"><h3 class="clamp-1">{{ d.title }}</h3><span v-if="!d.providerOnly && d.kind !== '本地片库'" class="heat"><Flame :size="15" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</span></div>
             <div class="tags"><span v-if="d.kind" class="tag" :class="kindTone(d.kind)">{{ d.kind }}</span><span v-for="t in d.tags" :key="t" class="tag">{{ t }}</span></div>

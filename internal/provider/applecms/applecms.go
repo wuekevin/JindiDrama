@@ -333,6 +333,7 @@ type record struct {
 	ID         json.RawMessage `json:"vod_id"`
 	TypeID     json.RawMessage `json:"type_id"`
 	Name       string          `json:"vod_name"`
+	Picture    json.RawMessage `json:"vod_pic"`
 	Category   string          `json:"type_name"`
 	Summary    string          `json:"vod_content"`
 	Total      json.RawMessage `json:"vod_total"`
@@ -425,11 +426,28 @@ func (item record) restricted() bool {
 	return strings.TrimSpace(scalar(item.PlayPass).text()) != "" || strings.TrimSpace(scalar(item.Pass).text()) != ""
 }
 
+func (p *Provider) coverURL(picture json.RawMessage) string {
+	var value string
+	if json.Unmarshal(picture, &value) != nil {
+		return ""
+	}
+	value = strings.TrimSpace(value)
+	if value == "" || len(value) > 4096 || strings.ContainsAny(value, "#\\\r\n\t ") {
+		return ""
+	}
+	ref, err := url.Parse(value)
+	if err != nil || (!ref.IsAbs() && ref.Host == "" && ref.Path == "" && ref.RawQuery == "") {
+		return ""
+	}
+	return p.endpoint.ResolveReference(ref).String()
+}
+
 func (p *Provider) normalize(item record, id, title string) (provider.Drama, map[int][]provider.MediaSource) {
 	total, _ := strconv.Atoi(scalar(item.Total).decimal(9))
 	drama := provider.Drama{
 		ID: p.idPrefix + id, Title: title, Tags: []string{},
 		Summary: metadataText(item.Summary), EpisodeCount: min(total, maxEpisodes),
+		CoverURL: p.coverURL(item.Picture),
 	}
 	if category := genreText(item.Category); category != "" {
 		drama.Tags = append(drama.Tags, category)

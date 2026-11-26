@@ -43,6 +43,8 @@ type Rankings struct {
 type Drama struct {
 	ID           string   `json:"id"`
 	Title        string   `json:"title"`
+	Cover        string   `json:"cover,omitempty"`
+	CoverURL     string   `json:"-"`
 	License      string   `json:"license,omitempty"`
 	AllowExport  bool     `json:"allowExport,omitempty"`
 	Tags         []string `json:"tags"`

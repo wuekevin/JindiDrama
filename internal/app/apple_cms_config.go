@@ -40,6 +40,7 @@ func configureAppleCMS(a *App, raw string, client *http.Client) error {
 	a.p = applecms.New(*u, client, func(raw string) (provider.MediaSource, bool) {
 		return catalogMediaSource(provider.MediaSource{Src: raw}, true, true)
 	})
+	a.catalogCovers = newCatalogCoverService(client)
 	return nil
 }
 
@@ -49,7 +50,9 @@ func (a *App) CatalogPage(query string, page int) (applecms.CatalogPage, error) 
 	if !ok {
 		return applecms.CatalogPage{}, provider.ErrNotAuthorized
 	}
-	return cms.CatalogPage(a.context(), query, page)
+	result, err := cms.CatalogPage(a.context(), query, page)
+	a.projectCatalogCovers(result.Entries)
+	return result, err
 }
 
 func (a *App) CatalogGenres() ([]applecms.CatalogGenre, error) {
@@ -67,5 +70,7 @@ func (a *App) CatalogGenrePage(genre string, page int) (applecms.CatalogPage, er
 	if !ok || cms.Capabilities(ctx)["catalog"] != provider.Ready {
 		return applecms.CatalogPage{}, provider.ErrNotAuthorized
 	}
-	return cms.CatalogGenrePage(ctx, genre, page)
+	result, err := cms.CatalogGenrePage(ctx, genre, page)
+	a.projectCatalogCovers(result.Entries)
+	return result, err
 }

@@ -26,6 +26,7 @@ type App struct {
 	catalogMediaMu     sync.Mutex
 	catalogMedia       *catalogMediaRelay
 	catalogMediaClosed bool
+	catalogCovers      *catalogCoverService
 
 	p                 provider.VideoProvider
 	licensed          *licensed.DemoProvider
@@ -141,7 +142,11 @@ func (a *App) ProviderName() string { return a.p.Name() }
 
 func (a *App) Capabilities() provider.Capabilities { return a.p.Capabilities(a.context()) }
 
-func (a *App) Home() ([]provider.Drama, error) { return a.p.Home(a.context()) }
+func (a *App) Home() ([]provider.Drama, error) {
+	rows, err := a.p.Home(a.context())
+	a.projectCatalogCovers(rows)
+	return rows, err
+}
 
 func (a *App) HomeFeed() (provider.HomeFeed, error) { return a.p.HomeFeed(a.context()) }
 
@@ -152,7 +157,9 @@ func (a *App) CatalogSearch(q string) ([]provider.Drama, error) {
 	if a.p.Capabilities(ctx)["search"] != provider.Ready {
 		return nil, provider.ErrNotAuthorized
 	}
-	return a.p.Search(ctx, q)
+	rows, err := a.p.Search(ctx, q)
+	a.projectCatalogCovers(rows)
+	return rows, err
 }
 
 func (a *App) CatalogDrama(id string) (provider.Drama, error) {
@@ -160,7 +167,11 @@ func (a *App) CatalogDrama(id string) (provider.Drama, error) {
 	if a.p.Capabilities(ctx)["catalog"] != provider.Ready {
 		return provider.Drama{}, provider.ErrNotAuthorized
 	}
-	return a.p.Drama(ctx, id)
+	drama, err := a.p.Drama(ctx, id)
+	if err == nil {
+		a.projectCatalogCover(&drama)
+	}
+	return drama, err
 }
 
 func (a *App) CatalogEpisodes(id string) ([]provider.Episode, error) {
@@ -174,6 +185,7 @@ func (a *App) CatalogEpisodes(id string) ([]provider.Episode, error) {
 func (a *App) Search(q string) ([]provider.Drama, error) {
 	ctx := a.context()
 	results, err := a.p.Search(ctx, q)
+	a.projectCatalogCovers(results)
 	if err != nil || a.licensed == nil {
 		return results, err
 	}
@@ -185,7 +197,12 @@ func (a *App) Search(q string) ([]provider.Drama, error) {
 }
 
 func (a *App) Drama(id string) (provider.Drama, error) {
-	return a.providerForDrama(id).Drama(a.context(), id)
+	p := a.providerForDrama(id)
+	drama, err := p.Drama(a.context(), id)
+	if _, local := p.(*licensed.DemoProvider); err == nil && !local {
+		a.projectCatalogCover(&drama)
+	}
+	return drama, err
 }
 
 func (a *App) Episodes(dramaID string) ([]provider.Episode, error) {
