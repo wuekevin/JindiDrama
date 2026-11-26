@@ -371,10 +371,11 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await expect(backupButton).toBeFocused()
 })
 
-test('downloads a verified update through the desktop bridge and shows its path after a cancelled attempt', async ({ page }, testInfo) => {
+test('downloads a verified update through the desktop bridge and shows its path after cancellation and a write failure', async ({ page }, testInfo) => {
   const url = 'https://github.com/wuekevin/JindiDrama/releases/tag/v1.2.3'
   let attempts = 0
   let cancelled = 0
+  const writeFailure = '无法写入更新文件，请检查保存位置和可用空间'
   const savedPath = '/native/downloads/' + '带空格 的更新目录/'.repeat(12) + '金帝短剧.zip'
   let firstComplete!: (saved: string) => void
   let copied = ''
@@ -383,6 +384,7 @@ test('downloads a verified update through the desktop bridge and shows its path 
     if (release !== url) throw new Error('wrong candidate')
     attempts++
     if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve })
+    if (attempts === 2) throw new Error(writeFailure)
     return savedPath
   })
   await page.exposeFunction('cancelUpdateFixture', () => { cancelled++; firstComplete('') })
@@ -425,8 +427,12 @@ test('downloads a verified update through the desktop bridge and shows its path 
   expect(cancelled).toBe(1)
   await expect(saved).toHaveCount(0)
   await download.click()
+  await expect(page.getByTestId('toast').last()).toContainText(writeFailure)
+  await expect(download).toBeEnabled()
+  await expect(saved).toHaveCount(0)
+  await download.click()
   await expect(saved.getByRole('status')).toContainText('安装包已校验并保存')
-  expect(attempts).toBe(2)
+  expect(attempts).toBe(3)
   await expect(saved.locator('code')).toHaveText(savedPath)
   await expect(copy).toBeInViewport()
   await expect(page.getByTestId('toast').filter({ hasText: '发现新版本' })).toHaveCount(0)

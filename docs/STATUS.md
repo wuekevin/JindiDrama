@@ -685,3 +685,8 @@
 - Windows x64 安装器 22.53 MiB、便携程序 32.33 MiB、macOS Universal ZIP 40.87 MiB。NSIS 包内主程序与便携程序一致，WebView2 引导程序与依赖原件一致，PE 版本字段为 0.1.0.0。macOS 两个切片的最低系统版本均为 13.0。Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立命令、随包指令和归档复核。[Windows 清单](../build/bin/smoke-20261127.48/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.48/macos/SHA256SUMS.txt)
 - Apple Silicon 从最终 ZIP 验证桌面启动、正常退出、隔离 SQLite 与成品回滚。最初检出和 Windows 编译遇到磁盘空间不足，回收隔离临时副本后恢复。macOS ZIP 的解压验收在腾出空间后使用同一份文件复跑通过。[Apple Silicon 原生](../build/bin/smoke-20261127.48/evidence/macos-native.log)
 - Go 源码、Windows x64、macOS arm64 与 x86_64 二进制及 npm 生产依赖扫描未报告已知漏洞。GitHub 仓库签名环境、仓库级 Actions secrets、Release 及本机有效代码签名身份均尚未配置。当前源码的 Windows 和 Intel Mac 原生、正式签名与公证以及授权公网片源仍待验收。[BMad 记录](../_bmad-output/plan-e13-local-candidate48-packages.md)
+
+## E13 更新下载错误指引（2026-11-27）
+
+- 设置页分别提示 GitHub 限流、临时故障、资源移除、访问权限问题、下载超时和本地写入失败。提示只显示可执行的处理建议，远程响应内容和系统写入错误不进入界面。成功下载仍须通过文件大小和 SHA-256 校验。[GitHub 限流文档](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#exceeding-the-rate-limit)
+- Go 回归覆盖响应状态、请求及传输超时、本地写入失败、暂存清理和完整性校验。Go vet、Go 全量和更新与应用竞态测试通过。前端生产构建和 44 项设置页 Playwright 通过，覆盖取消后遇到写入错误、提示处理方法和再次下载保存成功。正式 Release 安装包下载仍待签名版本端到端验收。[浏览器日志](../build/bin/qa-update-download-recovery/e2e.log) · [BMad 记录](../_bmad-output/plan-e13-update-download-recovery.md)
