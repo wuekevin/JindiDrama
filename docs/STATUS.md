@@ -661,3 +661,9 @@
 
 - 演示视频和本地授权片库收到桌面隐藏事件时会保存当前播放位置。演示视频离开页面也会保存。顶栏最小化及旧窗口桥的隐藏路径在执行窗口操作前发出保存事件。播放器不会因这次保存而暂停。
 - 用真实演示视频和本地片库视频复现四个入口的旧问题。修复后均在定期保存前记录准确进度，并保持播放。最终 164 项 Playwright、122 项 Vitest、前端类型检查和构建、Go vet 与 Go 全量通过。原生窗口操作留待集中验收。[回归日志](../build/bin/qa-local-playback-hide/e2e-final.log) · [BMad 记录](../_bmad-output/plan-e11-local-playback-hide-checkpoint.md)
+
+## E11 Apple Silicon 原生最小化与续看验收（2026-11-27）
+
+- 从隔离发行源码 `14ce2ff7733f6bf8601685843b8b5fdede69e925` 构建 `v0.1.0-smoke.20261127.47`，复用已通过 164 项相关 Playwright 的前端资源。在 macOS 26.6.2 上验证 arm64，最低系统版本为 macOS 13.0，ad-hoc 签名通过。首次构建遇到磁盘空间不足，清理经核对的 .46 临时重复副本后通过。
+- 通过真实 WKWebView 操作演示视频顶栏「最小化」与本地片库「关闭时最小化」。两者都在定期记录前更新隔离 SQLite，记录分别为 0→98 ms 和 5800→5993 ms。恢复系统窗口时仍处于播放状态。正常退出后两套 SQLite 完整性均为 `ok`。[演示日志](../build/bin/qa-native-playback-hide-47/demo-run.log) · [片库日志](../build/bin/qa-native-playback-hide-47/licensed-run.log)
+- 重启后演示在保存的位置暂停，片库打开原分集并从约 7 秒继续。Windows 和 Intel Mac 的当前候选原生验收、签名与公证仍待集中执行。[演示重启](../build/bin/qa-native-playback-hide-47/demo-reopen.log) · [片库重启](../build/bin/qa-native-playback-hide-47/licensed-reopen.log) · [BMad 记录](../_bmad-output/plan-e11-native-playback-hide-acceptance.md)
