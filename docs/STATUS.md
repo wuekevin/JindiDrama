@@ -527,3 +527,12 @@
 - 加强校验后，Apple Silicon 复现旧版回滚命令会在已关闭的 WAL 模式原库旁生成 WAL。现在只在私有目录复制并核验原库、WAL 和 journal，直接在这份副本上降级。源文件仍在变化时，工具返回失败并提示退出应用后重试。
 - Apple Silicon 从修复后的本地 ad-hoc 归档实测正常窗口、正常退出及成品回滚。探针通过带中文和空格路径的独立 v10 数据库，正确拒绝未产出副本、创建了启动配置或在原库旁新增 WAL 的测试程序。Go vet、Go 全量、SQLite 与探针竞态和 13 项 Python/macOS 工具测试通过，Windows x64 桌面程序与探针交叉编译通过。
 - Windows 安装版与便携版及 Intel 成品的新增回滚步骤尚待下一批原生验收。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e13-rollback-package-smoke.md)
+
+## E13 本机互动与回滚合并验收批次 .43（2026-11-27）
+
+- 从隔离发行源码 `565e75077adfb62a192ed578761b42f8b1537e69` 构建 `v0.1.0-smoke.20261127.43`。本批包含苹果 CMS 本机评论和弹幕、播放快捷键和高缩放、发行草稿核验、桌面回滚命令及成品回滚验证。
+- Windows x64 安装器 22.52 MiB，便携版 32.31 MiB，macOS Universal ZIP 40.86 MiB。两平台共 13 项 SHA-256 通过项目校验器、独立 shasum 和随包命令，移入项目之后再次核验一致。Windows 安装器内主程序文件与便携版一致，WebView2 安装组件与 Wails 原件一致。Universal 含 arm64 和 x86_64，两个切片最低系统均为 macOS 13.0。
+- Apple Silicon 从最终 ZIP 验证实际版本、原生窗口、Wails 页面、正常退出、独立 SQLite 和成品回滚。另在带中文和空格路径的测试库中，用同一成品由 v10 生成 v2 后，通过旧版数据层读回收藏、搜索、设置及 7345 毫秒进度。原库摘要一致，未创建源辅助文件或新启动配置。
+- 打包和回归使用的 69 个前端生产文件哈希一致。Playwright 全量 378 项、Vitest 122 项、Go vet 与全量、Node 22 与 Python macOS 发行工具各 13 项及 Windows 冒烟 PowerShell 语法均通过。Go 源码、三个二进制切片和 npm 生产依赖扫描均无已知漏洞报告。
+- 静态检验曾因本机空间不足在解包时失败。重试后通过，未重新打包。Windows 与 Intel Mac 当前批次原生、正式签名与公证、真实授权公网片源仍待验收。Windows 本地包未签名，macOS 采用 ad-hoc 签名。本轮未触发 GitHub 打包。
+- [Windows SHA-256](../build/bin/smoke-20261127.43/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.43/macos/SHA256SUMS.txt) · [Apple Silicon 原生结果](../build/bin/smoke-20261127.43/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-cms-release-batch43.md)
