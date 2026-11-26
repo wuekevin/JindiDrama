@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { localId } from '@/localId'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { Star, Play, Plus, Check, Download, ThumbsUp, Share2, Flame, ChevronDown, RefreshCw } from 'lucide-vue-next'
@@ -12,6 +11,7 @@ import { demoQualityId, demoSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
 import { playbackEndAction } from '@/player/preferences'
 import { episodeDuration, fmt } from '@/player/machine'
+import { draftForDanmaku, type DanmakuSubmission } from '@/player/danmakuDraft'
 import { genDanmaku, type DanmakuItem } from '@/player/danmaku'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
@@ -124,14 +124,15 @@ async function continuePlayback() {
   await router.replace({ query: { ...route.query, panel: undefined, paused: undefined } })
   await focusStackedPanel('')
 }
-async function sendDm(text: string) {
+const danmakuDraft = computed(() => draftForDanmaku(dramaId.value, episode.value))
+async function sendDm(submission: DanmakuSubmission) {
   const id = dramaId.value
   const ep = episode.value
-  const at = player.time.value
-  const saved = await sendLocalDanmaku(id, ep, Math.round(at * 1000), text)
+  const saved = await sendLocalDanmaku(id, ep, submission)
   if (dramaId.value !== id || episode.value !== ep) return
   mergeMine([saved ? toItem(saved) : {
-    id: `demo-${localId()}`, at, text, likes: 0, lane: Math.floor(Math.random() * 12), mine: true,
+    id: `demo-${submission.requestId}`, at: submission.offsetMs / 1000, text: submission.text,
+    likes: 0, lane: Math.floor(Math.random() * 12), mine: true,
   }])
 }
 const rtab = ref<'eps' | 'cm'>('eps'); const desc = ref(false); const grp = ref(Math.floor((episode.value - 1) / 20)); const exp = ref(false)
@@ -254,7 +255,7 @@ async function toggleEpisodeLike() {
         </template>
       </section>
       <section v-if="layout === 'dmk'" ref="companion" class="rail" tabindex="-1">
-        <DanmakuSettings :time="player.time.value" :send-danmaku="sendDm" />
+        <DanmakuSettings :key="`${dramaId}:${episode}`" :time="player.time.value" :draft="danmakuDraft" :send-danmaku="sendDm" />
       </section>
       <section v-else-if="layout === 'cmt'" ref="companion" class="drawer" tabindex="-1">
         <CommentPanel :key="`${dramaId}-${episode}`" @close="setPanel('')" />

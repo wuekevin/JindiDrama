@@ -71,11 +71,14 @@ func TestWindowCloseResponseRequiresTheActiveAttempt(t *testing.T) {
 	tests := []struct {
 		name        string
 		data        []any
-		unconfirmed bool
+		unconfirmed pendingWindowWrites
 		ok          bool
 	}{
 		{name: "safe", data: []any{"2", false}, ok: true},
-		{name: "unsafe", data: []any{"2", true}, unconfirmed: true, ok: true},
+		{name: "unsafe", data: []any{"2", true}, unconfirmed: pendingWindowWrites{library: true}, ok: true},
+		{name: "danmaku pending", data: []any{"2", false, true}, unconfirmed: pendingWindowWrites{danmaku: true}, ok: true},
+		{name: "both pending", data: []any{"2", true, true}, unconfirmed: pendingWindowWrites{library: true, danmaku: true}, ok: true},
+		{name: "invalid danmaku status", data: []any{"2", false, "true"}},
 		{name: "stale", data: []any{"1", true}},
 		{name: "missing attempt", data: []any{true}},
 		{name: "wrong attempt type", data: []any{[]int{2}, true}},
@@ -85,7 +88,7 @@ func TestWindowCloseResponseRequiresTheActiveAttempt(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			unsafe, ok := parseWindowCloseResponse("2", test.data)
 			if unsafe != test.unconfirmed || ok != test.ok {
-				t.Fatalf("got (%t, %t), want (%t, %t)", unsafe, ok, test.unconfirmed, test.ok)
+				t.Fatalf("got (%+v, %t), want (%+v, %t)", unsafe, ok, test.unconfirmed, test.ok)
 			}
 		})
 	}

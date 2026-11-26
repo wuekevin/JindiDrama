@@ -49,6 +49,9 @@ ALTER TABLE favorites DROP COLUMN sort_order;`},
 CHECK (episode_count_at_watch = 0 OR episode_count_at_watch BETWEEN episode AND 9007199254740991);`, `ALTER TABLE history DROP COLUMN episode_count_at_watch;`},
 	{8, `ALTER TABLE local_comments ADD COLUMN write_id TEXT NOT NULL DEFAULT '';
 UPDATE local_comments SET write_id=lower(hex(randomblob(16)));`, `ALTER TABLE local_comments DROP COLUMN write_id;`},
+	{9, `ALTER TABLE local_danmaku ADD COLUMN request_id TEXT;
+CREATE UNIQUE INDEX idx_local_danmaku_request ON local_danmaku(request_id) WHERE request_id IS NOT NULL;`,
+		`DROP INDEX idx_local_danmaku_request; ALTER TABLE local_danmaku DROP COLUMN request_id;`},
 }
 
 const (

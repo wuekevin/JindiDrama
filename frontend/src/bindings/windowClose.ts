@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
+import { hasPendingDanmakuWrite, hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
 
 export const BEFORE_WINDOW_CLOSE = 'jindi-before-window-close'
 export const WINDOW_CLOSE_CANCELED = 'jindi-window-close-canceled'
@@ -10,7 +10,7 @@ export const windowCloseReplyPending = () => repliedAttempt !== undefined
 export function registerWindowClose() {
   const runtime = (window as Window & { runtime?: {
     EventsOn(name: string, callback: (attempt: string) => void): void
-    EventsEmit(name: string, attempt: string, unconfirmed: boolean): void
+    EventsEmit(name: string, attempt: string, unconfirmedLibrary: boolean, pendingDanmaku?: boolean): void
   } }).runtime
   if (!runtime?.EventsOn || !runtime.EventsEmit) return
   const emit = runtime.EventsEmit.bind(runtime)
@@ -32,7 +32,9 @@ export function registerWindowClose() {
         if (active !== attempt) return
         active = undefined
         repliedAttempt = id
-        emit('jindi-window-close-ready', id, hasUnconfirmedLibrarySave())
+        const library = hasUnconfirmedLibrarySave()
+        if (hasPendingDanmakuWrite()) emit('jindi-window-close-ready', id, library, true)
+        else emit('jindi-window-close-ready', id, library)
       },
     }
     active = attempt

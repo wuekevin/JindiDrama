@@ -32,7 +32,7 @@ test.describe('06 弹幕设置', () => {
         StorageReady: async () => false,
         LocalComments: async () => '',
         LocalDanmaku: async (id: string, ep: number) => JSON.parse(localStorage.getItem(key(id, ep)) ?? '[]'),
-        SendLocalDanmaku: async (id: string, ep: number, offsetMs: number, text: string) => {
+        SendLocalDanmakuOnce: async (id: string, ep: number, offsetMs: number, text: string) => {
           if (rejectFirst) {
             rejectFirst = false
             throw new Error('test write failure')
@@ -55,6 +55,181 @@ test.describe('06 弹幕设置', () => {
     await expect(item).toBeVisible()
     await page.reload()
     await expect(item).toBeVisible()
+  })
+  test('desktop retries a committed danmaku without inserting it again', async ({ page }) => {
+    await page.addInitScript(() => {
+      const key = 'jd-test-danmaku-receipts'
+      const read = () => JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{
+        id: number; drama: string; episode: number; offsetMs: number; text: string; request?: string
+      }>
+      let rejectFirst = true
+      async function save(drama: string, episode: number, offsetMs: number, text: string, request?: string) {
+        const rows = read()
+        const matching = request && rows.find((row) => row.request === request)
+        if (matching) {
+          if (matching.drama !== drama || matching.episode !== episode || matching.text !== text || matching.offsetMs !== offsetMs) {
+            throw new Error('Existing request belongs to a different submission')
+          }
+          return matching
+        }
+        const row = { id: rows.length + 1, drama, episode, offsetMs, text, request }
+        localStorage.setItem(key, JSON.stringify([...rows, row]))
+        if (rejectFirst) {
+          rejectFirst = false
+          throw new Error('SQLite committed but bridge acknowledgement was lost')
+        }
+        return row
+      }
+      Object.assign(window, { go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDanmaku: async (drama: string, episode: number) => read().filter((row) => row.drama === drama && row.episode === episode),
+        SendLocalDanmaku: save,
+        SendLocalDanmakuOnce: save,
+      } } } })
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    const sent = '确认丢失只保存一次'
+    await input.fill(sent)
+    await input.evaluate((el) => el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, isComposing: true })))
+    expect(await page.evaluate(() => localStorage.getItem('jd-test-danmaku-receipts'))).toBeNull()
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('保存失败')
+    await expect(input).toHaveValue(sent)
+    const rows = () => page.evaluate(() => JSON.parse(localStorage.getItem('jd-test-danmaku-receipts') ?? '[]'))
+    const first = await rows()
+    expect(first).toHaveLength(1)
+    await page.getByTestId('danmaku-back').click()
+    await page.getByRole('button', { name: '弹幕设置', exact: true }).click()
+    await expect(input).toHaveValue(sent)
+    const seek = page.getByTestId('seek')
+    const originalPosition = await seek.getAttribute('aria-valuenow')
+    await seek.press('ArrowRight')
+    await expect(seek).not.toHaveAttribute('aria-valuenow', originalPosition ?? '')
+    await input.press('Enter')
+    await expect(input).toHaveValue('')
+    expect(await rows()).toEqual(first)
+
+    await input.fill(sent)
+    await input.press('Enter')
+    await expect(input).toHaveValue('')
+    const both = await rows()
+    expect(both).toHaveLength(2)
+    expect(both[1].request).not.toBe(both[0].request)
+    expect(both[1].offsetMs).not.toBe(both[0].offsetMs)
+
+    await input.fill('只属于第32集的草稿')
+    await page.evaluate(() => { location.hash = '/watch/d1/31?panel=danmaku&paused' })
+    await expect(input).toHaveValue('')
+    await input.fill(sent)
+    await input.press('Enter')
+    await expect(input).toHaveValue('')
+    const otherEpisode = (await rows()).at(-1)
+    expect(otherEpisode).toMatchObject({ episode: 31, text: sent })
+    expect(otherEpisode.request).not.toBe(both[0].request)
+    await page.evaluate(() => { location.hash = '/watch/d1/32?panel=danmaku&paused' })
+    await expect(input).toHaveValue('只属于第32集的草稿')
+  })
+
+  test('desktop close waits for a pending danmaku acknowledgement', async ({ page }) => {
+    await page.addInitScript(() => {
+      let close: (attempt: string) => void
+      let deadline: (attempt: string) => void
+      let release: () => void
+      Object.assign(window, {
+        runtime: {
+          EventsOn: (name: string, listener: (attempt: string) => void) => {
+            if (name === 'jindi-before-window-close') close = listener
+            if (name === 'jindi-window-close-deadline') deadline = listener
+          },
+          EventsEmit: (name: string, attempt: string, _library: boolean, danmaku: boolean) => {
+            if (name === 'jindi-window-close-ready') sessionStorage.setItem('danmaku-close-ready', `${attempt}:${Boolean(danmaku)}`)
+          },
+        },
+        go: { app: { App: {
+          StorageReady: async () => false,
+          LocalComments: async () => '',
+          LocalDanmaku: async () => [],
+          SendLocalDanmakuOnce: async (_drama: string, _episode: number, offsetMs: number, text: string) => {
+            sessionStorage.setItem('danmaku-send-started', 'yes')
+            await new Promise<void>((resolve) => { release = resolve })
+            return { id: 5, offsetMs, text }
+          },
+        } } },
+      })
+      window.addEventListener('danmaku-test-close', (event) => close((event as CustomEvent<string>).detail))
+      window.addEventListener('danmaku-test-deadline', () => deadline('second'))
+      window.addEventListener('danmaku-test-release', () => release())
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    await input.fill('等待写入时关闭窗口')
+    await input.press('Enter')
+    const read = (key: string) => page.evaluate((name) => sessionStorage.getItem(name), key)
+    await expect.poll(() => read('danmaku-send-started')).toBe('yes')
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('danmaku-test-close', { detail: 'first' }))
+      return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+    })
+    expect(await read('danmaku-close-ready')).toBeNull()
+    await page.evaluate(() => window.dispatchEvent(new Event('danmaku-test-release')))
+    await expect.poll(() => read('danmaku-close-ready')).toBe('first:false')
+    await expect(input).toHaveValue('')
+    await page.evaluate(() => sessionStorage.removeItem('danmaku-send-started'))
+    await input.fill('达到关窗期限仍在保存')
+    await input.press('Enter')
+    await expect.poll(() => read('danmaku-send-started')).toBe('yes')
+    await page.evaluate(() => {
+      window.dispatchEvent(new CustomEvent('danmaku-test-close', { detail: 'second' }))
+      window.dispatchEvent(new Event('danmaku-test-deadline'))
+    })
+    await expect.poll(() => read('danmaku-close-ready')).toBe('second:true')
+    await page.evaluate(() => window.dispatchEvent(new Event('danmaku-test-release')))
+  })
+
+  test('a missing bridge callback leaves the same danmaku available to retry', async ({ page }) => {
+    await page.addInitScript(() => {
+      const timeout = window.setTimeout.bind(window)
+      Object.defineProperty(window, 'setTimeout', {
+        value: (handler: TimerHandler, ms?: number, ...args: unknown[]) => timeout(handler, ms === 8000 ? 100 : ms, ...args),
+      })
+      let request: string | undefined
+      let closeWindow: (attempt: string) => void
+      window.addEventListener('danmaku-timeout-test-close', () => closeWindow('after-timeout'))
+      Object.assign(window, {
+        runtime: {
+          EventsOn: (name: string, listener: (attempt: string) => void) => {
+            if (name === 'jindi-before-window-close') closeWindow = listener
+          },
+          EventsEmit: (name: string, attempt: string, _library: boolean, pending?: boolean) => {
+            if (name === 'jindi-window-close-ready') sessionStorage.setItem('danmaku-timeout-close', `${attempt}:${pending}`)
+          },
+        },
+        go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDanmaku: async () => [],
+        SendLocalDanmakuOnce: async (_drama: string, _episode: number, offsetMs: number, text: string, id: string) => {
+          if (!request) {
+            request = id
+            await new Promise(() => {})
+          }
+          if (request !== id) throw new Error('Unexpected new request')
+          return { id: 6, offsetMs, text }
+        },
+      } } } })
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    await input.fill('没有返回回执的弹幕')
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('保存失败')
+    await expect(input).toHaveValue('没有返回回执的弹幕')
+    await page.evaluate(() => window.dispatchEvent(new Event('danmaku-timeout-test-close')))
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem('danmaku-timeout-close'))).toBe('after-timeout:true')
+    await input.press('Enter')
+    await expect(input).toHaveValue('')
   })
   test('settings persist after reload', async ({ page }) => { await page.getByTestId('dm-size').fill('20'); await page.reload(); await expect(page.getByTestId('dm-size')).toHaveValue('20') })
   test('back returns to player', async ({ page }) => { await page.getByTestId('danmaku-back').click(); await expect(page.getByTestId('page-watch')).toBeVisible() })

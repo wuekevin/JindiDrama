@@ -100,7 +100,7 @@ func (a *App) CompareAndSaveLocalComments(dramaID string, episode int, expected,
 	if a.store == nil {
 		return "", ErrNoStore
 	}
-	if (expected != "" && !isCommentToken(expected, 64)) || !isCommentToken(writeID, 32) {
+	if (expected != "" && !validLocalWriteID(expected, 64)) || !validLocalWriteID(writeID, 32) {
 		return "", errInvalidLocalComments
 	}
 	if err := validateLocalCommentSnapshot(snapshot); err != nil {
@@ -112,7 +112,7 @@ func (a *App) CompareAndSaveLocalComments(dramaID string, episode int, expected,
 	return a.store.CompareAndSaveLocalComments(dramaID, episode, expected, snapshot, writeID)
 }
 
-func isCommentToken(value string, length int) bool {
+func validLocalWriteID(value string, length int) bool {
 	if len(value) != length {
 		return false
 	}

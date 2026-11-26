@@ -152,12 +152,27 @@ const (
 	windowCloseCanceledEvent = "jindi-window-close-canceled"
 )
 
-func parseWindowCloseResponse(id string, data []any) (unconfirmed, ok bool) {
-	if len(data) != 2 || data[0] != id {
-		return false, false
+type pendingWindowWrites struct {
+	library bool
+	danmaku bool
+}
+
+func parseWindowCloseResponse(id string, data []any) (pendingWindowWrites, bool) {
+	if (len(data) != 2 && len(data) != 3) || data[0] != id {
+		return pendingWindowWrites{}, false
 	}
-	unconfirmed, ok = data[1].(bool)
-	return
+	library, ok := data[1].(bool)
+	if !ok {
+		return pendingWindowWrites{}, false
+	}
+	if len(data) == 2 {
+		return pendingWindowWrites{library: library}, true
+	}
+	danmaku, ok := data[2].(bool)
+	if !ok {
+		return pendingWindowWrites{}, false
+	}
+	return pendingWindowWrites{library: library, danmaku: danmaku}, true
 }
 
 // PrepareWindowClose gives the WebView a bounded opportunity to finish local writes.
@@ -205,11 +220,11 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 		}
 		flush := func() {
 			runtime.EventsOn(ctx, windowCloseReadyEvent, func(data ...any) {
-				unconfirmed, ok := parseWindowCloseResponse(id, data)
+				pending, ok := parseWindowCloseResponse(id, data)
 				if !ok {
 					return
 				}
-				if !unconfirmed {
+				if !pending.library && !pending.danmaku {
 					finish(waiting)
 					return
 				}
@@ -218,7 +233,7 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 				}
 
 				runtime.EventsOff(ctx, windowCloseReadyEvent)
-				if confirmUnsavedLibraryQuit(ctx) {
+				if confirmUnsavedQuit(ctx, pending) {
 					finish(confirming)
 					return
 				}
@@ -252,16 +267,26 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 	}
 }
 
-func confirmUnsavedLibraryQuit(ctx context.Context) bool {
+func confirmUnsavedQuit(ctx context.Context, pending pendingWindowWrites) bool {
 	// Wails maps Windows question dialogs to the system's localized Yes/No.
 	quit, keepEditing := "Yes", "No"
 	if goruntime.GOOS == "darwin" {
 		quit, keepEditing = "仍然退出", "继续编辑"
 	}
+	title := "收藏或历史尚未保存"
+	message := "收藏或观看历史的改动尚未保存，退出后可能丢失。仍然退出吗？"
+	if pending.danmaku {
+		title = "正在保存弹幕"
+		message = "弹幕还未收到保存回执，退出后可能丢失。仍然退出吗？"
+		if pending.library {
+			title = "仍有本地内容尚未确认保存"
+			message = "收藏或观看历史的改动及弹幕尚未确认保存，退出后可能丢失。仍然退出吗？"
+		}
+	}
 	selected, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
-		Title:         "收藏或历史尚未保存",
-		Message:       "收藏或观看历史的改动尚未保存，退出后可能丢失。仍然退出吗？",
+		Title:         title,
+		Message:       message,
 		Buttons:       []string{quit, keepEditing},
 		DefaultButton: keepEditing,
 		CancelButton:  keepEditing,

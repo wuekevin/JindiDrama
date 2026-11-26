@@ -18,7 +18,7 @@ CheckUpdate ChooseCacheDirectory ChooseLicensedDirectory ClearHistory ClearLicen
 Favorites GetSetting HideWindowToTray History Home HomeFeed LicensedCatalog LicensedConfiguration LocalComments LocalCommentsState LocalDanmaku LocalEpisodeLiked LogEvent MarkFrontendReady
 OpenReleasePage ProviderName RecordHistory ReleaseCatalogPlayback RemoveHistory ResetCacheDirectory ResolvePlayback RestoreLibraryBackup SaveFavorites
 SaveLibraryChanges SaveLocalComments SaveSearchHistory SaveSearchHistoryRevision SaveSetting Search SearchHistory SearchHistoryState
-SendLocalDanmaku SetAutostart SetLocalEpisodeLiked SetUpdateChannel SetWindowCloseAction StorageReady UpdateChannel WindowCloseAction WindowTrayAvailable
+SendLocalDanmaku SendLocalDanmakuOnce SetAutostart SetLocalEpisodeLiked SetUpdateChannel SetWindowCloseAction StorageReady UpdateChannel WindowCloseAction WindowTrayAvailable
 `)
 	appType := reflect.TypeOf((*App)(nil))
 	got := make([]string, appType.NumMethod())

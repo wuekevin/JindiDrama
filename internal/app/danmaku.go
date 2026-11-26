@@ -17,6 +17,17 @@ func (a *App) LocalDanmaku(dramaID string, episode int) ([]sqlite.LocalDanmaku, 
 }
 
 func (a *App) SendLocalDanmaku(dramaID string, episode int, offsetMS int64, text string) (sqlite.LocalDanmaku, error) {
+	return a.sendLocalDanmaku(dramaID, episode, offsetMS, text, "")
+}
+
+func (a *App) SendLocalDanmakuOnce(dramaID string, episode int, offsetMS int64, text, requestID string) (sqlite.LocalDanmaku, error) {
+	if !validLocalWriteID(requestID, 32) {
+		return sqlite.LocalDanmaku{}, errors.New("弹幕请求标识无效")
+	}
+	return a.sendLocalDanmaku(dramaID, episode, offsetMS, text, requestID)
+}
+
+func (a *App) sendLocalDanmaku(dramaID string, episode int, offsetMS int64, text, requestID string) (sqlite.LocalDanmaku, error) {
 	if a.store == nil {
 		return sqlite.LocalDanmaku{}, ErrNoStore
 	}
@@ -26,6 +37,9 @@ func (a *App) SendLocalDanmaku(dramaID string, episode int, offsetMS int64, text
 	}
 	if err := a.validateInteractionEpisode(dramaID, episode); err != nil {
 		return sqlite.LocalDanmaku{}, err
+	}
+	if requestID != "" {
+		return a.store.AddLocalDanmakuOnce(dramaID, episode, offsetMS, text, requestID)
 	}
 	return a.store.AddLocalDanmaku(dramaID, episode, offsetMS, text)
 }

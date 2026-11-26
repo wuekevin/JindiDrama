@@ -1,5 +1,7 @@
 package sqlite
 
+import "errors"
+
 type LocalDanmaku struct {
 	ID       int64  `json:"id"`
 	OffsetMS int64  `json:"offsetMs"`
@@ -30,4 +32,34 @@ func (s *Store) AddLocalDanmaku(dramaID string, episode int, offsetMS int64, tex
 	}
 	id, err := result.LastInsertId()
 	return LocalDanmaku{ID: id, OffsetMS: offsetMS, Text: text}, err
+}
+
+// AddLocalDanmakuOnce returns the original row when the same request is
+// retried. A request identifier can never be reassigned to another payload.
+func (s *Store) AddLocalDanmakuOnce(dramaID string, episode int, offsetMS int64, text, requestID string) (LocalDanmaku, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return LocalDanmaku{}, err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`INSERT INTO local_danmaku(drama_id,episode,offset_ms,text,request_id) VALUES(?,?,?,?,?)
+ON CONFLICT(request_id) WHERE request_id IS NOT NULL DO NOTHING`, dramaID, episode, offsetMS, text, requestID)
+	if err != nil {
+		return LocalDanmaku{}, err
+	}
+	var saved LocalDanmaku
+	var savedDrama string
+	var savedEpisode int
+	err = tx.QueryRow(`SELECT id,drama_id,episode,offset_ms,text FROM local_danmaku WHERE request_id=?`, requestID).
+		Scan(&saved.ID, &savedDrama, &savedEpisode, &saved.OffsetMS, &saved.Text)
+	if err != nil {
+		return LocalDanmaku{}, err
+	}
+	if savedDrama != dramaID || savedEpisode != episode || saved.OffsetMS != offsetMS || saved.Text != text {
+		return LocalDanmaku{}, errors.New("弹幕请求已用于其他内容")
+	}
+	if err := tx.Commit(); err != nil {
+		return LocalDanmaku{}, err
+	}
+	return saved, nil
 }

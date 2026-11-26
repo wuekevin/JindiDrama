@@ -1,6 +1,7 @@
 import { localId } from '@/localId'
 import { loadRecoverableComments, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
+import type { DanmakuSubmission } from '@/player/danmakuDraft'
 import type { DemoQualityId } from '@/player/demoMedia'
 import { captureLibraryIntent, parseLibraryCache, replayLibraryBatch, type LibraryBatch, type LibraryCache, type LibraryReceipt, type LibraryState } from './libraryRecovery'
 import type { Capability, CapabilityState, HistoryEntry } from '@/types'
@@ -67,7 +68,7 @@ interface GoApp {
   CompareAndSaveLocalComments?(dramaId: string, episode: number, expected: string, snapshot: string, writeId: string): Promise<string>
   SaveLocalComments(dramaId: string, episode: number, snapshot: string): Promise<void>
   LocalDanmaku(dramaId: string, episode: number): Promise<LocalDanmaku[]>
-  SendLocalDanmaku(dramaId: string, episode: number, offsetMs: number, text: string): Promise<LocalDanmaku>
+  SendLocalDanmakuOnce?(dramaId: string, episode: number, offsetMs: number, text: string, requestId: string): Promise<LocalDanmaku>
   HomeFeed(): Promise<HomeFeed>
   Home?(): Promise<CatalogDrama[]>
   Capabilities?(): Promise<Partial<Record<Capability, CapabilityState>>>
@@ -195,8 +196,40 @@ export function saveLocalComments(dramaId: string, episode: number, snapshot: st
 }
 
 export const loadLocalDanmaku = (dramaId: string, episode: number) => api()?.LocalDanmaku(dramaId, episode)
-export const sendLocalDanmaku = (dramaId: string, episode: number, offsetMs: number, text: string) =>
-  api()?.SendLocalDanmaku(dramaId, episode, offsetMs, text)
+const danmakuWrites = new Set<Promise<LocalDanmaku>>()
+const danmakuCallbacks = new Map<string, Set<Promise<LocalDanmaku>>>()
+export const hasPendingDanmakuWrite = () => danmakuCallbacks.size > 0
+const danmakuReceiptTimeoutMs = 8_000
+
+export function sendLocalDanmaku(dramaId: string, episode: number, submission: DanmakuSubmission) {
+  const app = api()
+  if (!app) return
+  const { offsetMs, text, requestId } = submission
+  if (!app.SendLocalDanmakuOnce) return Promise.reject(new Error('本地弹幕发送需要新版桌面桥'))
+  const call = app.SendLocalDanmakuOnce(dramaId, episode, offsetMs, text, requestId)
+  const callbacks = danmakuCallbacks.get(requestId) ?? new Set<Promise<LocalDanmaku>>()
+  callbacks.add(call)
+  danmakuCallbacks.set(requestId, callbacks)
+  // Wails can leave the promise pending if the callback never arrives.
+  const write = new Promise<LocalDanmaku>((resolve, reject) => {
+    const timer = window.setTimeout(() => reject(new Error('本地弹幕保存回执超时')), danmakuReceiptTimeoutMs)
+    void call.then((item) => {
+      // A receipt confirms all attempts for this exact request.
+      danmakuCallbacks.delete(requestId)
+      window.clearTimeout(timer)
+      resolve(item)
+    }, (err) => {
+      callbacks.delete(call)
+      if (!callbacks.size && danmakuCallbacks.get(requestId) === callbacks) danmakuCallbacks.delete(requestId)
+      window.clearTimeout(timer)
+      reject(err)
+    })
+  })
+  danmakuWrites.add(write)
+  const settled = () => danmakuWrites.delete(write)
+  void write.then(settled, settled)
+  return write
+}
 
 export const hasLicensedLibrary = () => typeof api()?.LicensedCatalog === 'function'
 export const hasLicensedExport = () => typeof api()?.ExportLicensedEpisode === 'function'
@@ -250,7 +283,7 @@ function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
   return queued
 }
 function queuedWindowWrites() {
-  return [windowCloseSettingWrite, libraryWrites, searchWrites, localCommentWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
+  return [windowCloseSettingWrite, libraryWrites, searchWrites, localCommentWrites, ...danmakuWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
 }
 
 export async function waitForWindowWrites() {
