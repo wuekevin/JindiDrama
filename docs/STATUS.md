@@ -695,3 +695,8 @@
 
 - 苹果 CMS 适配器识别 `vod_trysee`。设置了试看时长或字段格式无效的短剧仍可浏览详情与分集，分集不可播放。申请整集播放时重新读取详情。只有新详情允许时才签发本机媒体票据。字段省略、为空或为零时仍按付费、密码和其他现有授权条件处理。[苹果 CMS 字段文档](https://github.com/magicblack/maccms10/wiki/%E6%A0%87%E7%AD%BE%E6%96%87%E6%A1%A3)
 - 旧版夹具复现了带试看字段时仍签发整集票据。修复后，Provider 验证合法零值和无效格式，应用验证从可播放切换到有试看限制时保留详情、拒发票据并保持零媒体请求。Go vet、全量测试和 App/CMS 竞态测试通过。已纳入本地候选，真实授权公网片源仍待联调。[BMad 记录](../_bmad-output/plan-e12-cms-trial-rights.md)
+
+## E12 授权 HLS 明文标记（2026-11-27）
+
+- 授权 HLS 点播接受媒体清单中的 `#EXT-X-KEY:METHOD=NONE`，并在转发时保留该标记。含密钥 URI、异常属性、主清单上的明文标记或任何加密声明的清单仍会整体拒绝。旧版在读取明文标记时返回 502。Go 转发测试证实修复后保留明文标记、正确改写分段地址，拒绝有风险的示例且不发布任何资源。[RFC 8216 §4.3.2.4](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.2.4)
+- Go vet、全量测试和 HLS 竞态测试通过。在 Apple Silicon 原生 WKWebView 从 CMS 目录打开分集，通过 Go 中转实际解码带该标记的 24 秒自制 fMP4。播放进度推进，正常退出，隔离 SQLite 完整性通过。原生构建使用隔离测试传输。首次并行构建和竞态链接遇到磁盘空间不足。清理隔离副本后串行复验。原生测试构建显式补齐 Wails 的系统框架链接参数，并用实际路径应用测试传输。实际授权公网 CMS 和跨平台原生仍待验收。[本机日志](../build/bin/qa-hls-clear-marker/native-run.log) · [BMad 记录](../_bmad-output/plan-e12-hls-clear-marker.md)

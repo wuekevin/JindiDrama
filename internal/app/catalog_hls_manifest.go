@@ -170,7 +170,7 @@ func (s *hlsManifestState) accept(line string) bool {
 		}
 		s.master = true
 		return true
-	case "#EXTINF", "#EXT-X-BYTERANGE", "#EXT-X-MAP", "#EXT-X-DISCONTINUITY",
+	case "#EXTINF", "#EXT-X-BYTERANGE", "#EXT-X-MAP", "#EXT-X-KEY", "#EXT-X-DISCONTINUITY",
 		"#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE", "#EXT-X-DISCONTINUITY-SEQUENCE",
 		"#EXT-X-PLAYLIST-TYPE", "#EXT-X-ENDLIST":
 		if s.master || !s.acceptMediaTag(tag, value, hasValue) {
@@ -238,6 +238,13 @@ func (s *hlsManifestState) acceptSegment(raw string) bool {
 
 func (s *hlsManifestState) acceptMediaTag(tag, value string, hasValue bool) bool {
 	switch tag {
+	case "#EXT-X-KEY":
+		// RFC 8216 allows only the METHOD attribute for clear segments.
+		if value != "METHOD=NONE" {
+			return false
+		}
+		s.manifest.literal(tag + ":" + value)
+		return true
 	case "#EXTINF":
 		durationText, _, comma := strings.Cut(value, ",")
 		duration, ok := parseHLSDecimal(durationText, false)

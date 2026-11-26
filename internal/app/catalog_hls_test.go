@@ -68,6 +68,7 @@ func TestCatalogHLSRewritesVariantAudioMapAndSegments(t *testing.T) {
 ../video/stream.m3u8?signature=variant
 `
 	const video = hlsVODStart + `#EXT-X-VERSION:7
+#EXT-X-KEY:METHOD=NONE
 #EXT-X-ENDLIST
 #EXT-X-MAP:URI="video.mp4?signature=payload",BYTERANGE="4@0"
 #EXT-X-BYTERANGE:3@4
@@ -128,7 +129,7 @@ video.mp4?signature=payload
 	if res.StatusCode != http.StatusOK || res.Header.Get("Access-Control-Allow-Origin") != "" ||
 		strings.Contains(body, "https:") || strings.Contains(body, "signature") ||
 		strings.Count(body, local+"2") != 3 || !strings.Contains(body, "#EXT-X-BYTERANGE:3@7\n") ||
-		!strings.HasSuffix(body, hlsVODEnd) {
+		!strings.Contains(body, "#EXT-X-KEY:METHOD=NONE\n") || !strings.HasSuffix(body, hlsVODEnd) {
 		t.Fatalf("unexpected video manifest: %d %q", res.StatusCode, body)
 	}
 	res, body = hlsTestRequest(t, http.MethodGet, origin+local+"0.m3u8", nil)
@@ -167,7 +168,11 @@ func TestCatalogHLSRejectsUnsafeManifestWithoutPublishingResources(t *testing.T)
 	for _, tc := range []struct{ name, body string }{
 		{"live without end", hlsVODStart + validSegment},
 		{"unsupported low latency", hlsVODStart + validSegment + "#EXT-X-PART:DURATION=0.5,URI=\"part.ts\"\n" + hlsVODEnd},
-		{"explicit no encryption", hlsVODStart + validSegment + "#EXT-X-KEY:METHOD=NONE\n" + hlsVODEnd},
+		{"clear with key URI", hlsVODStart + validSegment + "#EXT-X-KEY:METHOD=NONE,URI=\"https://secret.example.test/key\"\n" + hlsVODEnd},
+		{"quoted clear method", hlsVODStart + validSegment + "#EXT-X-KEY:METHOD=\"NONE\"\n" + hlsVODEnd},
+		{"clear in master", "#EXTM3U\n#EXT-X-KEY:METHOD=NONE\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nvideo.m3u8\n"},
+		{"encryption before clear", hlsVODStart + "#EXT-X-KEY:METHOD=SAMPLE-AES,URI=\"key\"\n" + validSegment +
+			"#EXT-X-KEY:METHOD=NONE\n" + hlsVODEnd},
 		{"encryption", hlsVODStart + validSegment + "#EXT-X-KEY:METHOD=AES-128,URI=\"https://secret.example.test/key\"\n" + hlsVODEnd},
 		{"variables", hlsVODStart + validSegment + "#EXT-X-DEFINE:NAME=\"upstream\",VALUE=\"secret\"\n" + hlsVODEnd},
 		{"variable reference", hlsVODStart + validSegment + "#EXTINF:1,\n{$directory}/bad.ts\n" + hlsVODEnd},
