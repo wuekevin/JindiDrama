@@ -10,6 +10,7 @@ import { formatSpeed } from '@/player/machine'
 import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
+import { observeContentWidth } from '@/layoutWidth'
 import { cacheStats, cacheClear, cacheSetLimit, hasCacheDirectoryPicker, chooseCacheDirectory, resetCacheDirectory, diagnostics, backupNow, LibraryBackupPendingError, canRestoreLibraryBackup, hasBridge, autostartEnabled, setAutostart, appVersion, type CacheStats } from '@/bindings'
 import { BaseButton, Modal } from '@/components/ui'
 import BrandLogo from '@/components/BrandLogo.vue'
@@ -296,12 +297,9 @@ onMounted(() => {
   a.applyTheme()
   refreshCache()
   if (root.value) {
-    // Measure layout width in CSS pixels. WebKit container queries can use a different width under page zoom.
-    layoutObserver = new ResizeObserver(([entry]) => {
-      const width = entry.contentRect.width
+    layoutObserver = observeContentWidth(root.value, (width) => {
       layout.value = width <= 650 ? 'compact' : width <= 1040 ? 'stacked' : 'wide'
     })
-    layoutObserver.observe(root.value)
   }
 })
 onBeforeUnmount(() => layoutObserver?.disconnect())

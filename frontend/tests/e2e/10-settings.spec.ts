@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, deferPanelResize } from './fixtures'
 
 test('desktop cache directory changes only after a confirmed choice and can be reset', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
@@ -394,6 +394,8 @@ test.describe('10 应用设置', () => {
       if (dpi === 150) {
         await page.getByTestId('dpi').press('End')
         await expect(settings).toHaveClass(/\bstacked\b/)
+        await deferPanelResize(page, 'page-settings')
+        await page.reload()
       } else {
         await page.evaluate((dpi) => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi })), dpi)
         await page.reload()
