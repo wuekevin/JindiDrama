@@ -28,6 +28,7 @@ type CatalogState = {
   dpi?: number
   shortcuts?: Record<string, string>
   holdPlaybackEpisode?: number
+  holdResume?: boolean
   home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
 const mediaURL = 'http://127.0.0.1:45671'
@@ -76,7 +77,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     let activeLookups = 0
     const closeReplies: { id: string; unconfirmed: boolean }[] = []
     const testState = {
-      calls, released, revoked, lookups, closeReplies, peakLookups: 0, failedLookups: 0, providerReads: 0, release: () => {},
+      calls, released, revoked, lookups, closeReplies, peakLookups: 0, failedLookups: 0, providerReads: 0, resumePending: false, release: () => {},
       close: () => events.get('jindi-before-window-close')?.('close-1'),
       hide: () => events.get('jindi-before-window-hide')?.(''),
       cancelClose: () => events.get('jindi-window-close-canceled')?.('close-1'),
@@ -112,6 +113,11 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       CatalogResumeIDs: async (ids: string[]) => {
         if (!libraryFixture) return []
         const catalog = await desktop.readDesktopCatalog()
+        if (catalog.holdResume) {
+          testState.resumePending = true
+          await new Promise<void>((resolve) => { testState.release = resolve })
+          testState.resumePending = false
+        }
         if (catalog.provider !== 'apple-cms') return []
         const prefix = catalog.id.slice(0, catalog.id.lastIndexOf(':') + 1)
         return ids.filter((candidate) => candidate.startsWith(prefix)).slice(0, 12)
@@ -595,6 +601,66 @@ const position = (video: ReturnType<typeof historyVideo>) => video.evaluate((med
   media.seeking ? -1 : media.currentTime,
 )
 
+const startupCMSHistory: HistoryRow = {
+  dramaId: cmsId, episode: 2, positionMs: 7345, durationMs: 24000, percent: 30,
+  episodeCountAtWatch: 3, watchedAt: 100,
+}
+
+test('CMS desktop startup restores the latest current-source bookmark paused', async ({ page }) => {
+  const otherSource = 'apple-cms:ffffffffffffffffffffffffffffffff:90071992547409931234'
+  await cmsLibraryFixture(page, [{ ...startupCMSHistory, dramaId: otherSource, watchedAt: 200 }, startupCMSHistory])
+
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/play\/2$/)
+  const video = historyVideo(page, 2)
+  await expect.poll(() => position(video)).toBeCloseTo(7.345, 2)
+  await expect(video).toHaveJSProperty('paused', true)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':2'])
+  await page.getByTestId('nav-home').click()
+  await expect(page.getByTestId('page-home')).toBeVisible()
+})
+
+test('CMS desktop startup returns home when the bookmarked episode is unavailable', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page, [startupCMSHistory])
+  desktop.catalog.available = [1, 3]
+
+  await page.goto('/')
+  await expect(page.getByTestId('page-home')).toBeVisible()
+  expect(await calls(page)).toEqual([])
+  expect(desktop.rows()).toHaveLength(1)
+
+  await page.goto(cmsRoute + '/play/2')
+  await expect(page.getByText('所选分集暂不可播放。')).toBeVisible()
+})
+
+test('CMS desktop startup returns home if the initial media cannot load', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page, [startupCMSHistory])
+  await page.route('**/catalog-media/**', (route) => route.fulfill({ status: 404 }))
+  await page.goto('/')
+  await expect.poll(() => calls(page)).toEqual(['catalog:' + cmsId + ':2'])
+  await expect(page.getByTestId('page-home')).toBeVisible()
+  expect(desktop.rows()).toEqual([startupCMSHistory])
+})
+
+test('a delayed CMS desktop startup cannot replace manual navigation', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page, [startupCMSHistory])
+  desktop.catalog.holdResume = true
+  await page.goto('/')
+  await expect.poll(() => page.evaluate(() =>
+    (window as unknown as { catalogTest: { resumePending: boolean } }).catalogTest.resumePending,
+  )).toBe(true)
+  await page.getByTestId('nav-history').click()
+  await page.evaluate(() => (window as unknown as { catalogTest: { release(): void } }).catalogTest.release())
+  await expect(page).toHaveURL(/\/history$/)
+  const redirected = await page.waitForURL(/\/catalog\//, { timeout: 500 }).then(
+    () => true,
+    (error: Error) => { if (error.name !== 'TimeoutError') throw error; return false },
+  )
+  expect(redirected).toBe(false)
+  await expect(page.getByTestId('page-history')).toBeVisible()
+  expect(await calls(page)).toEqual([])
+})
+
 test('CMS shortcut bindings operate the native video and leave local editors alone', async ({ page }, testInfo) => {
   const desktop = await cmsLibraryFixture(page)
   desktop.catalog.shortcuts = { playPause: 'K', fullscreen: 'G' }
@@ -828,9 +894,11 @@ test('CMS bookmark persists through detail, history, refresh and the normal wind
   }).catalogTest.closeReplies)).toEqual([{ id: 'close-1', unconfirmed: false }])
   await expect(video).toHaveJSProperty('paused', true)
   expect(JSON.stringify(desktop.rows())).not.toMatch(/catalog-media|127\.0\.0\.1|lease/)
-  await page.goto('/#/')
-  await expect(page).toHaveURL(/\/home$/)
-  await expect(page.locator('video')).toHaveCount(0)
+  await page.goto('about:blank')
+  await page.goto('/')
+  await expect(page).toHaveURL(/\/play\/2$/)
+  await expect.poll(() => position(video)).toBeCloseTo(closePosition, 2)
+  await expect(video).toHaveJSProperty('paused', true)
 })
 
 test('CMS before-hide runtime event checkpoints sub-five-second playback without pausing', async ({ page }) => {

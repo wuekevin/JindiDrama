@@ -53,6 +53,18 @@ export function playbackRoute(id: string, episode: number, autoplay = false) {
 
 type ResumeEntry = { dramaId: string; episode: number }
 let automatic: ResumeEntry[] = []
+let cmsStartup: { entry: ResumeEntry; fallback: ResumeEntry[] } | undefined
+
+export function beginCMSStartupPlayback(entry: ResumeEntry, fallback: ResumeEntry[]) {
+  cmsStartup = { entry, fallback }
+  return catalogPlaybackRoute(entry.dramaId, entry.episode)
+}
+
+export function takeCMSStartupFallback(id: string, episode: number) {
+  const startup = cmsStartup
+  cmsStartup = undefined
+  if (startup?.entry.dramaId === id && startup.entry.episode === episode) return startup.fallback
+}
 
 export function beginStartupPlayback(entries: ResumeEntry[]) {
   automatic = entries

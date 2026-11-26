@@ -542,3 +542,10 @@
 - 安装器只在写入主程序成功后创建快捷方式、注册深链和更新卸载登记。安装目录无法写入或旧程序被占用时，交互安装提示退出后重试，静默安装返回退出码 1。[NSIS 文件写入错误标记](https://nsis.sourceforge.io/Reference/File)
 - 托管 Windows 安装冒烟持有禁止写入的旧 EXE 文件句柄，验证升级退出码以及原程序、卸载器与 Run 登记，随后释放句柄重试并验证新文件的 SHA-256 与安装包一致。测试步骤覆盖 smoke 与 release。
 - 本机用 .43 的 Windows x64 便携程序编译 NSIS 安装器。7-Zip 校验通过，包内主程序和 WebView2 引导程序与原件逐字节一致。YAML 和 Windows PowerShell 语法通过。本轮未触发 GitHub 打包，锁文件与释放后的原生验收待 Windows 运行器执行。[BMad 记录](../_bmad-output/plan-e13-windows-locked-upgrade.md)
+
+## E10 苹果 CMS 启动续看（2026-11-27）
+
+- 桌面「启动时 → 上次观看」现在从已保存记录中核对当前苹果 CMS 片源。选中未看完的同片源分集后按原进度暂停打开。若分集不可用、票据不可用或恢复前媒体加载失败，则回退到原有启动页，已保存进度保留。手动浏览或播放继续显示对应的错误和重试入口。
+- Chromium 覆盖其他片源有更新记录、暂停恢复、缺集、媒体 404、迟到的归属查询，以及正常关窗后重开续播。复现时旧实现落在首页，修复后打开正确分集。原有演示及本地启动逻辑随设置和播放回归复验。
+- Apple Silicon 原生 Wails 用本机合成片源和两个来源的独立 SQLite 历史启动，WKWebView 在第 2 集暂停恢复到 7345 毫秒。片源详情返回 503 时回到目录，未发起媒体请求。两轮均保留两条历史，退出后的 SQLite 完整性通过。
+- 前端生产构建、122 项 Vitest 和 143 项设置、目录及播放 Playwright 通过。实际授权公网源和 Windows、Intel Mac 当前批次原生仍待验收。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e10-cms-startup-resume.md)

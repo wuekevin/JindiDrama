@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import type Hls from 'hls.js'
 import { isAppleCMSDramaId } from '@/catalogIdentity'
@@ -17,7 +17,7 @@ import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { usePlaybackShortcuts } from '@/player/usePlaybackShortcuts'
-import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
+import { availableCatalogEpisode, beginStartupPlayback, catalogPlaybackRoute, detailRoute, takeCMSStartupFallback } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useCommentStore } from '@/stores/comments'
 import { useSettingsStore } from '@/stores/player'
@@ -116,6 +116,19 @@ let nextEpisode: Advance | undefined
 const autoStart = shallowRef<AutoStart>()
 let manualNavigation: ReturnType<typeof router.push> | undefined
 let closing = false
+let startupFallback: ReturnType<typeof takeCMSStartupFallback>
+
+function fallbackFromStartup() {
+  const fallback = startupFallback
+  startupFallback = undefined
+  if (fallback && !closing && !manualNavigation) void router.replace(beginStartupPlayback(fallback))
+}
+
+function finishStartup(current: MediaHistory) {
+  if (!current.pending && !current.restoring && current.media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    startupFallback = undefined
+  }
+}
 
 function isPlaybackRoute(path: string, current: number) {
   return route.name === 'catalog-play' && route.path === path && generation === current
@@ -152,10 +165,16 @@ function restoreHistory(current: MediaHistory) {
   }
 }
 
+function onStartupData(event: Event) {
+  const current = currentHistory(event)
+  if (current) finishStartup(current)
+}
+
 function onPlayable(event: Event) {
   const current = currentHistory(event)
   if (!current) return
   restoreHistory(current)
+  finishStartup(current)
   syncDanmakuClock()
   startWhenReady(current)
 }
@@ -186,6 +205,7 @@ function onPlaying(event: Event) {
     return
   }
   autoStart.value = undefined
+  startupFallback = undefined
   playbackNotice.value = ''
   watchPlaybackProgress(current)
   current.endHandled = false
@@ -210,6 +230,7 @@ function onSeeked(event: Event) {
   if (current.restoring) {
     current.restoring = false
     current.lastPosition = current.media.currentTime
+    finishStartup(current)
     startWhenReady(current)
     return
   }
@@ -431,6 +452,7 @@ function expireTicket() {
   sources.value = []
   state.value = 'error'
   error.value = '播放票据已过期，请重试。'
+  fallbackFromStartup()
 }
 
 function watchExpiry(current: number) {
@@ -455,6 +477,7 @@ async function load() {
   playbackPath = path
   const targetId = id.value
   const targetEpisode = episode.value
+  startupFallback = takeCMSStartupFallback(targetId, targetEpisode)
   clearTimeout(expiryTimer)
   stopMedia()
   releaseLease()
@@ -469,6 +492,7 @@ async function load() {
     autoStart.value = undefined
     error.value = automatic ? '无法播放下一集。' + message : message
     state.value = 'error'
+    fallbackFromStartup()
   }
   try {
     const result = await getDetail(targetId, 'normal', true)
@@ -529,6 +553,7 @@ function failMedia(media: HTMLVideoElement, choice: MediaSource) {
   autoStart.value = undefined
   sources.value = []
   releaseLease()
+  fallbackFromStartup()
 }
 
 function mediaError(event: Event) {
@@ -626,6 +651,7 @@ async function toggleLocalPanel(panel: LocalPanel) {
   else panelRegion.value?.focus()
 }
 
+onBeforeRouteLeave(() => { startupFallback = undefined })
 watch(() => route.path, () => {
   localPanel.value = undefined
   void load()
@@ -657,7 +683,7 @@ onBeforeUnmount(() => {
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline :preload="autoStart ? 'auto' : 'metadata'"
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="onLoadedMetadata"
-        @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
+        @loadeddata="onStartupData" @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
         @play="onPlay" @playing="onPlaying" @volumechange="onMediaPreferenceChange" @ratechange="onMediaPreferenceChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
       <DanmakuLayer v-if="canInteract && video && mine.length && state === 'ready'" :items="mine" :time="mediaTime" :duration="mediaDuration" />
     </div>
