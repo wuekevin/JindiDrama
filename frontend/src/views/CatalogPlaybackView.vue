@@ -8,7 +8,10 @@ import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { ErrorState } from '@/components/ui'
 import CommentPanel from '@/components/player/CommentPanel.vue'
+import DanmakuLayer from '@/components/player/DanmakuLayer.vue'
+import DanmakuSettings from '@/components/player/DanmakuSettings.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
+import { useLocalEpisodeDanmaku } from '@/composables/useLocalEpisodeDanmaku'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
@@ -41,12 +44,36 @@ const state = ref<'loading' | 'ready' | 'error'>('loading')
 const error = ref('')
 const playbackNotice = ref('')
 const detail = ref<DramaDetail>()
-const canComment = computed(() => detail.value?.appleCMS && detail.value.catalogPlayback &&
-  !!availableCatalogEpisode(detail.value, episode.value))
-const showComments = ref(false)
+const canInteract = computed(() => !!detail.value?.appleCMS && detail.value.catalogPlayback === true &&
+  detail.value.drama.id === id.value && !!availableCatalogEpisode(detail.value, episode.value))
+type LocalPanel = 'comments' | 'danmaku'
+const localPanel = ref<LocalPanel>()
 const commentTrigger = ref<HTMLButtonElement>()
-const commentRegion = ref<HTMLElement>()
+const danmakuTrigger = ref<HTMLButtonElement>()
+const panelRegion = ref<HTMLElement>()
 const video = ref<HTMLVideoElement>()
+const { mine, danmakuDraft, sendDm, recoveringDanmaku, pendingDanmakuRecovery, retryDanmakuRecovery } =
+  useLocalEpisodeDanmaku(id, episode, () => canInteract.value)
+const mediaTime = ref(0)
+const mediaDuration = ref(0)
+let danmakuFrame = 0
+const currentPosition = () => video.value?.currentTime ?? 0
+
+function syncDanmakuClock() {
+  cancelAnimationFrame(danmakuFrame)
+  const media = video.value
+  if (!canInteract.value || !media) {
+    mediaTime.value = 0
+    mediaDuration.value = 0
+    return
+  }
+  mediaTime.value = media.currentTime
+  mediaDuration.value = Number.isFinite(media.duration) ? media.duration : 0
+  if (!media.paused && !media.ended && mine.value.length && settings.danmaku.enabled) {
+    danmakuFrame = requestAnimationFrame(syncDanmakuClock)
+  }
+}
+watch([video, () => mine.value.length, () => settings.danmaku.enabled], syncDanmakuClock)
 const sources = ref<MediaSource[]>([])
 const selected = ref(0)
 const source = computed(() => sources.value[selected.value])
@@ -127,6 +154,7 @@ function onPlayable(event: Event) {
   const current = currentHistory(event)
   if (!current) return
   restoreHistory(current)
+  syncDanmakuClock()
   startWhenReady(current)
 }
 
@@ -176,6 +204,7 @@ function onSeeking(event: Event) {
 function onSeeked(event: Event) {
   const current = currentHistory(event)
   if (!current || current.media.seeking || closing) return
+  syncDanmakuClock()
   if (current.restoring) {
     current.restoring = false
     current.lastPosition = current.media.currentTime
@@ -222,6 +251,7 @@ function saveProgress(force: boolean, failed = false) {
 function onProgress(event: Event) {
   const current = currentHistory(event)
   if (!closing && current) {
+    syncDanmakuClock()
     watchPlaybackProgress(current)
     saveProgress(event.type !== 'timeupdate')
   }
@@ -229,7 +259,10 @@ function onProgress(event: Event) {
 
 function onPlay(event: Event) {
   const current = currentHistory(event)
-  if (current) watchPlaybackProgress(current)
+  if (current) {
+    syncDanmakuClock()
+    watchPlaybackProgress(current)
+  }
 }
 
 function watchPlaybackProgress(current: MediaHistory) {
@@ -255,6 +288,7 @@ function watchPlaybackProgress(current: MediaHistory) {
 function onEnded(event: Event) {
   const current = currentHistory(event)
   if (!current || !current.media.ended || current.endHandled || current.terminalSeek) return
+  syncDanmakuClock()
   saveProgress(true)
   if (current.progress?.percent !== 100) return
   current.endHandled = true
@@ -304,6 +338,7 @@ function selectEpisode(index: number) {
 }
 
 function stopMedia(failed = false) {
+  cancelAnimationFrame(danmakuFrame)
   clearTimeout(stallTimer)
   stallTimer = undefined
   syncMediaPreferences()
@@ -534,19 +569,23 @@ function onMediaPreferenceChange(event: Event) {
   if (event.currentTarget === preferenceMedia) syncMediaPreferences()
 }
 
-async function toggleComments() {
-  showComments.value = !showComments.value
-  if (!showComments.value) {
-    commentTrigger.value?.focus()
+async function toggleLocalPanel(panel: LocalPanel) {
+  if (localPanel.value === panel) {
+    localPanel.value = undefined
+    const trigger = panel === 'comments' ? commentTrigger : danmakuTrigger
+    trigger.value?.focus()
     return
   }
-  void comments.open(id.value, episode.value)
+  localPanel.value = panel
+  if (panel === 'comments') void comments.open(id.value, episode.value)
   await nextTick()
-  commentRegion.value?.querySelector<HTMLElement>('[data-testid="comment-panel"]')?.focus()
+  if (localPanel.value !== panel) return
+  if (panel === 'comments') panelRegion.value?.querySelector<HTMLElement>('[data-testid="comment-panel"]')?.focus()
+  else panelRegion.value?.focus()
 }
 
 watch(() => route.path, () => {
-  showComments.value = false
+  localPanel.value = undefined
   void load()
 }, { immediate: true })
 window.addEventListener('pagehide', onWindowClose)
@@ -578,6 +617,7 @@ onBeforeUnmount(() => {
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="onLoadedMetadata"
         @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
         @play="onPlay" @playing="onPlaying" @volumechange="onMediaPreferenceChange" @ratechange="onMediaPreferenceChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
+      <DanmakuLayer v-if="canInteract && video && mine.length && state === 'ready'" :items="mine" :time="mediaTime" :duration="mediaDuration" />
     </div>
     <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
@@ -585,10 +625,18 @@ onBeforeUnmount(() => {
         :aria-current="item.index === episode ? 'page' : undefined"
         @click="selectEpisode(item.index)">第{{ item.index }}集</button>
     </nav>
-    <div v-if="canComment" class="local-comments">
-      <button ref="commentTrigger" type="button" :aria-expanded="showComments" @click="toggleComments">本机评论</button>
-      <div v-if="showComments" ref="commentRegion" class="local-comment-panel">
-        <CommentPanel local-only @close="toggleComments" />
+    <div v-if="canInteract" class="local-interactions">
+      <div class="local-actions">
+        <button ref="commentTrigger" type="button" :aria-expanded="localPanel === 'comments'" @click="toggleLocalPanel('comments')">本机评论</button>
+        <button ref="danmakuTrigger" type="button" :aria-expanded="localPanel === 'danmaku'" @click="toggleLocalPanel('danmaku')">本机弹幕</button>
+      </div>
+      <div v-if="localPanel === 'comments'" ref="panelRegion" class="local-comment-panel">
+        <CommentPanel local-only @close="toggleLocalPanel('comments')" />
+      </div>
+      <div v-else-if="localPanel === 'danmaku'" ref="panelRegion" class="local-danmaku-panel" tabindex="-1" @keydown.esc="toggleLocalPanel('danmaku')">
+        <DanmakuSettings local-only :time="mediaTime" :current-time="currentPosition" :draft="danmakuDraft"
+          :send-danmaku="sendDm" :local-items="mine" :pending-recovery="pendingDanmakuRecovery"
+          :recovering="recoveringDanmaku" :retry-recovery="retryDanmakuRecovery" />
       </div>
     </div>
   </article>
@@ -599,14 +647,15 @@ onBeforeUnmount(() => {
 .back { display: inline-flex; align-items: center; gap: 4px; justify-self: start; color: var(--c-text-2); }
 h1 { font-size: 28px; overflow-wrap: anywhere; }
 .episode-label { color: var(--c-text-2); }
-.stage { min-height: 260px; display: grid; place-items: center; border-radius: 18px; overflow: hidden; background: var(--c-surface-solid); }
+.stage { --danmaku-top: 8px; --danmaku-bottom: 60px; position: relative; min-height: 260px; display: grid; place-items: center; border-radius: 18px; overflow: hidden; background: var(--c-surface-solid); }
 video { display: block; width: 100%; max-width: 960px; max-height: 65vh; background: #000; }
 .loading { width: 100%; min-height: 360px; }
-.episode-nav { display: flex; gap: 10px; flex-wrap: wrap; }
-.episode-nav button, .local-comments > button {
+.episode-nav, .local-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.episode-nav button, .local-actions button {
   border-radius: var(--r-pill); min-height: 38px; padding: 0 16px; background: var(--c-surface-hover);
   &[aria-current='page'] { background: var(--g-accent); color: #fff; }
   &:disabled { opacity: .45; cursor: not-allowed; }
 }
 .local-comment-panel { width: min(100%, 640px); height: min(560px, 75vh); min-height: 290px; margin-top: 12px; }
+.local-danmaku-panel { width: min(100%, 640px); height: min(660px, 75vh); min-height: 290px; margin-top: 12px; }
 </style>

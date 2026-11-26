@@ -10,6 +10,8 @@ import { useToastStore } from '@/stores/toast'
 import { isBlocked, type Area, type DanmakuItem, type Density } from '@/player/danmaku'
 const props = defineProps<{
   time: number
+  localOnly?: boolean
+  currentTime?: () => number
   draft: DanmakuDraft
   localItems: readonly DanmakuItem[]
   pendingRecovery: boolean
@@ -35,7 +37,7 @@ async function send(event?: KeyboardEvent) {
   if (isBlocked(t, d.blocked)) { toast.push('包含屏蔽关键词，发送后你也看不到这条弹幕', 'error'); return }
   const attempt = draft.attempt?.text === t ? draft.attempt : {
     text: t,
-    offsetMs: Math.round(props.time * 1000),
+    offsetMs: Math.round((props.currentTime?.() ?? props.time) * 1000),
     requestId: localId(),
   }
   draft.attempt = attempt
@@ -60,21 +62,21 @@ async function send(event?: KeyboardEvent) {
 const pct = (v: number, lo: number, hi: number) => ((v - lo) / (hi - lo)) * 100
 </script>
 <template>
-  <aside class="ds on-dark" data-testid="danmaku-settings" aria-label="弹幕设置">
-    <h2><MessageSquareText :size="26" color="#ff6a4d" />弹幕设置</h2>
+  <aside class="ds on-dark" data-testid="danmaku-settings" :aria-label="localOnly ? '本机弹幕' : '弹幕设置'">
+    <h2><MessageSquareText :size="26" color="#ff6a4d" />{{ localOnly ? '本机弹幕' : '弹幕设置' }}</h2>
     <div class="row sw"><Eye :size="22" /><div><b>弹幕开关</b><small>开启后，视频中将显示弹幕</small></div><button class="tg" :class="{ on: d.enabled }" role="switch" :aria-checked="d.enabled" aria-label="弹幕开关" data-testid="dm-enabled" @click="d.enabled = !d.enabled"><i /></button></div>
     <div class="card"><h4><Scan :size="18" />显示区域</h4>
       <div class="areas"><button v-for="a in areas" :key="a.k" :class="{ on: d.area === a.k }" :data-testid="`area-${a.k}`" :aria-pressed="d.area === a.k" @click="d.area = a.k"><span class="ico" :class="a.k"><i /><i /><i /></span><Check v-if="d.area === a.k" :size="14" class="ck" /><em>{{ a.l }}</em></button></div>
       <label class="sl"><span>透明度</span><input v-model.number="d.opacity" type="range" min="20" max="100" data-testid="dm-opacity" :style="{ '--p': pct(d.opacity, 20, 100) + '%' }" /><em>{{ d.opacity }}%</em></label>
       <label class="sl"><span>字号</span><input v-model.number="d.fontSize" type="range" min="12" max="28" data-testid="dm-size" :style="{ '--p': pct(d.fontSize, 12, 28) + '%' }" /><em>{{ d.fontSize }}px</em></label>
       <label class="sl"><span>速度</span><input v-model.number="d.speed" type="range" min="0.5" max="2" step="0.25" data-testid="dm-speed" :style="{ '--p': pct(d.speed, 0.5, 2) + '%' }" /><em>{{ d.speed.toFixed(1) }}x</em></label>
-      <label class="sl"><span>密度</span><input type="range" min="0" max="2" :value="DENS.indexOf(d.density)" data-testid="dm-density" :style="{ '--p': DENS.indexOf(d.density) * 50 + '%' }" @input="d.density = DENS[+($event.target as HTMLInputElement).value]" /><em>{{ DL[d.density] }}</em></label>
+      <label v-if="!localOnly" class="sl"><span>密度</span><input type="range" min="0" max="2" :value="DENS.indexOf(d.density)" data-testid="dm-density" :style="{ '--p': DENS.indexOf(d.density) * 50 + '%' }" @input="d.density = DENS[+($event.target as HTMLInputElement).value]" /><em>{{ DL[d.density] }}</em></label>
     </div>
-    <div class="row sw"><Flame :size="22" color="#ff6a3d" fill="#ff6a3d" /><div><b>仅看热评弹幕</b><small>仅显示高赞、精选的优质弹幕</small></div><button class="tg" :class="{ on: d.hotOnly }" role="switch" :aria-checked="d.hotOnly" aria-label="仅看热评弹幕" data-testid="dm-hot" @click="d.hotOnly = !d.hotOnly"><i /></button></div>
+    <div v-if="!localOnly" class="row sw"><Flame :size="22" color="#ff6a3d" fill="#ff6a3d" /><div><b>仅看热评弹幕</b><small>仅显示高赞、精选的优质弹幕</small></div><button class="tg" :class="{ on: d.hotOnly }" role="switch" :aria-checked="d.hotOnly" aria-label="仅看热评弹幕" data-testid="dm-hot" @click="d.hotOnly = !d.hotOnly"><i /></button></div>
     <div class="card kw"><div class="kh"><ShieldCheck :size="22" /><div><b>屏蔽关键词</b><small>包含以下关键词的弹幕将不再显示</small></div><button class="add" data-testid="kw-add-btn" @click="adding = !adding"><Plus :size="14" />添加</button></div>
       <div v-if="adding" class="addrow"><input v-model="word" placeholder="输入要屏蔽的关键词" data-testid="kw-input" @keydown.enter="addWord" /><button data-testid="kw-confirm" @click="addWord">确定</button></div>
       <ul><li v-for="w in d.blocked" :key="w" data-testid="kw">{{ w }}<button :aria-label="`移除${w}`" @click="s.removeBlock(w)"><X :size="12" /></button></li></ul></div>
-    <div class="send"><h4><MessageSquareText :size="22" />发送弹幕</h4><div class="srow"><div class="ip"><input v-model="draft.text" placeholder="发一条弹幕，和大家一起聊剧情吧~" aria-label="弹幕内容" data-testid="dm-input" @keydown.enter="send" /><Smile :size="22" /></div><button class="go" data-testid="dm-send" :disabled="draft.sending" @click="send()">发送</button></div>
+    <div class="send"><h4><MessageSquareText :size="22" />发送弹幕</h4><div class="srow"><div class="ip"><input v-model="draft.text" :placeholder="localOnly ? '在当前播放位置添加弹幕' : '发一条弹幕，和大家一起聊剧情吧~'" aria-label="弹幕内容" data-testid="dm-input" @keydown.enter="send" /><Smile :size="22" /></div><button class="go" data-testid="dm-send" :disabled="draft.sending" @click="send()">发送</button></div>
       <details v-if="localItems.length" class="local-log" data-testid="dm-local-log">
         <summary>本集本机弹幕</summary>
         <ul tabindex="0" aria-label="本机弹幕记录" data-player-scroll>

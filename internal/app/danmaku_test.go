@@ -1,9 +1,52 @@
 package app
 
 import (
+	"errors"
+	"net/http"
 	"path/filepath"
 	"testing"
+
+	"jindi-drama/internal/provider"
 )
+
+func TestAppleCMSLocalDanmakuRemainsLocalAndEpisodeScoped(t *testing.T) {
+	a := New()
+	client := &http.Client{Transport: catalogRoundTripper(func(*http.Request) (*http.Response, error) {
+		t.Error("local danmaku must not contact the CMS")
+		return nil, errors.New("offline")
+	})}
+	if err := configureAppleCMS(a, "https://catalog.example.test/", client); err != nil {
+		t.Fatal(err)
+	}
+	db := filepath.Join(t.TempDir(), "jindi.db")
+	if err := a.openStore(db); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+	const id = "apple-cms:c5133cb26d2d4113a54fdc9761b904fe:202603"
+	const request = "84d46f108fd048128c2c6dd0731e13d0"
+	const foreign = "apple-cms:ffffffffffffffffffffffffffffffff:202603"
+	if _, err := a.SendLocalDanmakuOnce(foreign, 1, 2500, "其他片源", request); !errors.Is(err, provider.ErrNotFound) {
+		t.Fatalf("foreign source: %v", err)
+	}
+	item, err := a.SendLocalDanmakuOnce(id, 1, 2500, "本机弹幕", request)
+	if err != nil || item.Text != "本机弹幕" || item.OffsetMS != 2500 {
+		t.Fatalf("save: %+v, %v", item, err)
+	}
+	a.close()
+	if err := a.openStore(db); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := a.SendLocalDanmakuOnce(id, 1, 2500, "本机弹幕", request); err != nil || got != item {
+		t.Fatalf("retry after reopen: %+v, %v", got, err)
+	}
+	if rows, err := a.LocalDanmaku(id, 1); err != nil || len(rows) != 1 || rows[0] != item {
+		t.Fatalf("persisted: %+v, %v", rows, err)
+	}
+	if rows, err := a.LocalDanmaku(id, 2); err != nil || len(rows) != 0 {
+		t.Fatalf("different episode: %+v, %v", rows, err)
+	}
+}
 
 func TestLocalDanmakuPersistsPerEpisode(t *testing.T) {
 	a := New()

@@ -21,6 +21,7 @@ type LibraryChanges = {
   history: HistoryRow[]
   removed: string[]
 }
+type SavedDanmaku = { id: number; offsetMs: number; text: string }
 type CatalogState = {
   id: string; provider: string; available: number[]
   playMode?: PlayMode
@@ -46,6 +47,8 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       waitForCMSDetails(): Promise<void>
       readCMSComments(id: string, episode: number): Promise<string>
       saveCMSComments(id: string, episode: number, snapshot: string): Promise<void>
+      readCMSDanmaku?(id: string, episode: number): Promise<SavedDanmaku[]>
+      saveCMSDanmaku?(id: string, episode: number, offsetMs: number, text: string, requestId: string): Promise<SavedDanmaku>
     }
     if (hls || libraryFixture) {
       // Chromium on macOS can use the system HLS decoder. Exercise MSE here.
@@ -89,6 +92,9 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       SearchHistory: async () => [],
       LocalComments: (id: string, episode: number) => desktop.readCMSComments(id, episode),
       SaveLocalComments: (id: string, episode: number, snapshot: string) => desktop.saveCMSComments(id, episode, snapshot),
+      LocalDanmaku: (id: string, episode: number) => desktop.readCMSDanmaku?.(id, episode) ?? [],
+      SendLocalDanmakuOnce: (id: string, episode: number, offset: number, text: string, requestId: string) =>
+        desktop.saveCMSDanmaku?.(id, episode, offset, text, requestId),
       GetSetting: async (key: string) => key === 'app'
         ? JSON.stringify({ startPage: '上次观看', playMode: libraryFixture ? (await desktop.readDesktopCatalog()).playMode : undefined })
         : '',
@@ -583,6 +589,52 @@ const durationMs = (video: ReturnType<typeof historyVideo>) => video.evaluate((m
 const position = (video: ReturnType<typeof historyVideo>) => video.evaluate((media: HTMLVideoElement) =>
   media.seeking ? -1 : media.currentTime,
 )
+
+test('CMS overlays local danmaku at the native media position and keeps episodes isolated', async ({ page }, testInfo) => {
+  const saved = new Map<string, SavedDanmaku[]>()
+  await page.exposeFunction('readCMSDanmaku', (id: string, episode: number) => saved.get(id + ':' + episode) ?? [])
+  await page.exposeFunction('saveCMSDanmaku', (id: string, episode: number, offsetMs: number, text: string) => {
+    const item = { id: 1, offsetMs, text }
+    saved.set(id + ':' + episode, [item])
+    return item
+  })
+  const desktop = await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(1000)
+  const seek = async (second: number) => {
+    await video.evaluate((media: HTMLVideoElement, time) => { media.currentTime = time }, second)
+    await expect.poll(() => position(video)).toBeCloseTo(second, 2)
+  }
+  await seek(3)
+  const open = page.getByRole('button', { name: '本机弹幕', exact: true })
+  await open.click()
+  const panel = page.getByTestId('danmaku-settings')
+  await expect(panel.getByTestId('dm-hot')).toHaveCount(0)
+  desktop.catalog.offline = true
+  await panel.getByTestId('dm-input').fill('苹果 CMS 的本机弹幕')
+  await panel.getByTestId('dm-send').click()
+  await expect.poll(() => saved.get(cmsId + ':1')).toEqual([{ id: 1, offsetMs: 3000, text: '苹果 CMS 的本机弹幕' }])
+  await seek(4)
+  await expect(page.getByTestId('danmaku-item')).toHaveText('苹果 CMS 的本机弹幕')
+  await expect(page.getByTestId('danmaku-item')).toBeVisible()
+  await video.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('cms-local-danmaku.png') })
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+  await panel.getByText('本集本机弹幕').click()
+  await expect(panel.getByRole('list', { name: '本机弹幕记录' })).toContainText('苹果 CMS 的本机弹幕')
+
+  desktop.catalog.offline = false
+  await page.getByRole('button', { name: '第2集' }).click()
+  await open.click()
+  await expect(panel.getByTestId('dm-local-log')).toHaveCount(0)
+  await expect(page.getByTestId('danmaku-item')).toHaveCount(0)
+  await page.getByRole('button', { name: '第1集' }).click()
+  await page.reload()
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(1000)
+  await seek(4)
+  await expect(page.getByTestId('danmaku-item')).toHaveText('苹果 CMS 的本机弹幕')
+})
 
 async function playHistoryVideo(video: ReturnType<typeof historyVideo>) {
   await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)

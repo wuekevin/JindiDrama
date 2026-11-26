@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { Star, Play, Plus, Check, Download, ThumbsUp, Share2, Flame, ChevronDown, RefreshCw } from 'lucide-vue-next'
-import { exportDemoEpisode, loadEpisodeLike, loadLocalDanmaku, recoverLocalDanmaku, saveEpisodeLike, sendLocalDanmaku, type LocalDanmaku } from '@/bindings'
+import { exportDemoEpisode, loadEpisodeLike, saveEpisodeLike } from '@/bindings'
 import { byId, DRAMAS } from '@/mocks/data'
 import { epHot, groupEpisodes } from '@/mocks/provider'
 import { useRelatedDramas } from '@/mocks/recommendations'
@@ -12,8 +12,7 @@ import { useAppSettings } from '@/stores/appSettings'
 import { observeContentWidth } from '@/layoutWidth'
 import { playbackEndAction } from '@/player/preferences'
 import { episodeDuration, fmt } from '@/player/machine'
-import { normalizeDanmakuText } from '@/bindings/danmakuRecovery'
-import { draftForDanmaku, type DanmakuSubmission } from '@/player/danmakuDraft'
+import { useLocalEpisodeDanmaku } from '@/composables/useLocalEpisodeDanmaku'
 import { genDanmaku, type DanmakuItem } from '@/player/danmaku'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
@@ -42,7 +41,11 @@ watch(watchRoot, (element, _, onCleanup) => {
   const observer = observeContentWidth(element, (width) => { stacked.value = width <= 980 })
   onCleanup(() => observer.disconnect())
 }, { flush: 'post' })
-const mine = ref<DanmakuItem[]>([])
+const { mine, danmakuDraft, sendDm, recoveringDanmaku, pendingDanmakuRecovery, retryDanmakuRecovery } =
+  useLocalEpisodeDanmaku(dramaId, episode, () => !!drama.value)
+watch([dramaId, episode], ([id, ep]) => {
+  if (byId(id)) void cs.open(id, ep)
+}, { immediate: true })
 const appPreferences = useAppSettings().s
 const mode = resolveMediaMode(appPreferences.mediaSource)
 const startOverride = () => typeof route.query.t === 'string' ? route.query.t : undefined
@@ -62,52 +65,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => window.removeEventListener(SHARE_LINK_PAUSE, player.pause))
 const items = computed<DanmakuItem[]>(() => [...genDanmaku(episode.value, player.duration.value || episodeDuration(episode.value)), ...mine.value])
-const toItem = (item: LocalDanmaku): DanmakuItem => ({
-  id: `local-${item.id}`, at: item.offsetMs / 1000, text: item.text, likes: 0, lane: item.id % 12, mine: true,
-})
-function mergeMine(items: DanmakuItem[]) {
-  mine.value = [...new Map([...mine.value, ...items].map((item) => [item.id, item])).values()]
-}
-const recoveringDanmaku = ref(false)
-const pendingDanmakuRecovery = ref(false)
-let danmakuEpisodeGeneration = 0
-async function retryDanmakuRecovery() {
-  if (recoveringDanmaku.value) return
-  const generation = danmakuEpisodeGeneration
-  const current = () => generation === danmakuEpisodeGeneration
-  recoveringDanmaku.value = true
-  try {
-    const pending = await recoverLocalDanmaku(dramaId.value, episode.value, current, (item, entry) => {
-      if (!current()) return
-      mergeMine([toItem(item)])
-      const draft = danmakuDraft.value
-      if (!draft.sending && draft.attempt?.requestId === entry.requestId) {
-        if (normalizeDanmakuText(draft.text) === entry.text) draft.text = ''
-        draft.attempt = undefined
-      }
-    })
-    if (current()) pendingDanmakuRecovery.value = pending
-  } finally {
-    if (current()) recoveringDanmaku.value = false
-  }
-}
-watch([dramaId, episode], async ([id, ep], _, onCleanup) => {
-  danmakuEpisodeGeneration++
-  onCleanup(() => { danmakuEpisodeGeneration++ })
-  const generation = danmakuEpisodeGeneration
-  mine.value = []
-  recoveringDanmaku.value = false
-  pendingDanmakuRecovery.value = false
-  if (!byId(id)) return
-  cs.open(id, ep)
-  void retryDanmakuRecovery()
-  try {
-    const saved = await loadLocalDanmaku(id, ep)
-    if (generation === danmakuEpisodeGeneration && saved) mergeMine(saved.map(toItem))
-  } catch {
-    if (generation === danmakuEpisodeGeneration) toast.push('本地弹幕读取失败', 'error')
-  }
-}, { immediate: true })
 const total = computed(() => drama.value?.episodeCount ?? 0)
 const hasNext = computed(() => episode.value < (drama.value?.updatedTo ?? 0))
 function goEp(e: number) {
@@ -151,24 +108,6 @@ async function continuePlayback() {
   if (player.state.value !== 'playing') player.play()
   await router.replace({ query: { ...route.query, panel: undefined, paused: undefined } })
   await focusStackedPanel('')
-}
-const danmakuDraft = computed(() => draftForDanmaku(dramaId.value, episode.value))
-async function sendDm(submission: DanmakuSubmission) {
-  const id = dramaId.value
-  const ep = episode.value
-  let saved: LocalDanmaku | undefined
-  try {
-    saved = await sendLocalDanmaku(id, ep, submission)
-  } catch (error) {
-    if (dramaId.value === id && episode.value === ep) pendingDanmakuRecovery.value = true
-    throw error
-  }
-  if (dramaId.value !== id || episode.value !== ep) return
-  mergeMine([saved ? toItem(saved) : {
-    id: `demo-${submission.requestId}`, at: submission.offsetMs / 1000, text: submission.text,
-    likes: 0, lane: Math.floor(Math.random() * 12), mine: true,
-  }])
-  if (pendingDanmakuRecovery.value) void retryDanmakuRecovery()
 }
 const rtab = ref<'eps' | 'cm'>('eps'); const desc = ref(false); const grp = ref(Math.floor((episode.value - 1) / 20)); const exp = ref(false)
 watch(episode, (index) => { grp.value = Math.floor((index - 1) / 20) })
