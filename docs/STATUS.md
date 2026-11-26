@@ -617,3 +617,9 @@
 - 现有 `--verify-release-draft` 命令复核已验证的 `RELEASE-NOTES.md` 与草稿正文。只读查询 GitHub 的精确版本标签，核对轻量标签或附注标签解引用后的提交是否与交付包一致。标签缺失、移动或草稿正文被改动都会报错。[Git 远程引用查询](https://git-scm.com/docs/git-ls-remote) · [GitHub Release API](https://docs.github.com/en/rest/releases/releases#get-a-release)
 - Node 22 与 Node 26 各通过 13 项发行脚本测试。用本机隔离 Git 远程测试同名分支、轻量标签和附注标签。使用现有 .45 两平台归档复核全部 13 项 SHA-256。
 - GitHub 只读查询仍返回 0 个 Release。真实签名资产和线上草稿仍待正式发行流程验收。[BMad 记录](../_bmad-output/plan-e13-release-draft-tag-and-body.md)
+
+## E02 苹果 CMS 翻页失败保留结果（2026-11-27）
+
+- 关键词搜索、片源目录和分类加载失败时，若该范围上次成功加载了结果，则继续展示这些结果，分别标明请求失败的页码和实际显示的页码。重试请求原页，返回更新 URL。切换关键词、分类或片源时清除旧结果，分类被删除时清除快照。
+- 前端类型检查、生产构建、122 项 Vitest、搜索与片源目录 38 项 Playwright、Go vet 和 Go 全量测试通过。对照设计稿复核默认窗口与 1280×860、220% 缩放。此次使用浏览器合成片源。[BMad 记录](../_bmad-output/plan-e02-cms-page-recovery.md) · [默认截图](../build/bin/qa-cms-page-recovery/cms-page-recovery-default.png) · [220% 截图](../build/bin/qa-cms-page-recovery/cms-page-recovery-220.png)
+- 同日复核已授权的 .44 批次。GitHub 四项 smoke 状态成功，两份原始 ZIP 的 SHA-256 与 GitHub 摘要一致，归档的 Windows 7 项和 macOS 6 项再次核验通过。此修复留待后续集中打包。[.44 工作流](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269)

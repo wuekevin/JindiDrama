@@ -155,6 +155,9 @@ async function setupCMSPages(page: Page) {
         state.calls.push([keyword, page])
         let entries: ReturnType<typeof row>[] = []
         if (!keyword) {
+          if (page === 2 && document.body.dataset.failDirectoryPage === '1') {
+            throw new Error('苹果 CMS 目录暂不可用')
+          }
           entries = page === 1 ? Array.from({ length: 6 }, (_, index) => row(index + 1, '潮汐来信' + (index ? ' ' + (index + 1) : '')))
             : [row(7, '岸边灯塔'), row(8, '归航时刻'), row(9, '港口旧事')]
         } else if (keyword === '海岛') {
@@ -221,7 +224,23 @@ test('CMS directory fetches the selected page and restores it through browser hi
   await expect(page).toHaveURL(/feed=today$/)
 })
 
-test('CMS keyword search retries the same page and shows local matches only on page one', async ({ page }) => {
+test('CMS directory can return to the page retained after an error', async ({ page }) => {
+  await setupCMSPages(page)
+  await page.goto('/#/search?feed=today')
+  const cards = page.getByTestId('result-card')
+  await expect(cards).toHaveCount(6)
+  await page.locator('body').evaluate((element) => { element.dataset.failDirectoryPage = '1' })
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page).toHaveURL(/feed=today&page=2$/)
+  await expect(page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })).toBeVisible()
+  await expect(cards).toHaveCount(6)
+  await page.getByRole('button', { name: '返回第 1 页' }).click()
+  await expect(page).toHaveURL(/feed=today$/)
+  await expect(page.getByRole('button', { name: '下一页' })).toBeVisible()
+  expect(await cmsPageCalls(page)).toEqual([['', 1], ['', 2], ['', 1]])
+})
+
+test('CMS keyword search retries the same page and shows local matches only on page one', async ({ page }, testInfo) => {
   await setupCMSPages(page)
   await page.goto(searchRoute('海岛'))
   const cards = page.getByTestId('result-card')
@@ -229,12 +248,26 @@ test('CMS keyword search retries the same page and shows local matches only on p
   await expect(cards.first()).toContainText('本地海岛短剧')
   await expect(cards.last()).toContainText('海岛来信')
   await page.getByRole('button', { name: '下一页' }).click()
-  await expect(page.getByTestId('error')).toContainText('苹果 CMS 目录暂不可用')
-  await expect(cards).toHaveCount(0)
-  await expect(previous).toBeVisible()
+  const fallback = page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })
+  await expect(fallback).toContainText('第 2 页加载失败（苹果 CMS 目录暂不可用）')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.first()).toContainText('本地海岛短剧')
+  await expect(cards.last()).toContainText('海岛来信')
+  await expect(page.getByRole('navigation', { name: '分页' }).locator('[aria-current=page]')).toHaveText('第 1 页')
+  await expect(page.getByRole('button', { name: '返回第 1 页' })).toBeVisible()
+  await expect(page).toHaveURL(/page=2$/)
+  await page.screenshot({ path: testInfo.outputPath('cms-page-recovery-default.png') })
+  const viewport = page.viewportSize()!
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((element) => element.style.setProperty('--user-zoom', '2.2'))
+  await expect(fallback).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('cms-page-recovery-220.png') })
+  await page.locator('html').evaluate((element) => element.style.removeProperty('--user-zoom'))
+  await page.setViewportSize(viewport)
   await page.getByRole('button', { name: '重试' }).click()
   await expect(cards).toHaveCount(1)
   await expect(cards.first()).toContainText('海岛归航')
+  await expect(fallback).toHaveCount(0)
   await expect(page.getByRole('heading', { level: 1 })).toBeFocused()
   expect(await cmsPageCalls(page)).toEqual([['海岛', 1], ['海岛', 2], ['海岛', 2]])
 
@@ -444,6 +477,24 @@ test('CMS invalid and expired classifications stay off the wire, and a failed cl
   expect(await cmsGenreCalls(page)).toEqual(['class', 'class', 'all:1'])
 })
 
+test('CMS classification retains its page on failure and discards it when the filter changes', async ({ page }) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const cards = page.getByTestId('result-card')
+  await expect(cards).toContainText('北海来信')
+  const failNext = () => page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('error'))
+  await failNext()
+  await page.getByRole('button', { name: '下一页' }).click()
+  await expect(page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })).toContainText('第 2 页加载失败')
+  await expect(cards).toContainText('北海来信')
+  await failNext()
+  await page.getByRole('combobox', { name: '分类' }).selectOption('7')
+  await expect(page.getByTestId('error')).toContainText('苹果 CMS 分类暂不可用')
+  await expect(cards).toHaveCount(0)
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(cards).toContainText('山中信号')
+})
+
 test('CMS switching classification discards a late page and retries a filter error', async ({ page }) => {
   await setupCMSGenres(page, 'late-page')
   await page.goto('/#/search?browse=topics&genre=' + wideGenre)
@@ -513,7 +564,8 @@ test('CMS retry refreshes a previously valid classification before sending a fil
   await expect(page.getByTestId('result-card')).toContainText('北海来信')
   await page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('error'))
   await page.getByRole('button', { name: '下一页' }).click()
-  await expect(page.getByTestId('error')).toBeVisible()
+  const fallback = page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })
+  await expect(fallback).toBeVisible()
   await page.evaluate((id) => (window as CMSGenreWindow).deleteCMSGenre(id), wideGenre)
   await page.getByRole('button', { name: '重试' }).click()
   await expect(page.getByTestId('empty')).toContainText('片源目录没有这个分类')

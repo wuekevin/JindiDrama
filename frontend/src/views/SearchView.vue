@@ -76,6 +76,8 @@ const cmsPage = computed(() => {
 const cmsPagination = ref(false)
 const cmsTopics = computed(() => browseTopics.value && cmsPagination.value)
 const cmsHasMore = ref(false)
+const cmsFallback = ref<{ page: number; reason: string }>()
+let lastCMSResult: { scope: string; page: number; items: Drama[] } | undefined
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
 const isDemo = ref(false)
 const localResultsOnly = ref(false)
@@ -98,6 +100,7 @@ function retry() {
 }
 function showInvalidCMSGenre() {
   invalidCMSGenre.value = true
+  lastCMSResult = undefined
   items.value = []
   state.value = 'empty'
 }
@@ -106,6 +109,7 @@ async function run(isRetry = false) {
   state.value = 'loading'
   page.value = 1
   cmsHasMore.value = false
+  cmsFallback.value = undefined
   invalidCMSGenre.value = false
   localResultsOnly.value = false
   const topicBrowse = browseTopics.value
@@ -114,6 +118,7 @@ async function run(isRetry = false) {
     lastGenreScope = undefined
   }
   if (route.query.state === 'loading') return
+  let cmsScope: string | undefined
   try {
     const name = await catalogProviderName()
     if (my !== token) return
@@ -124,6 +129,7 @@ async function run(isRetry = false) {
       cmsGenres.value = undefined
       lastGenreScope = undefined
       lastCMSRequest = undefined
+      lastCMSResult = undefined
     }
     if (sourceChanged && route.query.page !== undefined && (cmsPagination.value || name === 'apple-cms')) {
       await patch({ page: undefined })
@@ -137,15 +143,22 @@ async function run(isRetry = false) {
     const selectedTopic = topic.value
     cmsPagination.value = name === 'apple-cms' && (section === 'today' || topicBrowse ||
       (!section && !castOnly.value && kind.value !== '本地片库'))
+    if (!cmsPagination.value) lastCMSResult = undefined
     let results: Drama[]
     let localOnly = false
     let tags: string[] = []
     let label: string | undefined
     if (cmsPagination.value) {
       const requestedGenre = genre.value
+      const genreScope = typeof requestedGenre === 'string' && /^[1-9][0-9]{0,29}$/.test(requestedGenre)
+        ? requestedGenre : undefined
+      const keyword = section || topicBrowse ? '' : q.value
+      const requestedPage = cmsPage.value
+      const scope = topicBrowse ? `genre:${genreScope ?? (requestedGenre === undefined ? '' : 'invalid')}`
+        : section ? 'today' : `search:${keyword.trim()}`
+      cmsScope = scope
+      if (lastCMSResult?.scope !== scope) lastCMSResult = undefined
       if (topicBrowse) {
-        const genreScope = typeof requestedGenre === 'string' && /^[1-9][0-9]{0,29}$/.test(requestedGenre)
-          ? requestedGenre : undefined
         if (isRetry || cmsGenres.value === undefined || (genreScope && lastGenreScope !== genreScope)) {
           const genres = await loadCMSCatalogGenres(mode)
           if (my !== token) return
@@ -158,9 +171,6 @@ async function run(isRetry = false) {
         }
       }
       const genreID = topicBrowse ? selectedGenre.value?.id : undefined
-      const keyword = section || topicBrowse ? '' : q.value
-      const requestedPage = cmsPage.value
-      const scope = topicBrowse ? `genre:${genreID ?? ''}` : section ? 'today' : `search:${keyword}`
       const pageChanged = lastCMSRequest?.scope === scope
         ? lastCMSRequest.page !== requestedPage
         : requestedPage > 1
@@ -189,10 +199,11 @@ async function run(isRetry = false) {
         }
         cmsHasMore.value = remote.hasMore
         results = [...local, ...remote.entries]
+        lastCMSResult = results.length ? { scope, page: requestedPage, items: results } : undefined
       } catch (error) {
         if (my !== token) return
-        if (topicBrowse) throw new Error('苹果 CMS 分类暂不可用')
-        if (!local.length) throw error
+        if (topicBrowse && !lastCMSResult) throw new Error('苹果 CMS 分类暂不可用')
+        if (lastCMSResult || !local.length) throw error
         localOnly = true
         results = local
       }
@@ -226,7 +237,14 @@ async function run(isRetry = false) {
     state.value = results.length ? 'ready' : 'empty'
   } catch (cause) {
     if (my !== token) return
-    err.value = errorMessage(cause)
+    const reason = errorMessage(cause)
+    if (lastCMSResult && lastCMSResult.scope === cmsScope) {
+      cmsFallback.value = { page: lastCMSResult.page, reason }
+      items.value = lastCMSResult.items
+      state.value = 'ready'
+      return
+    }
+    err.value = reason
     state.value = 'error'
   }
 }
@@ -288,8 +306,9 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
       <header class="head">
         <h1 ref="heading" :tabindex="cmsPagination ? -1 : undefined"><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
         <p v-if="state === 'ready' || state === 'empty' && !invalidCMSGenre" class="count" data-testid="result-count">{{ cmsPagination ? '本页共' : '共找到' }} {{ items.length }} 部相关内容</p>
+        <p v-if="cmsFallback" class="count" role="status">第 {{ cmsPage }} 页加载失败（{{ cmsFallback.reason }}）。当前显示已加载的第 {{ cmsFallback.page }} 页。</p>
         <p v-if="localResultsOnly" class="count" role="status">主目录暂不可用，已显示本地片库的匹配结果。</p>
-        <BaseButton v-if="cmsPagination && localResultsOnly" class="catalog-retry" variant="outline" @click="retry">重试</BaseButton>
+        <BaseButton v-if="cmsPagination && (localResultsOnly || cmsFallback)" class="catalog-retry" variant="outline" @click="retry">重试</BaseButton>
       </header>
       <label v-if="cmsTopics" class="topic-filter">
         分类
@@ -337,8 +356,9 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
         </li>
       </ul>
       <nav v-if="cmsPagination && !invalidCMSGenre && state !== 'loading'" class="pager cms-pager" aria-label="分页">
-        <button v-if="cmsPage > 1" @click="selectPage(cmsPage - 1)">上一页</button>
-        <span aria-current="page">第 {{ cmsPage }} 页</span>
+        <button v-if="cmsFallback && cmsFallback.page !== cmsPage" @click="selectPage(cmsFallback.page)">返回第 {{ cmsFallback.page }} 页</button>
+        <button v-else-if="!cmsFallback && cmsPage > 1" @click="selectPage(cmsPage - 1)">上一页</button>
+        <span aria-current="page">第 {{ cmsFallback?.page ?? cmsPage }} 页</span>
         <button v-if="cmsHasMore && cmsPage < MAX_CMS_PAGE" @click="selectPage(cmsPage + 1)">下一页</button>
       </nav>
       <nav v-else-if="!cmsPagination && state === 'ready' && pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === currentPage }" :aria-current="p === currentPage ? 'page' : undefined" @click="selectPage(p)">{{ p }}</button></nav>
