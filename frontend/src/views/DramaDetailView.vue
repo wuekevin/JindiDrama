@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { ChevronLeft, ChevronDown, ChevronUp, ChevronRight, Star, CirclePlay, Heart, Play, Plus, Check, Share2, Flame, Crown, RefreshCw, Landmark, Swords, Sprout, Sparkles } from 'lucide-vue-next'
-import { fallbackCatalogCover, vCancelCatalogCover, getDetail, groupEpisodes, epHot, type DemoHighlight, type DramaDetail } from '@/mocks/provider'
+import { fallbackCatalogCover, vCancelCatalogCover, getDetail, loadCMSRelatedDramas, groupEpisodes, epHot, type DemoHighlight, type DramaDetail } from '@/mocks/provider'
 import { useRelatedDramas } from '@/mocks/recommendations'
 import { demoClipSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
@@ -14,6 +14,7 @@ import { availableCatalogEpisode, catalogBookmarkEpisode, catalogPlaybackRoute, 
 import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
+import type { Drama } from '@/types'
 
 const route = useRoute(); const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
 const recentSearch = useSearchStore()
@@ -30,10 +31,12 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener(SHARE_CATALOG_REFRESH, refreshSharedCatalog)
   layoutObserver?.disconnect()
+  token++
 })
 const id = computed(() => String(route.params.id))
 const state = ref<'loading'|'ready'|'notfound'|'error'>('loading'); const err = ref('')
 const detail = ref<DramaDetail | null>(null)
+const cmsRelated = ref<Drama[]>([])
 const detailHeading = ref<HTMLHeadingElement | null>(null)
 const tab = ref<'eps'|'clips'>('eps'); const group = ref(0); const expanded = ref(false)
 const settings = useAppSettings()
@@ -62,6 +65,7 @@ watch([id, () => route.name], () => { closeClip(); tab.value = 'eps' })
 let token = 0
 async function load(focusHeading = false) {
   const my = ++token; state.value = 'loading'
+  cmsRelated.value = []
   if (route.query.state === 'loading') return
   try {
     const result = await getDetail(id.value, route.query.state === 'error' ? 'error' : 'normal', route.name === 'catalog')
@@ -73,6 +77,11 @@ async function load(focusHeading = false) {
       ? catalogBookmarkEpisode(result, history) !== undefined : !savedMediaIssue(result.drama, history.episode))
       ? Math.floor((history.episode - 1) / 20) : 0
     expanded.value = false
+    if (result?.appleCMS && result.catalogGenreID) {
+      void loadCMSRelatedDramas(result.drama.id, result.catalogGenreID).then((cards) => {
+        if (my === token) cmsRelated.value = cards
+      }).catch(() => { /* 同类短剧加载失败时，详情和选集仍可用。 */ })
+    }
     if (result && focusHeading) {
       await nextTick()
       if (my === token) detailHeading.value?.focus()
@@ -191,8 +200,21 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
         </div>
       </section>
 
-      <section v-if="guess.length" class="guess"><header><h2><Flame :size="24" color="#ff6a3d" fill="#ff6a3d" />猜你喜欢</h2><button data-testid="shuffle" :disabled="!canShuffle" @click="shuffle">换一换<RefreshCw :size="14" /></button></header>
-        <div class="row"><button v-for="d in guess" :key="d.id" class="gc on-dark" data-testid="guess-card" @click="router.push(`/drama/${d.id}`)"><img :src="d.cover" :alt="d.title" /><span v-if="d.kind === detail.drama.kind" class="bd">同类型</span><b class="clamp-1">{{ d.title }}</b><em><Flame :size="12" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></button></div></section>
+      <section v-if="guess.length || cmsRelated.length" class="guess" :aria-label="detail.appleCMS ? '同类短剧' : undefined">
+        <header>
+          <h2><Flame :size="24" color="#ff6a3d" fill="#ff6a3d" />{{ detail.appleCMS ? '同类短剧' : '猜你喜欢' }}</h2>
+          <button v-if="!detail.appleCMS" data-testid="shuffle" :disabled="!canShuffle" @click="shuffle">换一换<RefreshCw :size="14" /></button>
+        </header>
+        <div class="row">
+          <button v-for="d in detail.appleCMS ? cmsRelated : guess" :key="d.id" class="gc on-dark" data-testid="guess-card" @click="router.push(detailRoute(d.id, d.providerOnly))">
+            <img v-cancel-catalog-cover :crossorigin="d.providerOnly ? 'anonymous' : undefined" :src="d.cover" :alt="d.title" @error="d.providerOnly && fallbackCatalogCover($event)" />
+            <span v-if="detail.appleCMS || d.kind === detail.drama.kind" class="bd">同类型</span>
+            <b class="clamp-1">{{ d.title }}</b>
+            <em v-if="detail.appleCMS">已更新至第{{ d.updatedTo }}集</em>
+            <em v-else><Flame :size="12" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em>
+          </button>
+        </div>
+      </section>
     </template>
     <dialog ref="clipDialog" class="clip-dialog on-dark" :aria-label="selectedClip?.title" @cancel.prevent="closeClip">
       <h2>{{ selectedClip?.title }}</h2>

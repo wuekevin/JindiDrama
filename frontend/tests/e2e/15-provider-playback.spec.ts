@@ -640,6 +640,82 @@ test('CMS shares a detail-only link and opens it for the configured source at 22
   expect(await calls(page)).toEqual([])
 })
 
+test('CMS detail offers playable same-source titles and ignores recommendations after navigation', async ({ page }, testInfo) => {
+  await cmsLibraryFixture(page)
+  await page.goto('/#/home')
+  const relatedID = cmsId.replace(/:[0-9]+$/, ':42')
+  await page.evaluate(({ id, relatedID, title }) => {
+    const app = (window as unknown as { go: { app: { App: Record<string, unknown> } } }).go.app.App
+    const card = (id: string, title: string, updatedTo = 3) => ({
+      id, title, tags: ['海岛'], summary: '授权目录样本', episodeCount: 3, updatedTo,
+    })
+    const rows = [
+      card(id, title),
+      card(relatedID, '另一封海岛来信'),
+      card(relatedID, '重复条目'),
+      card(id.replace(/:[0-9]+$/, ':43'), '不可播作品', 0),
+      card('apple-cms:' + 'f'.repeat(32) + ':44', '其他片源'),
+      card(id.replace(/:[0-9]+$/, ':45'), '海边小镇', 2),
+    ]
+    const related = { requests: [] as Array<[string, number]>, finish: () => {} }
+    Object.assign(window, { relatedCMS: related })
+    app.CatalogDetail = async (requested: string) => ({
+      drama: card(requested, requested === id ? title : '另一封海岛来信'),
+      episodes: [{ id: 'episode-1', dramaId: requested, index: 1, available: true }],
+      ...(requested === id ? { genreId: '7' } : {}),
+    })
+    app.CatalogGenrePage = async (genre: string, page: number) => {
+      related.requests.push([genre, page])
+      if (related.requests.length === 2) {
+        await new Promise<void>((resolve) => { related.finish = resolve })
+      }
+      if (related.requests.length === 3) throw new Error('分类暂不可用')
+      return { page, entries: rows, hasMore: false }
+    }
+  }, { id: cmsId, relatedID, title: cmsTitle })
+
+  await page.getByRole('region', { name: '片源目录' }).getByTestId('drama-card').click()
+  const section = page.getByRole('region', { name: '同类短剧' })
+  const cards = section.getByTestId('guess-card')
+  await expect(cards).toHaveCount(2)
+  await expect(cards.first()).toContainText('另一封海岛来信')
+  await expect(cards.last()).toContainText('已更新至第2集')
+  await expect(page.getByRole('button', { name: '第1集' })).toBeEnabled()
+  await page.screenshot({ path: testInfo.outputPath('cms-related-default.png'), fullPage: true })
+
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((html) => { html.style.setProperty('--user-zoom', '2.2') })
+  await expect(page.getByTestId('page-detail')).toHaveClass(/\bcompact\b/)
+  await cards.first().scrollIntoViewIfNeeded()
+  await expect(cards.first()).toBeInViewport({ ratio: 0.95 })
+  await expect(cards.last()).toBeInViewport({ ratio: 0.95 })
+  const width = await section.evaluate((element) => ({ inner: element.clientWidth, content: element.scrollWidth }))
+  expect(width.content).toBeLessThanOrEqual(width.inner + 1)
+  await page.screenshot({ path: testInfo.outputPath('cms-related-220.png') })
+
+  await cards.first().click()
+  await expect(page.getByRole('heading', { name: '另一封海岛来信' })).toBeVisible()
+  await expect(section).toHaveCount(0)
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: cmsTitle })).toBeVisible()
+  const requests = () => page.evaluate(() => (window as unknown as { relatedCMS: { requests: Array<[string, number]> } }).relatedCMS.requests)
+  await expect.poll(requests).toEqual([['7', 1], ['7', 1]])
+  await page.evaluate((id) => { window.location.hash = '/catalog/' + encodeURIComponent(id) }, relatedID)
+  await expect(page.getByRole('heading', { name: '另一封海岛来信' })).toBeVisible()
+  await page.evaluate(async () => {
+    (window as unknown as { relatedCMS: { finish(): void } }).relatedCMS.finish()
+    await new Promise(requestAnimationFrame)
+  })
+  await expect(section).toHaveCount(0)
+  expect(await requests()).toEqual([['7', 1], ['7', 1]])
+
+  await page.goBack()
+  await expect(page.getByRole('heading', { name: cmsTitle })).toBeVisible()
+  await expect.poll(requests).toEqual([['7', 1], ['7', 1], ['7', 1]])
+  await expect(page.getByRole('button', { name: '第1集' })).toBeEnabled()
+  await expect(section).toHaveCount(0)
+})
+
 test('CMS desktop startup restores the latest current-source bookmark paused', async ({ page }) => {
   const otherSource = 'apple-cms:ffffffffffffffffffffffffffffffff:90071992547409931234'
   await cmsLibraryFixture(page, [{ ...startupCMSHistory, dramaId: otherSource, watchedAt: 200 }, startupCMSHistory])

@@ -67,6 +67,7 @@ type CatalogPage struct {
 type CatalogDetail struct {
 	Drama    provider.Drama     `json:"drama"`
 	Episodes []provider.Episode `json:"episodes"`
+	GenreID  string             `json:"genreId,omitempty"`
 }
 
 type CatalogGenre struct {
@@ -247,7 +248,7 @@ func (p *Provider) catalogPage(ctx context.Context, keyword, genre string, page 
 }
 
 func (p *Provider) Drama(ctx context.Context, id string) (provider.Drama, error) {
-	drama, _, err := p.detail(ctx, id)
+	drama, _, _, err := p.detail(ctx, id)
 	return drama, err
 }
 
@@ -258,7 +259,7 @@ func (p *Provider) Episodes(ctx context.Context, id string) ([]provider.Episode,
 
 // CatalogDetail projects the title and episode availability from the same record.
 func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail, error) {
-	drama, sources, err := p.detail(ctx, id)
+	drama, sources, genre, err := p.detail(ctx, id)
 	if err != nil {
 		return CatalogDetail{}, err
 	}
@@ -268,14 +269,14 @@ func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail,
 			ID: episodeID(id, index), DramaID: id, Index: index, Available: len(sources[index]) > 0,
 		})
 	}
-	return CatalogDetail{Drama: drama, Episodes: episodes}, nil
+	return CatalogDetail{Drama: drama, Episodes: episodes, GenreID: genre}, nil
 }
 
 func (p *Provider) ResolvePlayback(ctx context.Context, id string, index int) (provider.PlaybackTicket, error) {
 	if index < 1 || index > MaxEpisodes {
 		return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
 	}
-	_, sources, err := p.detail(ctx, id)
+	_, sources, _, err := p.detail(ctx, id)
 	if err != nil {
 		return provider.PlaybackTicket{}, err
 	}
@@ -301,25 +302,25 @@ func (p *Provider) OwnsDramaID(id string) bool {
 	return ok
 }
 
-func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, error) {
+func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, string, error) {
 	vodID, ok := p.dramaID(id)
 	if !ok {
-		return provider.Drama{}, nil, provider.ErrNotFound
+		return provider.Drama{}, nil, "", provider.ErrNotFound
 	}
 	data, err := p.request(ctx, url.Values{"ac": {"detail"}, "ids": {vodID}})
 	if err != nil {
-		return provider.Drama{}, nil, err
+		return provider.Drama{}, nil, "", err
 	}
 	items := data.List
 	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID {
-		return provider.Drama{}, nil, provider.ErrNotFound
+		return provider.Drama{}, nil, "", provider.ErrNotFound
 	}
 	title := metadataText(items[0].Name)
 	if title == "" {
-		return provider.Drama{}, nil, errUpstream
+		return provider.Drama{}, nil, "", errUpstream
 	}
 	drama, sources := p.normalize(items[0], vodID, title)
-	return drama, sources, nil
+	return drama, sources, genreID(scalar(items[0].TypeID).text()), nil
 }
 
 // scalar retains JSON number spelling instead of decoding IDs through float64.

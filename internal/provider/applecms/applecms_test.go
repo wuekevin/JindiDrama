@@ -49,7 +49,7 @@ func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 			q.Get("ac") != "detail" || q.Get("at") != "json" || q.Get("token") != "qa" || q.Has("t") {
 			t.Errorf("unexpected CMS request: %s %s", r.Method, r.URL)
 		}
-		item := fmt.Sprintf(`{"vod_id":%s,"vod_name":"<b>海岛来信</b> http://catalog.example.test/vod?access=private","type_name":"剧情 <a href='https://media.example.test/a?sig=private'>HTTPS&#58;//media.example.test/a?sig=private&amp;key=hidden</a>","vod_content":"<p>海岛 &amp; 信</p> https://catalog.example.test/vod?access=private","vod_total":"6","vod_play_url":%q}`, wideID, routes)
+		item := fmt.Sprintf(`{"vod_id":%s,"vod_name":"<b>海岛来信</b> http://catalog.example.test/vod?access=private","type_id":"007","type_name":"剧情 <a href='https://media.example.test/a?sig=private'>HTTPS&#58;//media.example.test/a?sig=private&amp;key=hidden</a>","vod_content":"<p>海岛 &amp; 信</p> https://catalog.example.test/vod?access=private","vod_total":"6","vod_play_url":%q}`, wideID, routes)
 		if q.Has("ids") {
 			if q.Get("ids") != wideID || q.Has("pg") || q.Has("wd") {
 				t.Errorf("unexpected detail query: %s", r.URL)
@@ -86,10 +86,11 @@ func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 	if err != nil || detail.Title != drama.Title || detail.Summary != drama.Summary || !slices.Equal(detail.Tags, drama.Tags) {
 		t.Fatalf("detail metadata = %+v, %v", detail, err)
 	}
-	episodes, err := p.Episodes(t.Context(), drama.ID)
-	if err != nil || len(episodes) != 6 {
-		t.Fatalf("episodes = %+v, %v", episodes, err)
+	combined, err := p.CatalogDetail(t.Context(), drama.ID)
+	if err != nil || combined.Drama.ID != drama.ID || combined.GenreID != "7" || len(combined.Episodes) != 6 {
+		t.Fatalf("combined detail = %+v, %v", combined, err)
 	}
+	episodes := combined.Episodes
 	for index, ep := range episodes {
 		if ep.Index != index+1 || ep.DramaID != drama.ID || ep.Available != (ep.Index == 3 || ep.Index == 5) {
 			t.Fatalf("unexpected episode at index %d: %+v", index, ep)

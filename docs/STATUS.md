@@ -570,3 +570,10 @@
 
 - 安装步骤核对 `jindi` URL 协议及带引号的处理命令。复用隔离配置和现有 Win32 窗口检查，经 Windows Shell 打开固定的合成 CMS 分享链接，等待转发进程退出以及原窗口恢复。普通二次启动检查保留。卸载后检查已移除协议。
 - Smoke 和 release 共用该步骤。PowerShell 语法、会话标记测试、工作流 YAML、Go vet、Go 全量竞态测试和 Windows x64 生产交叉编译均通过。本轮使用与 .44 相同的前端源码和已构建资源。Windows 系统 Shell 实际转发留待下一批托管验收。[BMad 记录](../_bmad-output/plan-e13-windows-cms-protocol-smoke.md)
+
+## E03 苹果 CMS 详情页同类短剧（2026-11-27）
+
+- 从剧目详情记录读取分类 ID，复用当前片源的分类首页，最多显示六个有可播分集的同源剧目。过滤当前剧目和重复条目。点击卡片打开对应 CMS 详情，分类请求失败时仍可浏览详情和选集，切页后忽略迟到结果。
+- Chromium 验证分类请求、筛选、卡片跳转、失效响应以及分类故障。对照详情设计稿复核选集下方的推荐布局。1448×1086 默认窗口和 1280×860、220% 缩放均核对卡片显示。[默认截图](../build/bin/qa-cms-related-dramas/cms-related-default.png) · [220% 截图](../build/bin/qa-cms-related-dramas/cms-related-220.png)
+- Apple Silicon 使用应用内 WKWebView 与本机合成接口实际查询分类、筛掉不可播条目并打开同类剧目。正常退出后 SQLite 完整性为 `ok`，观看历史仍为空。
+- 前端类型检查、生产构建、122 项 Vitest、81 项详情及播放 Playwright、Go vet、Go 全量、App 和 Provider 竞态测试与 Windows x64 生产交叉编译通过。真实授权公网片源和新批次 Windows 原生仍待验收。[BMad 记录](../_bmad-output/plan-e03-cms-related-dramas.md)
