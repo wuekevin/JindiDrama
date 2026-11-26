@@ -556,3 +556,12 @@
 - 非法路径、附加查询和分集路径会被拒绝。在同一详情再次打开链接会重新读取剧目，当前片源找不到时使用未找到状态。统一 Wails 对象错误和桥接夹具字符串错误的处理。
 - Chromium 核对实际复制文本、同源打开、异源拒绝、重复打开、无媒体请求。对照详情设计稿，1280×860 且 220% 时操作可换行，分享按钮可见可用。Apple Silicon 原生使用合成片源，经系统深链打开同源剧目，异源请求未访问上游或启动媒体，SQLite 完整性通过。
 - 前端生产构建、122 项 Vitest、详情与片源等 129 项 Playwright（128 项首轮通过，1 项已有切源时序断言单独复跑通过）、Go vet、Go 全量、深链竞态和 Windows x64 生产交叉编译通过。本轮未触发 GitHub 打包，Windows 原生协议联调待下一批执行。[BMad 记录](../_bmad-output/plan-e03-cms-detail-share.md) · [220% 分享截图](../build/bin/qa-cms-detail-share/cms-share-220.png)
+
+## E13 .44 累计候选托管打包（2026-11-27）
+
+- 从隔离发行源码 `eba24ce66d8a0c1840ce3b58e357a407639a75be` 推送独立测试分支 `codex/smoke-20261127-44`。`v0.1.0-smoke.20261127.44` 集中验收 Windows 占用升级保护、成品回滚、苹果 CMS 启动续看与详情分享。打包第 1 次运行的四个 smoke 任务均通过。[GitHub 打包](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269)
+- Windows x64 安装版与便携版均验证正常退出、WebView2、隔离 SQLite 及回滚副本。安装器测试验证占用时返回退出码 1 并保留旧程序、卸载器和 Run 登记，释放后可升级。托盘场景验证了最小化回退。Apple Silicon 和 Intel Mac 均从同一 Universal ZIP 验证启动、退出与回滚。
+- 下载两份原始 Actions ZIP 并核对 GitHub 的外层摘要。用项目校验器和独立 `shasum` 核对 Windows 7 项与 macOS 6 项、记录的版本与提交、运行编号与尝试次数。macOS 原始 ZIP 的一个分段下载不完整，补取该分段后摘要一致。Windows 和 macOS 产物移入归档后复核通过，无需重打包。
+- Windows NSIS 安装器 22.53 MiB，Windows x64 便携 EXE 32.29 MiB，macOS Universal ZIP 40.86 MiB。三者封装与压缩方式不同。Universal ZIP 实测含 arm64 和 x86_64 两个切片，最低系统版本均为 macOS 13.0。
+- 同提交的 Windows 与 macOS CI 首轮通过。每平台 383 项 Playwright，通过苹果 CMS 暂停续看、媒体不可用回退和分享详情回归。Windows 原生 CMS 系统协议及托盘回调仍待验证，正式签名、公证与授权公网片源待验收。[双平台 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45878898001)
+- [Windows 清单](../build/bin/github-smoke-20261127.44/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/github-smoke-20261127.44/macos/SHA256SUMS.txt) · [原始 ZIP 清单](../build/bin/github-smoke-20261127.44/raw/SHA256SUMS.txt) · [归档复核](../build/bin/github-smoke-20261127.44/evidence/archived-checks.log) · [BMad 记录](../_bmad-output/plan-e13-candidate44-hosted-packages.md)
