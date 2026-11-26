@@ -98,9 +98,14 @@ Section
 
     !insertmacro wails.webview2runtime
 
+    ClearErrors
     SetOutPath $INSTDIR
+    IfErrors install_files_failed
 
+    SetOverwrite try
     !insertmacro wails.files
+    IfErrors install_files_failed
+    SetOverwrite on
 
     CreateShortcut "$SMPROGRAMS\${SHORTCUT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
@@ -111,6 +116,15 @@ Section
     WriteRegStr SHELL_CONTEXT "Software\Classes\jindi\shell\open\command" "" '"$INSTDIR\${PRODUCT_EXECUTABLE}" "%1"'
 
     !insertmacro wails.writeUninstaller
+    Goto install_done
+
+    install_files_failed:
+    DetailPrint "无法写入金帝短剧程序。请退出正在运行的金帝短剧，确认安装目录可写后重试。"
+    IfSilent +2
+    MessageBox MB_OK|MB_ICONSTOP "无法写入金帝短剧程序。请退出正在运行的金帝短剧，确认安装目录可写后重试。"
+    SetErrorLevel 1
+    Abort
+    install_done:
 SectionEnd
 
 Section "uninstall"

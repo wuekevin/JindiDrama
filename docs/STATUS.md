@@ -536,3 +536,9 @@
 - 打包和回归使用的 69 个前端生产文件哈希一致。Playwright 全量 378 项、Vitest 122 项、Go vet 与全量、Node 22 与 Python macOS 发行工具各 13 项及 Windows 冒烟 PowerShell 语法均通过。Go 源码、三个二进制切片和 npm 生产依赖扫描均无已知漏洞报告。
 - 静态检验曾因本机空间不足在解包时失败。重试后通过，未重新打包。Windows 与 Intel Mac 当前批次原生、正式签名与公证、真实授权公网片源仍待验收。Windows 本地包未签名，macOS 采用 ad-hoc 签名。本轮未触发 GitHub 打包。
 - [Windows SHA-256](../build/bin/smoke-20261127.43/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.43/macos/SHA256SUMS.txt) · [Apple Silicon 原生结果](../build/bin/smoke-20261127.43/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-cms-release-batch43.md)
+
+## E13 Windows 旧程序占用时的升级保护（2026-11-27）
+
+- 安装器只在写入主程序成功后创建快捷方式、注册深链和更新卸载登记。安装目录无法写入或旧程序被占用时，交互安装提示退出后重试，静默安装返回退出码 1。[NSIS 文件写入错误标记](https://nsis.sourceforge.io/Reference/File)
+- 托管 Windows 安装冒烟持有禁止写入的旧 EXE 文件句柄，验证升级退出码以及原程序、卸载器与 Run 登记，随后释放句柄重试并验证新文件的 SHA-256 与安装包一致。测试步骤覆盖 smoke 与 release。
+- 本机用 .43 的 Windows x64 便携程序编译 NSIS 安装器。7-Zip 校验通过，包内主程序和 WebView2 引导程序与原件逐字节一致。YAML 和 Windows PowerShell 语法通过。本轮未触发 GitHub 打包，锁文件与释放后的原生验收待 Windows 运行器执行。[BMad 记录](../_bmad-output/plan-e13-windows-locked-upgrade.md)

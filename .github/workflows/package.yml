@@ -291,9 +291,35 @@ jobs:
             if ($runKey.GetValueNames() -contains 'JindiDrama') { throw 'A JindiDrama Run entry already exists on the runner' }
             $runFixture = '"' + $exe + '"'
             $runKey.SetValue('JindiDrama', $runFixture, [Microsoft.Win32.RegistryValueKind]::String)
+            # This runner-only payload stands in for an older installed executable.
+            [IO.File]::AppendAllText($exe, 'JindiDrama upgrade test marker')
+            $beforeBlockedApp = (Get-FileHash -LiteralPath $exe).Hash
+            $beforeBlockedUpgrade = (Get-FileHash -LiteralPath $uninstaller).Hash
+            $lockedUpgrade = [IO.File]::Open($exe, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+            try {
+              $blockedUpgrade = Start-Process -FilePath $inst -ArgumentList '/S' -PassThru
+              try {
+                if (-not $blockedUpgrade.WaitForExit(45000)) {
+                  $blockedUpgrade.Kill($true)
+                  [void]$blockedUpgrade.WaitForExit(5000)
+                  throw 'Locked upgrade did not exit promptly'
+                }
+                if ($blockedUpgrade.ExitCode -ne 1 -or
+                    (Get-FileHash -LiteralPath $exe).Hash -ne $beforeBlockedApp -or
+                    (Get-FileHash -LiteralPath $uninstaller).Hash -ne $beforeBlockedUpgrade -or
+                    $runKey.GetValue('JindiDrama') -cne $runFixture) {
+                  throw 'Locked upgrade must fail and preserve the installed app, uninstaller, and Run entry'
+                }
+              } finally {
+                $blockedUpgrade.Dispose()
+              }
+            } finally {
+              $lockedUpgrade.Dispose()
+            }
             $upgrade = Start-Process -FilePath $inst -ArgumentList '/S' -Wait -PassThru
-            if ($upgrade.ExitCode -ne 0 -or $runKey.GetValue('JindiDrama') -cne $runFixture) {
-              throw 'An in-place upgrade must preserve the current Run entry'
+            if ($upgrade.ExitCode -ne 0 -or (Get-FileHash -LiteralPath $exe).Hash -ne $packaged -or
+                $runKey.GetValue('JindiDrama') -cne $runFixture) {
+              throw 'An in-place upgrade must replace the app and preserve the current Run entry'
             }
           } catch {
             $checkFailure = $_
