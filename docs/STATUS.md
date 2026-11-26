@@ -605,3 +605,9 @@
 - 对照详情设计稿，1448×1086 和 1280×860、220% 缩放验证长姓名换行、标签与内容对齐。Chromium 验证演职信息缺失的剧目可正常选集，切换详情不残留旧名单。[默认截图](../build/bin/qa-cms-credits/cms-credits-default.png) · [220% 截图](../build/bin/qa-cms-credits/cms-credits-220.png)
 - Apple Silicon 实测 Go 处理本机合成详情后由 WKWebView 显示清理过的主演和导演，打开另一剧目时隐藏缺失字段。退出后 SQLite 完整性为 `ok`。
 - 生产构建、122 项 Vitest、82 项详情与播放 Playwright、Go vet、Go 全量及 App/Provider 竞态、Windows x64 生产交叉编译通过。真实授权公网片源和本批 Windows 原生仍待验收。[BMad 记录](../_bmad-output/plan-e03-cms-credits.md)
+
+## E12 macOS 钥匙串非交互操作（2026-11-27）
+
+- 现有文件型钥匙串的读取、保存和删除会在系统调用期间临时关闭进程内钥匙串交互。进程级互斥防止操作互相恢复设置。完成后恢复原状态，钥匙串服务和账号命名兼容已有记录。[Apple 钥匙串技术说明](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) · [Apple 交互控制接口](https://developer.apple.com/documentation/security/keychains)
+- Apple Silicon 原生测试验证交互初始开启和关闭两种情况，均在操作中关闭且操作后恢复。使用随机合成凭据验证写入、重读、替换、清理与配置隔离。Go vet、Go 全量、钥匙串竞态和无 CGO 退回路径通过。Windows x64 凭据测试程序和生产应用交叉编译通过。
+- 当前范围已核对系统交互状态及可用钥匙串的真实读写删除。受锁钥匙串和正式签名应用跨版本访问仍待验收。正式账号仍需授权和接口联调。[BMad 记录](../_bmad-output/plan-e12-keychain-interaction.md)

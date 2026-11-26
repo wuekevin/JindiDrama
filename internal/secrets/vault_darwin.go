@@ -9,6 +9,18 @@ package secrets
 #include <limits.h>
 #include <stdlib.h>
 
+// The file-based Keychain still uses the process interaction setting.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+static OSStatus getCredentialInteraction(Boolean *allowed) {
+	return SecKeychainGetUserInteractionAllowed(allowed);
+}
+
+static OSStatus setCredentialInteraction(Boolean allowed) {
+	return SecKeychainSetUserInteractionAllowed(allowed);
+}
+#pragma clang diagnostic pop
+
 static int getProfilePath(int descriptor, char *path) {
 	return fcntl(descriptor, F_GETPATH, path);
 }
@@ -66,8 +78,47 @@ import "C"
 
 import (
 	"os"
+	"sync"
 	"unsafe"
 )
+
+var keychainInteractionMu sync.Mutex
+
+func keychainInteractionAllowed() (bool, error) {
+	var allowed C.Boolean
+	if C.getCredentialInteraction(&allowed) != C.errSecSuccess {
+		return false, ErrUnavailable
+	}
+	return allowed != 0, nil
+}
+
+func setKeychainInteraction(allowed bool) error {
+	var flag C.Boolean
+	if allowed {
+		flag = 1
+	}
+	if C.setCredentialInteraction(flag) != C.errSecSuccess {
+		return ErrUnavailable
+	}
+	return nil
+}
+
+func withoutKeychainInteraction(run func()) (err error) {
+	keychainInteractionMu.Lock()
+	defer keychainInteractionMu.Unlock()
+	allowed, err := keychainInteractionAllowed()
+	if err != nil {
+		return err
+	}
+	if allowed {
+		if err := setKeychainInteraction(false); err != nil {
+			return err
+		}
+		defer func() { err = setKeychainInteraction(true) }()
+	}
+	run()
+	return nil
+}
 
 type keychainVault struct {
 	service string
@@ -96,9 +147,13 @@ func (v keychainVault) Load(provider string) ([]byte, error) {
 	defer C.CFRelease(C.CFTypeRef(query))
 
 	var result C.CFTypeRef
-	status := C.readCredential(query, &result)
+	var status C.OSStatus
+	err = withoutKeychainInteraction(func() { status = C.readCredential(query, &result) })
 	if result != 0 {
 		defer C.CFRelease(result)
+	}
+	if err != nil {
+		return nil, err
 	}
 	if status == C.errSecItemNotFound {
 		return nil, ErrMissing
@@ -123,7 +178,12 @@ func (v keychainVault) Save(provider string, credential []byte) error {
 		return err
 	}
 	defer C.CFRelease(C.CFTypeRef(query))
-	status := C.writeCredential(query, (*C.UInt8)(unsafe.Pointer(unsafe.SliceData(credential))), C.CFIndex(len(credential)))
+	var status C.OSStatus
+	if err := withoutKeychainInteraction(func() {
+		status = C.writeCredential(query, (*C.UInt8)(unsafe.Pointer(unsafe.SliceData(credential))), C.CFIndex(len(credential)))
+	}); err != nil {
+		return err
+	}
 	if status != C.errSecSuccess {
 		return ErrUnavailable
 	}
@@ -136,7 +196,10 @@ func (v keychainVault) Delete(provider string) error {
 		return err
 	}
 	defer C.CFRelease(C.CFTypeRef(query))
-	status := C.SecItemDelete(C.CFDictionaryRef(query))
+	var status C.OSStatus
+	if err := withoutKeychainInteraction(func() { status = C.SecItemDelete(C.CFDictionaryRef(query)) }); err != nil {
+		return err
+	}
 	if status != C.errSecSuccess && status != C.errSecItemNotFound {
 		return ErrUnavailable
 	}
