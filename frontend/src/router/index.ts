@@ -4,6 +4,7 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { beginStartupPlayback, unfinishedBookmark } from './libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useLibraryStore } from '@/stores/library'
+import { usesDemoCatalog } from '@/mocks/provider'
 
 function startupRoute() {
   if (!hasBridge()) return '/home'
@@ -29,10 +30,19 @@ export const router = createRouter({
     { path: '/licensed', name: 'licensed', component: () => import('@/views/LicensedLibraryView.vue'), meta: { nav: 'home' } },
     { path: '/search', name: 'search', component: () => import('@/views/SearchView.vue'), meta: { nav: 'home' } },
     { path: '/drama/:id', name: 'drama', component: () => import('@/views/DramaDetailView.vue'), meta: { nav: 'home' } },
+    { path: '/catalog/:id', name: 'catalog', component: () => import('@/views/DramaDetailView.vue'), meta: { nav: 'home' } },
     { path: '/watch/:dramaId/:episodeId', name: 'watch', component: () => import('@/views/WatchView.vue'), meta: { nav: 'home' } },
     { path: '/favorites', name: 'favorites', component: () => import('@/views/FavoritesView.vue'), meta: { nav: 'favorites' } },
     { path: '/history', name: 'history', component: () => import('@/views/HistoryView.vue'), meta: { nav: 'history' } },
     { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { nav: 'home' } },
     { path: '/settings', name: 'settings', component: () => import('@/views/SettingsView.vue'), meta: { nav: 'settings' } },
   ],
+})
+
+router.beforeEach(async (target) => {
+  if (target.name !== 'watch') return
+  const id = String(target.params.dramaId)
+  // The watch route currently understands bundled demo media. Do not mount it
+  // for another catalog, even when the catalog happens to reuse a demo ID.
+  if (id.startsWith('local-') || !(await usesDemoCatalog().catch(() => false))) return { name: 'drama', params: { id } }
 })

@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
-import { mockProvider, searchDramas, HOT_WORDS, type SearchFilters } from '@/mocks/provider'
+import { loadCatalogHome, searchDramas, usesDemoCatalog, HOT_WORDS, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
@@ -41,30 +41,48 @@ const status = computed(() => String(route.query.status ?? '') as SearchFilters[
 const sort = computed(() => String(route.query.sort ?? 'comprehensive') as NonNullable<SearchFilters['sort']>)
 const page = ref(1)
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
+const isDemo = ref(false)
+const localResultsOnly = ref(false)
 const err = ref(''); const items = ref<Drama[]>([])
 let token = 0
 async function run() {
   const my = ++token; state.value = 'loading'; page.value = 1
+  localResultsOnly.value = false
   if (route.query.state === 'loading') return
   try {
+    const demo = await usesDemoCatalog()
+    if (my !== token) return
+    isDemo.value = demo
     const mode = route.query.state === 'error' ? 'error' : 'normal'
     const section = feed.value
     const topicBrowse = browseTopics.value
     const selectedTopic = topic.value
     let results: Drama[]
+    let localOnly = false
     let tags: string[] = []
     if (section) {
-      const home = await mockProvider.home(mode)
+      const home = await loadCatalogHome(mode)
       results = section === 'today' ? home.todayNew : home.rankings[section]
     } else if (topicBrowse) {
       const dramas = await searchDramas('', {}, mode, catalog.card)
       tags = [...new Set(dramas.flatMap((drama) => drama.tags.map((tag) => tag.trim()).filter(Boolean)))]
         .sort((a, b) => a.localeCompare(b, 'zh-CN'))
       results = selectedTopic ? dramas.filter((drama) => drama.tags.some((tag) => tag.trim() === selectedTopic)) : dramas
+    } else if (!demo && kind.value === '本地片库') {
+      results = catalog.searchLocal(q.value)
     } else {
-      results = await searchDramas(q.value, { kind: kind.value, status: status.value, sort: sort.value, castOnly: castOnly.value }, mode, catalog.card)
+      const local = demo || castOnly.value ? [] : catalog.searchLocal(q.value)
+      try {
+        const matched = await searchDramas(q.value, { kind: kind.value, status: status.value, sort: sort.value, castOnly: castOnly.value }, mode, catalog.card)
+        results = [...local, ...matched]
+      } catch (error) {
+        if (!local.length) throw error
+        localOnly = true
+        results = local
+      }
     }
     if (my !== token) return
+    localResultsOnly.value = localOnly
     topics.value = tags
     items.value = results
     state.value = results.length ? 'ready' : 'empty'
@@ -97,10 +115,13 @@ const selectTopic = (event: Event) => {
   return patch({ topic: value || undefined, page: undefined })
 }
 const selectKind = (value: string) => patch(value === '本地片库' ? { kind: value, status: undefined } : { kind: value || undefined })
-const kinds = computed(() => [
+const kinds = computed(() => isDemo.value ? [
   { k: '', l: '全部', i: null }, { k: '真人剧', l: '真人剧', i: Video }, { k: '漫剧', l: '漫剧', i: Cat }, { k: 'AI剧', l: 'AI剧', i: Bot },
   ...(!castOnly.value && catalog.entries.length ? [{ k: '本地片库', l: '本地片库', i: BookOpen }] : []),
-])
+] : catalog.entries.length ? [
+  { k: '', l: '全部', i: null },
+  { k: '本地片库', l: '本地片库', i: BookOpen },
+] : [])
 const sorts = [{ k: 'hot', l: '最热' }, { k: 'new', l: '最新' }, { k: 'rating', l: '评分最高' }]
 const kindTone = (k: string) => (k === '漫剧' ? 'purple' : k === 'AI剧' ? 'blue' : 'red')
 const go = (t: string) => {
@@ -115,6 +136,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
       <header class="head">
         <h1><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
         <p v-if="state === 'ready' || state === 'empty'" class="count" data-testid="result-count">共找到 {{ items.length }} 部相关内容</p>
+        <p v-if="localResultsOnly" class="count" role="status">主目录暂不可用，已显示本地片库的匹配结果。</p>
       </header>
       <label v-if="browseTopics" class="topic-filter">
         题材
@@ -123,12 +145,12 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
           <option v-for="tag in topics" :key="tag" :value="tag">{{ tag }}</option>
         </select>
       </label>
-      <div v-if="!discoveryTitle" class="filters" :class="{ 'filters-last': kind === '本地片库' }" role="group" aria-label="筛选">
+      <div v-if="kinds.length && !discoveryTitle" class="filters" :class="{ 'filters-last': kind === '本地片库' }" role="group" aria-label="筛选">
         <button v-for="k in kinds" :key="k.l" class="pill" :class="{ on: kind === k.k }" :data-testid="`kind-${k.l}`" @click="selectKind(k.k)"><component :is="k.i" v-if="k.i" :size="17" />{{ k.l }}</button>
-        <button v-if="kind !== '本地片库'" class="pill" :class="{ on: status === 'finished' }" data-testid="status-finished" @click="patch({ status: status === 'finished' ? undefined : 'finished' })"><CircleCheck :size="17" />已完结</button>
-        <button v-if="kind !== '本地片库'" class="pill" :class="{ on: status === 'ongoing' }" data-testid="status-ongoing" @click="patch({ status: status === 'ongoing' ? undefined : 'ongoing' })"><RefreshCw :size="17" />连载中</button>
+        <button v-if="isDemo && kind !== '本地片库'" class="pill" :class="{ on: status === 'finished' }" data-testid="status-finished" @click="patch({ status: status === 'finished' ? undefined : 'finished' })"><CircleCheck :size="17" />已完结</button>
+        <button v-if="isDemo && kind !== '本地片库'" class="pill" :class="{ on: status === 'ongoing' }" data-testid="status-ongoing" @click="patch({ status: status === 'ongoing' ? undefined : 'ongoing' })"><RefreshCw :size="17" />连载中</button>
       </div>
-      <div v-if="!discoveryTitle && kind !== '本地片库'" class="sorts"><span class="comp">综合排序<ChevronDown :size="14" /></span>
+      <div v-if="isDemo && !discoveryTitle && kind !== '本地片库'" class="sorts"><span class="comp">综合排序<ChevronDown :size="14" /></span>
         <button v-for="s in sorts" :key="s.k" :class="{ on: sort === s.k }" :data-testid="`sort-${s.k}`" @click="patch({ sort: s.k })">{{ s.l }}</button></div>
 
       <div v-if="state === 'loading'" class="list"><Skeleton v-for="i in 4" :key="i" style="height: 138px" /></div>
@@ -137,16 +159,16 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
         <BaseButton v-if="!discoveryTitle || browseTopics && topic" variant="outline" @click="browseTopics ? patch({ topic: undefined, page: undefined }) : router.push({ name: 'search' })">清除筛选</BaseButton>
       </EmptyState>
       <ul v-else class="list">
-        <li v-for="d in shown" :key="d.id" class="item" data-testid="result-card">
-          <button class="cover" :aria-label="`播放${d.title}`" @click="watchIt(d.id)"><img :src="d.cover" :alt="d.title" /><i class="pb"><Play :size="12" fill="currentColor" /></i></button>
+        <li v-for="d in shown" :key="`${d.providerOnly ? 'catalog' : 'local'}:${d.id}`" class="item" data-testid="result-card">
+          <button class="cover" :aria-label="`${d.providerOnly ? '查看' : '播放'}${d.title}`" @click="d.providerOnly ? router.push(detailRoute(d.id, true)) : watchIt(d.id)"><img :src="d.cover" :alt="d.title" /><i v-if="!d.providerOnly" class="pb"><Play :size="12" fill="currentColor" /></i></button>
           <div class="info">
-            <div class="t"><h3 class="clamp-1">{{ d.title }}</h3><span v-if="d.kind !== '本地片库'" class="heat"><Flame :size="15" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</span></div>
-            <div class="tags"><span class="tag" :class="kindTone(d.kind)">{{ d.kind }}</span><span v-for="t in d.tags" :key="t" class="tag">{{ t }}</span></div>
+            <div class="t"><h3 class="clamp-1">{{ d.title }}</h3><span v-if="!d.providerOnly && d.kind !== '本地片库'" class="heat"><Flame :size="15" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</span></div>
+            <div class="tags"><span v-if="d.kind" class="tag" :class="kindTone(d.kind)">{{ d.kind }}</span><span v-for="t in d.tags" :key="t" class="tag">{{ t }}</span></div>
             <p class="sum clamp-2">{{ d.summary }}</p>
           </div>
-          <div class="act"><span class="eps">共{{ d.episodeCount }}集<template v-if="d.kind !== '本地片库'"> · {{ d.finished ? '已完结' : '连载中' }}</template></span>
-            <BaseButton data-testid="play-now" @click="watchIt(d.id)"><Play :size="15" fill="currentColor" />立即播放</BaseButton>
-            <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id))">查看详情</BaseButton></div>
+          <div class="act"><span class="eps">共{{ d.episodeCount }}集<template v-if="!d.providerOnly && d.kind !== '本地片库'"> · {{ d.finished ? '已完结' : '连载中' }}</template></span>
+            <BaseButton v-if="!d.providerOnly" data-testid="play-now" @click="watchIt(d.id)"><Play :size="15" fill="currentColor" />立即播放</BaseButton>
+            <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id, d.providerOnly))">查看详情</BaseButton></div>
         </li>
       </ul>
       <nav v-if="state === 'ready' && pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === currentPage }" :aria-current="p === currentPage ? 'page' : undefined" @click="selectPage(p)">{{ p }}</button></nav>
@@ -156,7 +178,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
       <section class="panel"><header><Clock :size="26" /><h3>最近搜索</h3><button class="clr" data-testid="clear-history" @click="hist.clear()">清空</button></header>
         <p v-if="!hist.history.length" class="none">暂无搜索记录</p>
         <ul><li v-for="h in hist.history.slice(0, 5)" :key="h" data-testid="history-item"><button class="w" @click="go(h)"><Search :size="16" /><span class="clamp-1">{{ h }}</span></button><button class="x" :aria-label="`删除${h}`" @click="hist.remove(h)"><X :size="14" /></button></li></ul></section>
-      <section class="panel hot"><header><Flame :size="26" color="#ff6a3d" fill="#ff6a3d" /><h3>热搜关键词</h3></header>
+      <section v-if="isDemo" class="panel hot"><header><Flame :size="26" color="#ff6a3d" fill="#ff6a3d" /><h3>热搜关键词</h3></header>
         <ol><li v-for="(w, i) in HOT_WORDS" :key="w.word"><button data-testid="hot-word" @click="go(w.word)"><b :class="`n${i < 3 ? i + 1 : 0}`">{{ i + 1 }}</b><span class="clamp-1" :class="{ top: i === 0 }">{{ w.word }}</span><em><Flame :size="13" color="#ff6a3d" fill="#ff6a3d" />{{ w.heat }}</em></button></li></ol></section>
     </aside>
   </div>

@@ -140,6 +140,32 @@ func (a *App) Home() ([]provider.Drama, error) { return a.p.Home(a.context()) }
 
 func (a *App) HomeFeed() (provider.HomeFeed, error) { return a.p.HomeFeed(a.context()) }
 
+// Catalog methods address only the active provider. Its IDs are independent of
+// the locally configured library, even when both providers use the same ID.
+func (a *App) CatalogSearch(q string) ([]provider.Drama, error) {
+	ctx := a.context()
+	if a.p.Capabilities(ctx)["search"] != provider.Ready {
+		return nil, provider.ErrNotAuthorized
+	}
+	return a.p.Search(ctx, q)
+}
+
+func (a *App) CatalogDrama(id string) (provider.Drama, error) {
+	ctx := a.context()
+	if a.p.Capabilities(ctx)["catalog"] != provider.Ready {
+		return provider.Drama{}, provider.ErrNotAuthorized
+	}
+	return a.p.Drama(ctx, id)
+}
+
+func (a *App) CatalogEpisodes(id string) ([]provider.Episode, error) {
+	ctx := a.context()
+	if a.p.Capabilities(ctx)["catalog"] != provider.Ready {
+		return nil, provider.ErrNotAuthorized
+	}
+	return a.p.Episodes(ctx, id)
+}
+
 func (a *App) Search(q string) ([]provider.Drama, error) {
 	ctx := a.context()
 	results, err := a.p.Search(ctx, q)

@@ -37,7 +37,7 @@ const resume = computed(() => lib.history.flatMap((history) => {
   const next = episode !== history.episode
   return [{ d: drama, episode, next, percent: next ? 0 : history.percent, watchedAt: history.watchedAt }]
 }).sort((a, b) => Number(a.next) - Number(b.next) || b.watchedAt - a.watchedAt).slice(0, 3))
-const openDrama = (id: string) => router.push(detailRoute(id))
+const openDrama = (id: string, fromProvider?: boolean) => router.push(detailRoute(id, fromProvider))
 function watchNow(id: string) {
   const history = lib.history.find((entry) => entry.dramaId === id)
   const drama = card(id)
@@ -58,9 +58,9 @@ const autoplay = computed(() => route.query.static === undefined)
     <ErrorState v-else-if="catalog.status === 'error'" :message="catalog.error" @retry="load" />
     <EmptyState v-else-if="catalog.status === 'empty'" title="暂无推荐内容" hint="稍后再来看看吧" />
     <template v-else-if="home">
-      <HeroCarousel :banners="home.banners" :autoplay="autoplay" :is-fav="lib.isFav" @watch="watchNow" @fav="fav" />
+      <HeroCarousel v-if="home.banners.length" :banners="home.banners" :autoplay="autoplay" :is-fav="lib.isFav" @watch="watchNow" @fav="fav" />
 
-      <section id="categories" class="cats" aria-label="题材精选">
+      <section v-if="home.categories.length" id="categories" class="cats" aria-label="题材精选">
         <h3 class="h-label">题材精选</h3>
         <button v-for="c in home.categories" :key="c.key" class="chip" :data-testid="`cat-${c.key}`" @click="searchCategory(c.label)">
           <component :is="icons[c.icon]" :size="18" :color="c.color" :fill="['Flame','Heart','Crown','Zap','Ghost'].includes(c.icon) ? c.color : 'none'" />{{ c.label }}
@@ -68,9 +68,9 @@ const autoplay = computed(() => route.query.static === undefined)
         <button class="more" data-testid="more-topics" @click="router.push({ name: 'search', query: { browse: 'topics' } })">更多<ChevronRight :size="14" /></button>
       </section>
 
-      <section class="block" aria-label="今日上新">
+      <section v-if="home.todayNew.length || home.banners.length" class="block" aria-label="今日上新">
         <div class="sec-h"><h2>今日上新</h2><span class="muted">共 {{ home.todayNew.length }} 部</span><span class="new">NEW</span><button class="link" data-testid="all-today-new" @click="router.push({ name: 'search', query: { feed: 'today' } })">查看更多<ChevronRight :size="15" /></button></div>
-        <div class="grid6"><NewDramaCard v-for="d in home.todayNew.slice(0, 6)" :key="d.id" :drama="d" badge="今日上新" @open="openDrama" /></div>
+        <div class="grid6"><NewDramaCard v-for="d in home.todayNew.slice(0, 6)" :key="d.id" :drama="d" badge="今日上新" @open="openDrama($event, d.providerOnly)" /></div>
       </section>
 
       <section id="rank" class="block rank" aria-label="排行榜">
@@ -78,9 +78,9 @@ const autoplay = computed(() => route.query.static === undefined)
           <div class="seg" role="tablist"><button v-for="t in tabs" :key="t.k" role="tab" :aria-selected="tab === t.k" :class="{ on: tab === t.k }" :data-testid="`rank-${t.k}`" @click="selectRank(t.k)">{{ t.l }}</button></div>
           <button class="link" data-testid="full-ranking" @click="router.push({ name: 'search', query: { feed: tab } })">完整榜单<ChevronRight :size="15" /></button></div>
         <ol class="rank-list">
-          <li v-for="(d, i) in ranking" :key="d.id"><button class="ri" data-testid="rank-item" @click="openDrama(d.id)">
+          <li v-for="(d, i) in ranking" :key="d.id"><button class="ri" data-testid="rank-item" @click="openDrama(d.id, d.providerOnly)">
             <span class="cov"><img :src="d.cover" :alt="d.title" /><b class="no" :class="rankClass(i)">{{ i + 1 }}</b></span>
-            <span class="rt"><strong class="clamp-2">{{ d.title }}</strong><em><Flame :size="14" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></span>
+            <span class="rt"><strong class="clamp-2">{{ d.title }}</strong><em v-if="!d.providerOnly"><Flame :size="14" color="#ff6a3d" fill="#ff6a3d" />{{ d.heat.toFixed(1) }}万热度</em></span>
           </button></li>
         </ol>
       </section>

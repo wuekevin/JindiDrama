@@ -17,8 +17,9 @@ export function continuationEpisode(drama: Drama, history: HistoryEntry) {
   if (!savedMediaIssue(drama, history.episode) && !savedMediaIssue(drama, episode)) return episode
 }
 
-export function detailRoute(id: string) {
-  return id.startsWith('local-') ? { name: 'licensed', query: { id } } : `/drama/${id}`
+export function detailRoute(id: string, activeCatalog = false) {
+  if (activeCatalog) return `/catalog/${encodeURIComponent(id)}`
+  return id.startsWith('local-') ? { name: 'licensed', query: { id } } : `/drama/${encodeURIComponent(id)}`
 }
 
 export function playbackRoute(id: string, episode: number, autoplay = false) {

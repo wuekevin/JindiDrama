@@ -2,9 +2,9 @@ import { localId } from '@/localId'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
 import type { DemoQualityId } from '@/player/demoMedia'
 import { captureLibraryIntent, parseLibraryCache, replayLibraryBatch, type LibraryBatch, type LibraryCache, type LibraryReceipt, type LibraryState } from './libraryRecovery'
-import type { HistoryEntry } from '@/types'
+import type { Capability, CapabilityState, HistoryEntry } from '@/types'
 import type { Episode, PlaybackTicket } from '../../../contracts/provider-contracts'
-type CatalogDrama = Pick<import('@/types').Drama, 'id' | 'title' | 'summary' | 'tags' | 'episodeCount' | 'updatedTo'>
+export type CatalogDrama = Pick<import('@/types').Drama, 'id' | 'title' | 'summary' | 'tags' | 'episodeCount' | 'updatedTo'>
 
 export interface LocalDanmaku { id: number; offsetMs: number; text: string }
 
@@ -66,8 +66,13 @@ interface GoApp {
   LocalDanmaku(dramaId: string, episode: number): Promise<LocalDanmaku[]>
   SendLocalDanmaku(dramaId: string, episode: number, offsetMs: number, text: string): Promise<LocalDanmaku>
   HomeFeed(): Promise<HomeFeed>
+  Home?(): Promise<CatalogDrama[]>
+  Capabilities?(): Promise<Partial<Record<Capability, CapabilityState>>>
+  CatalogSearch?(query: string): Promise<CatalogDrama[]>
+  CatalogDrama?(id: string): Promise<CatalogDrama>
+  CatalogEpisodes?(id: string): Promise<Episode[]>
 
-  Search(query: string): Promise<Pick<CatalogDrama, "id" | "title">[]>
+  Search(query: string): Promise<CatalogDrama[]>
   Drama(id: string): Promise<CatalogDrama>
   Episodes(id: string): Promise<Episode[]>
   ResolvePlayback(dramaId: string, episode: number): Promise<PlaybackTicket>
@@ -173,12 +178,19 @@ export const chooseLicensedDirectory = () => api()?.ChooseLicensedDirectory?.()
 export const clearLicensedDirectory = () => api()?.ClearLicensedDirectory?.()
 export const loadLicensedCatalog = () => api()?.LicensedCatalog?.()
 export const loadHomeFeed = () => api()?.HomeFeed()
+export const loadProviderCatalog = () => api()?.Home?.()
+export const loadProviderCapabilities = () => api()?.Capabilities?.()
+export const hasProviderCapabilities = () => typeof api()?.Capabilities === 'function'
 export const activeProviderName = () => api()?.ProviderName?.()
 export const searchProvider = (query: string) => api()?.Search(query)
+export const searchActiveCatalog = (query: string) => api()?.CatalogSearch?.(query)
+export const loadCatalogDrama = (id: string) => api()?.CatalogDrama?.(id)
 export const loadProviderEpisodes = (id: string) => api()?.Episodes(id)
-export function loadProviderDetail(id: string) {
+export function loadProviderDetail(id: string, activeCatalog = false) {
   const app = api()
-  return app ? Promise.all([app.Drama(id), app.Episodes(id)]) : undefined
+  if (!app) return
+  if (activeCatalog) return app.CatalogDrama && app.CatalogEpisodes ? Promise.all([app.CatalogDrama(id), app.CatalogEpisodes(id)]) : undefined
+  return Promise.all([app.Drama(id), app.Episodes(id)])
 }
 export const resolvePlayback = (dramaId: string, episode: number) => api()?.ResolvePlayback(dramaId, episode)
 const warn = (e: unknown) => console.warn('[bridge]', e)

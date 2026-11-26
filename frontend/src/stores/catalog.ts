@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { mockProvider, type HomePayload } from '@/mocks/provider'
+import { loadCatalogHome, type HomePayload } from '@/mocks/provider'
 
 export const useCatalogStore = defineStore('catalog', () => {
   const status = ref<'idle'|'loading'|'ready'|'empty'|'error'>('idle')
@@ -13,13 +13,14 @@ export const useCatalogStore = defineStore('catalog', () => {
     status.value = 'loading'; error.value = ''
     if (mode === 'loading') return
     try {
-      const data = await mockProvider.home(mode === 'normal' ? 'normal' : mode)
+      const data = await loadCatalogHome(mode)
       if (my !== token) return
       home.value = data
-      status.value = data.todayNew.length === 0 && data.banners.length === 0 ? 'empty' : 'ready'
+      status.value = data.todayNew.length || data.banners.length || Object.values(data.rankings).some((list) => list.length) ? 'ready' : 'empty'
     } catch (e) {
       if (my !== token) return
-      error.value = (e as Error).message; status.value = 'error'
+      error.value = typeof e === 'string' ? e : e instanceof Error ? e.message : '目录暂不可用'
+      status.value = 'error'
     }
   }
   return { status, error, home, loadHome }

@@ -56,18 +56,18 @@ function closeClip() {
   selectedClip.value = null
 }
 
-watch(id, () => { closeClip(); tab.value = 'eps' })
+watch([id, () => route.name], () => { closeClip(); tab.value = 'eps' })
 let token = 0
 async function load(focusHeading = false) {
   const my = ++token; state.value = 'loading'
   if (route.query.state === 'loading') return
   try {
-    const result = await getDetail(id.value, route.query.state === 'error' ? 'error' : 'normal')
+    const result = await getDetail(id.value, route.query.state === 'error' ? 'error' : 'normal', route.name === 'catalog')
     if (my !== token) return
     detail.value = result
     state.value = result ? 'ready' : 'notfound'
     const history = lib.history.find((entry) => entry.dramaId === id.value)
-    group.value = history && result && !savedMediaIssue(result.drama, history.episode)
+    group.value = history && result && !result.drama.providerOnly && !savedMediaIssue(result.drama, history.episode)
       ? Math.floor((history.episode - 1) / 20) : 0
     expanded.value = false
     if (result && focusHeading) {
@@ -76,17 +76,17 @@ async function load(focusHeading = false) {
     }
   } catch (error) {
     if (my !== token) return
-    err.value = (error as Error).message
+    err.value = typeof error === 'string' ? error : error instanceof Error ? error.message : '详情加载失败'
     state.value = 'error'
   }
 }
-watch(id, (_, previous) => { void load(previous !== undefined) }, { immediate: true })
+watch([id, () => route.name], (_, [previous]) => { void load(previous !== undefined) }, { immediate: true })
 const groups = computed(() => (detail.value ? groupEpisodes(detail.value.drama.episodeCount) : []))
 const eps = computed(() => {
   const range = groups.value[group.value]
   return range ? (detail.value?.episodes ?? []).filter(({ index }) => index >= range.from && index <= range.to) : []
 })
-const hist = computed(() => lib.history.find((h) => h.dramaId === id.value))
+const hist = computed(() => detail.value?.drama.providerOnly ? undefined : lib.history.find((h) => h.dramaId === id.value))
 const hasEpisode = (episode: number) => detail.value?.episodes.some((item) => item.index === episode && item.available)
 const continuation = computed(() => {
   const history = hist.value
@@ -98,14 +98,14 @@ const continuation = computed(() => {
   }
   return { episode: history.episode, percent: history.percent, label: history.percent === 100 ? '重播本集' : '继续观看' }
 })
-const watchEp = (ep: number) => { if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
+const watchEp = (ep: number) => { if (detail.value?.drama.providerOnly) return; if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return } router.push(`/watch/${id.value}/${ep}`) }
 const progressOf = (ep: number) => (hist.value && hist.value.episode === ep ? hist.value.percent : ep < (hist.value?.episode ?? 0) ? 100 : 0)
 function fav() { void lib.notifySaved(lib.toggleFav(id.value) ? '已加入收藏' : '已取消收藏') }
 const share = () => copyShareLink(`/drama/${id.value}`)
 const tagIcon = (t: string) => ({ 古装: Landmark, 甜宠: Heart, 重生: Sprout, 权谋: Swords, 逆袭: Crown }[t] ?? Sparkles)
 const recommendationSource = computed(() => {
   const current = detail.value?.drama
-  return current?.id === id.value ? current : undefined
+  return current?.id === id.value && !current.providerOnly ? current : undefined
 })
 const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSource, 6)
 </script>
@@ -117,12 +117,12 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
     <EmptyState v-else-if="state === 'notfound'" title="没有找到这部短剧"><BaseButton variant="outline" @click="router.push('/home')">回到首页</BaseButton></EmptyState>
     <template v-else-if="detail">
       <section class="top">
-        <div class="poster"><img :src="detail.drama.cover" :alt="detail.drama.title" /><span class="badge"><Crown :size="13" fill="currentColor" />独播</span><b class="pt">{{ detail.drama.title }}</b></div>
+        <div class="poster"><img :src="detail.drama.cover" :alt="detail.drama.title" /><span v-if="!detail.drama.providerOnly" class="badge"><Crown :size="13" fill="currentColor" />独播</span><b class="pt">{{ detail.drama.title }}</b></div>
         <div class="meta">
-          <h1 ref="detailHeading" tabindex="-1">{{ detail.drama.title }}<span class="heat"><Flame :size="20" color="#ff6a3d" fill="#ff6a3d" />{{ detail.drama.heat.toFixed(1) }}万热度</span></h1>
-          <div class="stats"><span class="score"><Star :size="19" color="#f4b740" fill="#f4b740" /><b>{{ detail.rating }}</b> 分</span><i /><span><CirclePlay :size="17" />{{ detail.plays }}</span><i /><span><Heart :size="17" />{{ detail.favs }}</span></div>
+          <h1 ref="detailHeading" tabindex="-1">{{ detail.drama.title }}<span v-if="!detail.drama.providerOnly" class="heat"><Flame :size="20" color="#ff6a3d" fill="#ff6a3d" />{{ detail.drama.heat.toFixed(1) }}万热度</span></h1>
+          <div v-if="!detail.drama.providerOnly" class="stats"><span class="score"><Star :size="19" color="#f4b740" fill="#f4b740" /><b>{{ detail.rating }}</b> 分</span><i /><span><CirclePlay :size="17" />{{ detail.plays }}</span><i /><span><Heart :size="17" />{{ detail.favs }}</span></div>
           <div class="tags"><span v-for="t in detail.drama.tags" :key="t" class="tg"><component :is="tagIcon(t)" :size="15" />{{ t }}</span></div>
-          <div class="sum"><h4>剧情简介</h4><p :class="{ clamp: !expanded }" data-testid="summary">{{ expanded ? detail.long : detail.drama.summary }}</p><button class="exp" data-testid="expand" @click="expanded = !expanded">{{ expanded ? '收起' : '展开' }}<component :is="expanded ? ChevronUp : ChevronDown" :size="14" /></button></div>
+          <div class="sum"><h4>剧情简介</h4><p :class="{ clamp: !detail.drama.providerOnly && !expanded }" data-testid="summary">{{ expanded ? detail.long : detail.drama.summary }}</p><button v-if="!detail.drama.providerOnly" class="exp" data-testid="expand" @click="expanded = !expanded">{{ expanded ? '收起' : '展开' }}<component :is="expanded ? ChevronUp : ChevronDown" :size="14" /></button></div>
           <div v-if="detail.cast.length" class="cast">
             <h4>演示主演</h4>
             <RouterLink v-for="c in detail.cast" :key="c.name" class="cm" :to="{ name: 'search', query: { q: c.name, cast: '1' } }" :aria-label="`搜索 ${c.name} 的作品`" @click="recentSearch.add(c.name)" @auxclick.middle="recentSearch.add(c.name)">
@@ -131,8 +131,9 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
               <ChevronRight :size="14" />
             </RouterLink>
           </div>
-          <p class="status"><b>更新状态</b> {{ detail.schedule }} <u>|</u> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
-          <div class="cta">
+          <p class="status"><b>更新状态</b><template v-if="detail.schedule"> {{ detail.schedule }} <u>|</u></template> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
+          <p v-if="detail.drama.providerOnly" class="status">当前目录仅提供剧目信息，播放暂不可用。</p>
+          <div v-else class="cta">
             <BaseButton size="lg" data-testid="watch-now" @click="watchEp(1)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
             <button v-if="continuation" class="cont" data-testid="continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
             <BaseButton size="lg" variant="ghost" data-testid="fav" @click="fav"><component :is="lib.isFav(id) ? Check : Plus" :size="18" />{{ lib.isFav(id) ? '已收藏' : '收藏' }}</BaseButton>
@@ -143,11 +144,11 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
 
       <section class="mid">
         <div class="panel eps">
-          <header><div class="tabs"><button :class="{ on: tab === 'eps' }" data-testid="tab-eps" @click="tab = 'eps'">选集</button><button :class="{ on: tab === 'clips' }" data-testid="tab-clips" @click="tab = 'clips'">精彩片段</button></div><span class="range">{{ groups[group]?.label }}<ChevronDown :size="14" /></span></header>
+          <header><div class="tabs"><button :class="{ on: tab === 'eps' }" data-testid="tab-eps" @click="tab = 'eps'">选集</button><button v-if="detail.highlights.length" :class="{ on: tab === 'clips' }" data-testid="tab-clips" @click="tab = 'clips'">精彩片段</button></div><span class="range">{{ groups[group]?.label }}<ChevronDown :size="14" /></span></header>
           <template v-if="tab === 'eps'">
             <div class="groups"><button v-for="(g, i) in groups" :key="g.label" :class="{ on: i === group }" data-testid="ep-group" @click="group = i">{{ g.label }}</button></div>
-            <div class="grid"><button v-for="{ index: ep, available } in eps" :key="ep" class="ep" :class="{ cur: hist?.episode === ep, lock: !available }" data-testid="ep" :aria-label="`第${ep}集`" @click="watchEp(ep)">
-              <Play v-if="ep === 1 && !hist" :size="14" fill="currentColor" /><template v-else><Flame v-if="epHot(ep)" :size="13" color="#ff6a3d" fill="#ff6a3d" />{{ ep }}</template>
+            <div class="grid"><button v-for="{ index: ep, available } in eps" :key="ep" class="ep" :class="{ cur: hist?.episode === ep, lock: !available }" data-testid="ep" :aria-label="`第${ep}集`" :disabled="detail.drama.providerOnly" @click="watchEp(ep)">
+              <Play v-if="!detail.drama.providerOnly && ep === 1 && !hist" :size="14" fill="currentColor" /><template v-else><Flame v-if="!detail.drama.providerOnly && epHot(ep)" :size="13" color="#ff6a3d" fill="#ff6a3d" />{{ ep }}</template>
               <i v-if="progressOf(ep) > 0 && progressOf(ep) < 100" class="pg" :style="{ width: progressOf(ep) + '%' }" /></button></div>
           </template>
           <ul v-else class="clips"><li v-for="c in detail.highlights" :key="c.id"><button data-testid="clip" @click="openClip(c, $event)"><Play :size="16" />{{ c.title }}<em>{{ c.dur }}</em></button></li></ul>

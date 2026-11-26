@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { byId } from '@/mocks/data'
-import { getDetail, searchDramas } from '@/mocks/provider'
+import { catalogSuggestions, getDetail, searchDramas } from '@/mocks/provider'
 
 describe('searchDramas', () => {
   it('matches keyword and sorts by heat', async () => {
@@ -31,7 +31,7 @@ describe('searchDramas', () => {
     const card = (id: string) => id === local.id ? local : byId(id)
     const Search = vi.fn().mockResolvedValue([{ id: local.id }, { id: 'd1' }, { id: 'd3' }])
     const ProviderName = vi.fn().mockResolvedValue('mock')
-    vi.stubGlobal('go', { app: { App: { Search, ProviderName } } })
+    vi.stubGlobal('go', { app: { App: { Search, CatalogSearch: Search, ProviderName, Capabilities: async () => ({ search: 'ready' }) } } })
     try {
       expect((await searchDramas('苏晚宁', {}, 'normal', card)).map(({ id }) => id)).toEqual(['d1', 'd3', local.id])
       expect((await searchDramas('苏晚宁', { castOnly: true }, 'normal', card)).map(({ id }) => id)).toEqual(['d1', 'd3'])
@@ -43,11 +43,27 @@ describe('searchDramas', () => {
   })
   it('does not attach demo cast to details from a different provider with the same ID', async () => {
     const ProviderName = vi.fn().mockResolvedValue('authorized')
-    vi.stubGlobal('go', { app: { App: { ProviderName, Drama: async () => byId('d1'), Episodes: async () => [] } } })
+    const Drama = async () => byId('d1')
+    const Episodes = async () => []
+    vi.stubGlobal('go', { app: { App: { ProviderName, Capabilities: async () => ({ catalog: 'ready' }), CatalogDrama: Drama, CatalogEpisodes: Episodes, Drama, Episodes } } })
     try {
-      expect((await getDetail('d1'))?.cast).toEqual([])
+      expect((await getDetail('d1', 'normal', true))?.cast).toEqual([])
+      expect(await getDetail('d1')).toBeNull()
       ProviderName.mockResolvedValue('mock')
       expect((await getDetail('d1'))?.cast.map(({ name }) => name)).toContain('苏晚宁')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('treats a nil search list as empty for both results and suggestions in a non-demo catalog', async () => {
+    vi.stubGlobal('go', { app: { App: {
+      ProviderName: async () => 'authorized',
+      Capabilities: async () => ({ search: 'ready' }),
+      CatalogSearch: async () => null,
+    } } })
+    try {
+      expect(await searchDramas('替嫁')).toEqual([])
+      expect(await catalogSuggestions('替嫁')).toEqual([])
     } finally {
       vi.unstubAllGlobals()
     }

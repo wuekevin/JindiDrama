@@ -3,8 +3,10 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { House, Flame, Cat, Video, Bot, ChartNoAxesColumn, Heart, Clock, Settings } from 'lucide-vue-next'
 import BrandLogo from './BrandLogo.vue'
+import { useLicensedCatalog } from '@/stores/licensedCatalog'
 
 const route = useRoute(); const router = useRouter()
+const catalog = useLicensedCatalog()
 const main = [
   { key: 'home', label: '推荐', icon: House, to: '/home' },
   { key: 'hot', label: '热门', icon: Flame, to: '/search?sort=hot' },
@@ -19,6 +21,7 @@ const lib = [
   { key: 'settings', label: '设置', icon: Settings, to: '/settings' },
 ]
 const active = computed(() => String(route.meta.nav ?? ''))
+const visibleMain = computed(() => catalog.demoCatalog ? main : main.filter(({ key }) => key === 'home' || key === 'rank'))
 function go(to: string) { router.push(to) }
 </script>
 <template>
@@ -26,7 +29,7 @@ function go(to: string) { router.push(to) }
     <div class="logo"><BrandLogo /></div>
     <nav>
       <ul class="group">
-        <li v-for="n in main" :key="n.key">
+        <li v-for="n in visibleMain" :key="n.key">
           <button class="item" :class="{ active: active === 'home' && n.key === 'home' }" :aria-current="active === 'home' && n.key === 'home' ? 'page' : undefined" :data-testid="`nav-${n.key}`" @click="go(n.to)">
             <component :is="n.icon" :size="24" :stroke-width="1.7" /><span>{{ n.label }}</span>
           </button>

@@ -1,17 +1,19 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray, searchProvider } from '@/bindings'
+import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray } from '@/bindings'
 import { CLOSE_TO_TRAY, TRAY_UNAVAILABLE_MESSAGE, useAppSettings } from '@/stores/appSettings'
 import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
+import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { searchDiscovery } from '@/router/searchDiscovery'
 import { Search, Minus, Square, X, CornerUpLeft } from 'lucide-vue-next'
 import UpdateNotifications from './UpdateNotifications.vue'
-import { suggestDemoSearch } from '@/mocks/provider'
+import { catalogSuggestions } from '@/mocks/provider'
 
 const route = useRoute(); const router = useRouter()
 const recentSearch = useSearchStore()
+const catalog = useLicensedCatalog()
 const topbar = ref<HTMLElement>()
 const compact = ref(false)
 let layoutObserver: ResizeObserver | undefined
@@ -42,15 +44,14 @@ watch([q, focused, suggestionsOpen], async ([text, active, open], [previous], on
   if (!active || !open || !query || suggestions.value.length) return
   let current = true
   onCleanup(() => { current = false })
+  const local = catalog.demoCatalog ? [] : catalog.searchLocal(query).map(({ title }) => title)
+  let titles: string[] = []
   try {
-    const desktop = searchProvider(query)
-    const titles = desktop
-      ? (await desktop).map(({ title }) => title)
-      : suggestDemoSearch(query)
-    if (current) suggestions.value = [...new Set(titles)].slice(0, 6)
+    titles = await catalogSuggestions(query)
   } catch {
     // 搜索提交仍可用，结果页负责显示错误。
   }
+  if (current) suggestions.value = [...new Set([...local, ...titles])].slice(0, 6)
 })
 function closeSuggestions() {
   suggestionsOpen.value = false
