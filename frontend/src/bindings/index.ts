@@ -1021,7 +1021,7 @@ export function backupNow() {
 }
 
 export type UpdateChannel = 'stable' | 'preview'
-export interface UpdateResult { current: string; latest: string; hasUpdate: boolean; url: string; notes: string; noRelease: boolean; preview: boolean; channel: UpdateChannel; downloadName?: string }
+export interface UpdateResult { current: string; latest: string; hasUpdate: boolean; url: string; notes: string; notesTruncated?: boolean; noRelease: boolean; preview: boolean; channel: UpdateChannel; downloadName?: string }
 export const getUpdateChannel = () => api()?.UpdateChannel?.() ?? Promise.resolve(null)
 export const setUpdateChannel = (channel: UpdateChannel) =>
   api()?.SetUpdateChannel?.(channel) ?? Promise.reject(new Error('桌面更新渠道不可用'))

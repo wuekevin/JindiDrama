@@ -379,7 +379,11 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
         <p v-else-if="checking">正在检查更新…</p>
         <p v-else-if="!upd">暂无新版本更新日志</p>
         <p v-else-if="upd.notes.trim()" data-testid="release-notes-body">{{ upd.notes }}</p>
-        <p v-else>该版本未提供更新说明</p>
+        <p v-else-if="!upd.notesTruncated">该版本未提供更新说明</p>
+      </div>
+      <div v-if="upd?.notesTruncated && !checking && !channelBusy" class="release-notes-more">
+        <p>当前仅显示部分更新说明。</p>
+        <BaseButton variant="outline" size="sm" @click="viewRelease">在发布页查看完整说明</BaseButton>
       </div>
     </Modal>
     <Modal :open="showBackup" title="数据备份已创建" confirm-text="关闭" :show-cancel="false" @confirm="backupPath = ''" @cancel="backupPath = ''">
@@ -466,6 +470,7 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
   }
 }
 .backup-path { overflow-wrap: anywhere; }
+.release-notes-more { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 12px; }
 .release-notes-text { max-height: 52vh; overflow-y: auto; overflow-wrap: anywhere; white-space: pre-wrap; h4 { margin-bottom: 8px; } }
 .spin { animation: sp 1s linear infinite; } @keyframes sp { to { transform: rotate(360deg); } }
 .ab.has-update .links {

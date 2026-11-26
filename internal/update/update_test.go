@@ -138,14 +138,24 @@ func TestCheckNeverOffersDowngradeAndPreservesUTF8(t *testing.T) {
 	defer server.Close()
 	for _, installed := range []string{"v1.2.3+older", "v2.0.0"} {
 		result, err := Check(t.Context(), nil, server.URL, installed)
-		if err != nil || result.HasUpdate || result.URL != "" || result.Notes != "" {
+		if err != nil || result.HasUpdate || result.URL != "" || result.Notes != "" || result.NotesTruncated {
 			t.Fatalf("unexpected downgrade or equal-version link: %+v, %v", result, err)
 		}
 	}
 	result, err := Check(t.Context(), nil, server.URL, "v1.2.3-rc.10")
 	if err != nil || !result.HasUpdate || result.URL != releaseURLPrefix+"v1.2.3+build" ||
-		!utf8.ValidString(result.Notes) || len([]rune(result.Notes)) != maxNotes {
+		!result.NotesTruncated || !utf8.ValidString(result.Notes) || len([]rune(result.Notes)) != maxNotes {
 		t.Fatalf("expected a stable release page and bounded UTF-8 notes, got version %q, %v", result.Latest, err)
+	}
+}
+
+func TestReleaseNotesExactlyAtLimitAreComplete(t *testing.T) {
+	const tag = "v1.2.3"
+	notes := strings.Repeat("剧", maxNotes)
+	result, err := releaseResult(Result{}, release{Tag: tag, URL: releaseURLPrefix + tag, Body: notes}, "v1.2.2", tag)
+	if err != nil || !result.HasUpdate || result.Notes != notes || result.NotesTruncated {
+		t.Fatalf("notes at the limit: update=%v length=%d truncated=%v err=%v",
+			result.HasUpdate, len([]rune(result.Notes)), result.NotesTruncated, err)
 	}
 }
 

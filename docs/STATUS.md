@@ -583,3 +583,9 @@
 - Windows 从创建私有暂存目录到发布及清理均通过打开的目录句柄执行。发布前后核对用户选择的路径是否仍指向原目录。写入前发现变化时取消并清理。如果写入后才发现变化，会提示在原目录查找。独占重命名保留同名文件，下载来源标记随已验证的安装包保存。[Microsoft 文件重命名接口](https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
 - 本机通过 Go vet、Go 全量、App 和更新模块竞态测试及 macOS 保存、取消、目录变化和来源标记专项。磁盘空间不足曾中断并行构建，清理临时副本后逐个复验通过。
 - Windows App 代码静态检查、原生测试程序及 x64 生产程序交叉编译通过。下一次 Windows CI 将执行目录改向、下载过程中同名文件出现以及来源标记用例。[BMad 记录](../_bmad-output/plan-e13-windows-update-destination.md)
+
+## E13 更新日志全文入口（2026-11-27）
+
+- 更新日志超过 4000 字符时，保留原来的纯文本预览并提示仅显示部分说明。弹窗内可打开当前版本已核验的发布页。恰好 4000 字符的说明视为完整。切换渠道或再次检查时，旧日志及其全文入口随候选撤下。
+- 对照设置设计稿，验证弹窗内正文键盘滚动、Tab 到全文入口、Enter 打开发布页和 Esc 后焦点归还。默认窗口和 1280×860、220% 缩放均核对操作可见。[默认截图](../build/bin/qa-complete-release-notes/release-notes-truncated.png) · [220% 截图](../build/bin/qa-complete-release-notes/release-notes-truncated-220.png)
+- 前端生产构建、122 项 Vitest、44 项设置 Playwright、Go vet、Go 全量、更新和 App 竞态以及 Windows x64 生产交叉编译通过。浏览器使用发布候选夹具验证入口，项目正式 Release 联调仍待发行。[BMad 记录](../_bmad-output/plan-e13-complete-release-notes.md)

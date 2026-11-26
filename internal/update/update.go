@@ -30,16 +30,17 @@ const (
 )
 
 type Result struct {
-	Current      string `json:"current"`
-	Latest       string `json:"latest"`
-	HasUpdate    bool   `json:"hasUpdate"`
-	URL          string `json:"url"`
-	Notes        string `json:"notes"`
-	NoRelease    bool   `json:"noRelease"`
-	Preview      bool   `json:"preview"`
-	Channel      string `json:"channel"`
-	DownloadName string `json:"downloadName,omitempty"`
-	Download     *Asset `json:"-"`
+	Current        string `json:"current"`
+	Latest         string `json:"latest"`
+	HasUpdate      bool   `json:"hasUpdate"`
+	URL            string `json:"url"`
+	Notes          string `json:"notes"`
+	NotesTruncated bool   `json:"notesTruncated,omitempty"`
+	NoRelease      bool   `json:"noRelease"`
+	Preview        bool   `json:"preview"`
+	Channel        string `json:"channel"`
+	DownloadName   string `json:"downloadName,omitempty"`
+	Download       *Asset `json:"-"`
 }
 
 type release struct {
@@ -158,6 +159,7 @@ func releaseResult(res Result, r release, installed, latest string) (Result, err
 		res.HasUpdate = true
 		res.URL = releaseURLPrefix + url.PathEscape(tag)
 		notes := []rune(r.Body)
+		res.NotesTruncated = len(notes) > maxNotes
 		res.Notes = string(notes[:min(len(notes), maxNotes)])
 		res.Download = selectAsset(r.Assets, runtime.GOOS, runtime.GOARCH)
 		if res.Download != nil {

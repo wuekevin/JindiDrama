@@ -281,7 +281,7 @@ test('desktop notifications share available releases, persist read state and cle
   await expect(unread).toHaveCount(0)
 })
 
-test('reads the release notes as scrollable plain text and clears stale candidates', async ({ page }) => {
+test('reads the release notes as scrollable plain text and clears stale candidates', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     let channel = 'stable'
     Object.assign(window, { go: { app: { App: {
@@ -296,10 +296,12 @@ test('reads the release notes as scrollable plain text and clears stale candidat
       },
       UpdateChannel: async () => channel,
       SetUpdateChannel: async (next: string) => { channel = next },
+      OpenReleasePage: async (url: string) => { document.body.dataset.openedRelease = url },
       CheckUpdate: async () => ({
         current: 'v0.1.0', latest: channel === 'preview' ? `v0.3.0-rc.${'a'.repeat(160)}` : 'v0.2.0',
         hasUpdate: true, noRelease: false, preview: channel === 'preview', channel,
         url: 'https://github.com/wuekevin/JindiDrama/releases/tag/v0.2.0',
+        notesTruncated: channel === 'stable',
         notes: channel === 'preview' ? '  ' : `${Array.from({ length: 42 }, (_, i) => `第 ${i + 1} 项更新说明`).join('\n')}\n<b>说明到此结束</b>`,
       }),
     } } } })
@@ -307,6 +309,7 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await page.goto('/#/settings')
   const trigger = page.getByRole('button', { name: '版本更新日志' })
   const dialog = page.getByRole('dialog', { name: '版本更新日志' })
+  const fullNotes = dialog.getByRole('button', { name: '在发布页查看完整说明' })
   await trigger.click({ timeout: 5000 })
   await expect(dialog).toContainText('暂无新版本更新日志', { timeout: 3000 })
   await dialog.getByRole('button', { name: '关闭' }).click()
@@ -319,9 +322,21 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await expect(notes.locator('b')).toHaveCount(0)
   const scrollArea = dialog.locator('[tabindex="0"]')
   await expect(scrollArea).toBeFocused()
+  await expect(dialog.getByText('当前仅显示部分更新说明。')).toBeVisible()
+  await expect(fullNotes).toBeVisible()
   await page.screenshot({ path: '../design/rendered/10-版本更新说明.png' })
   await page.keyboard.press('End')
   await expect.poll(() => scrollArea.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((html) => { html.style.setProperty('--user-zoom', '2.2') })
+  await expect(fullNotes).toBeInViewport({ ratio: 0.95 })
+  await page.screenshot({ path: testInfo.outputPath('release-notes-truncated-220.png') })
+  await page.keyboard.press('Tab')
+  await expect(fullNotes).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(page.locator('body')).toHaveAttribute('data-opened-release', 'https://github.com/wuekevin/JindiDrama/releases/tag/v0.2.0')
+  await page.locator('html').evaluate((html) => { html.style.setProperty('--user-zoom', '1') })
+  await page.setViewportSize({ width: 1448, height: 1086 })
   await dialog.getByRole('heading', { name: '版本更新日志' }).click()
   await page.keyboard.press('Escape')
   await expect(trigger).toBeFocused()
@@ -330,11 +345,13 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await expect(dialog).toContainText('暂无新版本更新日志')
   await expect(dialog.getByRole('heading', { name: 'v0.2.0' })).toHaveCount(0)
   await expect(dialog.getByTestId('release-notes-body')).toHaveCount(0)
+  await expect(fullNotes).toHaveCount(0)
   await dialog.getByRole('button', { name: '关闭' }).click()
   await page.getByTestId('check-update').click()
   await expect(page.getByTestId('open-release')).toBeVisible()
   await trigger.click()
   await expect(dialog).toContainText('该版本未提供更新说明')
+  await expect(fullNotes).toHaveCount(0)
   await expect(dialog.getByRole('heading', { name: /^v0\.3\.0-rc\./ })).toBeVisible()
   expect(await scrollArea.evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
   await page.keyboard.press('Escape')
