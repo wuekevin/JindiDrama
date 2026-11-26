@@ -1077,6 +1077,20 @@ async function failWithMediaError(video: ReturnType<typeof historyVideo>, option
   }, options)
 }
 
+async function blockNextCMSAutoplay(page: Page) {
+  await page.evaluate(() => {
+    const nativePlay = HTMLMediaElement.prototype.play
+    let rejected = false
+    HTMLMediaElement.prototype.play = function () {
+      if (!rejected && this.src.endsWith('/1')) {
+        rejected = true
+        return Promise.reject(new DOMException('Playback requires a user gesture', 'NotAllowedError'))
+      }
+      return nativePlay.call(this)
+    }
+  })
+}
+
 test('CMS media fallback captures the final played position and ignores events from old media', async ({ page }) => {
   const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
@@ -1088,9 +1102,13 @@ test('CMS media fallback captures the final played position and ignores events f
   await playHistoryVideo(first)
   const duration = await durationMs(first)
   expect(desktop.rows()).toEqual([])
+  // Keep the restored frame still while checking the exact position. The
+  // playing scenario below separately checks automatic resumption.
+  await blockNextCMSAutoplay(page)
   const checkpoint = await failWithMediaError(first)
   expect(checkpoint).toBeGreaterThan(0.1)
   await expect(first).toHaveAttribute('src', /\/1$/)
+  await expect(first).toHaveJSProperty('paused', true)
   await expect.poll(() => position(first)).toBeCloseTo(checkpoint, 1)
   await expect.poll(() => (desktop.rows()[0]?.positionMs ?? 0) / 1000).toBeCloseTo(checkpoint, 1)
   await playHistoryVideo(first)
@@ -1204,19 +1222,7 @@ for (const scenario of ['playing', 'paused', 'blocked'] as const) {
     if (scenario === 'paused') {
       await video.evaluate((media: HTMLVideoElement) => media.pause())
     }
-    if (scenario === 'blocked') {
-      await page.evaluate(() => {
-        const nativePlay = HTMLMediaElement.prototype.play
-        let rejected = false
-        HTMLMediaElement.prototype.play = function () {
-          if (!rejected && this.src.endsWith('/1')) {
-            rejected = true
-            return Promise.reject(new DOMException('Playback requires a user gesture', 'NotAllowedError'))
-          }
-          return nativePlay.call(this)
-        }
-      })
-    }
+    if (scenario === 'blocked') await blockNextCMSAutoplay(page)
     const checkpoint = await failWithMediaError(video)
     await expect(video).toHaveAttribute('src', /\/1$/)
     if (scenario === 'playing') {
