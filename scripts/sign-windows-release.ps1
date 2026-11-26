@@ -1,7 +1,8 @@
 param(
     [Parameter(Mandatory)][string]$File,
     [switch]$VerifyOnly,
-    [switch]$Uninstaller
+    [switch]$Uninstaller,
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')][string]$ExpectedSHA256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -12,6 +13,13 @@ if (-not $env:JD_SIGNTOOL -or $thumbprint -notmatch '^[0-9A-Fa-f]{40}$') {
 $filePath = (Resolve-Path -LiteralPath $File -ErrorAction Stop).Path
 if ($Uninstaller -and ($VerifyOnly -or -not $env:JD_SIGN_UNINSTALLER_RECEIPT)) {
     throw 'The NSIS uninstaller hook requires a fresh signing receipt path'
+}
+
+if ($ExpectedSHA256) {
+    if (-not $VerifyOnly) { throw 'An expected SHA-256 can only be used during verification' }
+    if ((Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash -ine $ExpectedSHA256) {
+        throw "SHA-256 mismatch: $filePath"
+    }
 }
 
 if (-not $VerifyOnly) {

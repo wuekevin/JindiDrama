@@ -210,7 +210,10 @@ jobs:
               throw 'The selected certificate has no accessible private key'
             }
             Remove-Item -LiteralPath $pfx -Force
-            & ./scripts/sign-windows-package.ps1 -SigningThumbprint $thumbprint -SignTool $signTool -OutputDirectory $signed
+            $uninstallerSHA256 = ''
+            & ./scripts/sign-windows-package.ps1 -SigningThumbprint $thumbprint -SignTool $signTool -OutputDirectory $signed `
+              -VerifiedUninstallerSHA256 ([ref]$uninstallerSHA256)
+            "JD_SIGN_UNINSTALLER_SHA256=$uninstallerSHA256" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "PACKAGE_DIR=$signed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "JD_SIGNTOOL=$signTool" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "JD_SIGN_THUMBPRINT=$thumbprint" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -239,6 +242,18 @@ jobs:
         run: |
           $inst = (Get-Item -LiteralPath (Join-Path $env:PACKAGE_DIR 'JindiDrama-amd64-installer.exe')).FullName
           $portable = (Get-Item -LiteralPath (Join-Path $env:PACKAGE_DIR 'JindiDrama.exe')).FullName
+          if ($env:PACKAGE_MODE -eq 'release') {
+            if (-not $env:JD_SIGN_UNINSTALLER_SHA256 -or $env:JD_SIGN_UNINSTALLER_SHA256 -notmatch '^[0-9A-Fa-f]{64}$') {
+              throw 'Missing signing receipt for the release uninstaller'
+            }
+            & ./scripts/sign-windows-release.ps1 -File $inst -VerifyOnly
+            & ./scripts/sign-windows-release.ps1 -File $portable -VerifyOnly
+          }
+          function Confirm-InstalledUninstaller([string]$Path) {
+            if ($env:PACKAGE_MODE -eq 'release') {
+              & ./scripts/sign-windows-release.ps1 -File $Path -VerifyOnly -ExpectedSHA256 $env:JD_SIGN_UNINSTALLER_SHA256
+            }
+          }
           $expected = "${env:PACKAGE_CORE_VERSION}.0"
           foreach ($binary in @($portable, $inst)) {
             $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $binary).Path)
@@ -280,6 +295,7 @@ jobs:
             if (-not ($desk | Where-Object { Test-Path $_ })) { throw "桌面快捷方式「金帝短剧」不存在" }
             $packaged = (Get-FileHash -LiteralPath $portable).Hash
             if ((Get-FileHash $exe).Hash -ne $packaged) { throw "Installed application differs from packaged executable" }
+            Confirm-InstalledUninstaller $uninstaller
             Write-Host "安装目录与中文桌面快捷方式验证通过"
             $protocol = Get-Item -LiteralPath $protocolKey
             $command = $null
@@ -340,9 +356,7 @@ jobs:
             $checkFailure = $_
           } finally {
             try {
-              if ($env:PACKAGE_MODE -eq "release") {
-                & ./scripts/sign-windows-release.ps1 -File $uninstaller -VerifyOnly
-              }
+              Confirm-InstalledUninstaller $uninstaller
               $uninstallWorker = Join-Path $env:RUNNER_TEMP ('jindi-uninstall-' + [Guid]::NewGuid().ToString('N') + '.exe')
               [IO.File]::Copy($uninstaller, $uninstallWorker)
               $installDirectory = Split-Path -Parent $exe
@@ -393,9 +407,7 @@ jobs:
                   throw "Second installation failed with exit code $($reinstall.ExitCode) or missing files"
                 }
                 $installedRun = $runKey.GetValue('JindiDrama')
-                if ($env:PACKAGE_MODE -eq "release") {
-                  & ./scripts/sign-windows-release.ps1 -File $uninstaller -VerifyOnly
-                }
+                Confirm-InstalledUninstaller $uninstaller
                 [IO.File]::Copy($uninstaller, $uninstallWorker, $true)
                 $secondUninstall = Start-Process -FilePath $uninstallWorker -ArgumentList $uninstallArgs -Wait -PassThru
                 if ($secondUninstall.ExitCode -ne 0 -or (Test-Path -LiteralPath $exe) -or (Test-Path -LiteralPath $uninstaller)) {

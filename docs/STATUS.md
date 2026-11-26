@@ -673,3 +673,8 @@
 - 提交公证前用系统 codesign 核对 Apple Developer ID Application 签名和已配置的 Team ID。脚本要求本轮 notarytool JSON 明确返回 `Accepted`，通过后才附加并校验票据。响应保存在私有临时目录并随本轮文件清理。[Apple 签名要求](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/) · [Apple 公证流程](https://developer.apple.com/documentation/Security/customizing-the-notarization-workflow)
 - 旧脚本可在工具退出成功、提交状态无效时继续。新夹具覆盖了拒绝、未完成、错误类型、缺失字段和截断结果。本机真实 codesign 校验了 Developer ID 应用的正确与错误团队，并确认项目 .47 的临时签名应用在联系 Apple 前被拒绝。
 - 16 项 macOS 工具测试、13 项 Node 发行工具测试、Bash 语法和发行源码历史检查通过。完整签名与线上公证仍待正式凭据验收。[测试日志](../build/bin/qa-macos-notary-acceptance/python-tests.log) · [BMad 记录](../_bmad-output/plan-e13-macos-notary-acceptance.md)
+
+## E13 Windows 正式成品绑定卸载器签名回执（2026-11-27）
+
+- 正式安装验收在启动前复验最终安装器和便携程序的签名、发布者及时间戳。安装、升级和重装后的卸载器必须与同轮 NSIS 签名钩子记录的 SHA-256 一致，再验签。摘要仅在签名和成品验收步骤间传递，交付文件名单不变。[NSIS 签名钩子](https://nsis.sourceforge.io/Docs/Chapter5.html#uninstfinalize) · [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)
+- 本机 PowerShell 夹具验证摘要匹配、修改后拒绝、缺少签名回执的清理，以及成功时交出准确摘要。用 NSIS 3.13 编译隔离样例，从安装器提取的卸载器与钩子输出逐字节一致。工作流 YAML、PowerShell AST、13 项 Node 发行工具测试通过。真实 Windows 签名和原生安装仍待正式验收。[夹具日志](../build/bin/qa-windows-uninstaller-hash/package-fixture.log) · [BMad 记录](../_bmad-output/plan-e13-windows-uninstaller-hash.md)

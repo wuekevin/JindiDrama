@@ -3,7 +3,8 @@ param(
     [Parameter(Mandatory)][string]$SignTool,
     [Parameter(Mandatory)][string]$OutputDirectory,
     [string]$BuildRoot = (Split-Path $PSScriptRoot -Parent),
-    [switch]$MachineStore
+    [switch]$MachineStore,
+    [ref]$VerifiedUninstallerSHA256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,13 +43,16 @@ try {
     } finally {
         Pop-Location
     }
-    if (-not (Test-Path -LiteralPath $uninstallerReceipt -PathType Leaf) -or
-        [IO.File]::ReadAllText($uninstallerReceipt) -notmatch '^[0-9A-Fa-f]{64}$') {
+    $digest = if (Test-Path -LiteralPath $uninstallerReceipt -PathType Leaf) {
+        [IO.File]::ReadAllText($uninstallerReceipt)
+    }
+    if (-not $digest -or $digest -notmatch '^[0-9A-Fa-f]{64}$') {
         throw 'NSIS did not run the verified uninstaller signing hook'
     }
     & $sign $installer
     # Both signed files move together, without overwriting an existing output.
     [IO.Directory]::Move($bins, $target)
+    if ($null -ne $VerifiedUninstallerSHA256) { $VerifiedUninstallerSHA256.Value = $digest }
 } finally {
     foreach ($variable in $previous.Keys) {
         [Environment]::SetEnvironmentVariable($variable, $previous[$variable])

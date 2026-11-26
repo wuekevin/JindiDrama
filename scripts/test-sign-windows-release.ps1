@@ -62,12 +62,23 @@ try {
     Assert-SigningFailure { & $sign $file -VerifyOnly } 'Signature or timestamp verification failed'
     $env:JD_TEST_VERIFY_STATUS = $null
 
+    $expectedDigest = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash
+    & $sign $file -VerifyOnly -ExpectedSHA256 ($expectedDigest.ToLowerInvariant())
+    $beforeMismatch = Get-Content -LiteralPath $env:JD_TEST_SIGN_LOG -Raw
+    [IO.File]::AppendAllText($file, ' modified')
+    Assert-SigningFailure { & $sign $file -VerifyOnly -ExpectedSHA256 $expectedDigest } 'SHA-256 mismatch'
+    Assert-SigningFailure { & $sign $file -ExpectedSHA256 $expectedDigest } 'only be used during verification'
+    if ((Get-Content -LiteralPath $env:JD_TEST_SIGN_LOG -Raw) -cne $beforeMismatch) {
+        throw 'A file with an unexpected digest reached SignTool'
+    }
+
     if ($IsWindows) {
         $buildRoot = Join-Path $root 'source'
         $original = Join-Path $buildRoot 'build/bin/JindiDrama.exe'
         $null = [IO.Directory]::CreateDirectory((Split-Path $original -Parent))
         $null = [IO.Directory]::CreateDirectory((Join-Path $buildRoot 'build/windows/installer'))
         [IO.File]::WriteAllText($original, 'unsigned')
+        $capturedUninstaller = Join-Path $root 'signed-hook-uninstaller.exe'
         function makensis {
             if ($env:JD_TEST_FAIL_NSIS) { $global:LASTEXITCODE = 2; return }
             $cwd = (Get-Location).Path
@@ -75,12 +86,14 @@ try {
             [IO.File]::WriteAllText($uninstaller, 'mock uninstaller')
             if (-not $env:JD_TEST_SKIP_NSIS_HOOK) {
                 & (Join-Path $cwd '../../../scripts/sign-windows-release.ps1') $uninstaller -Uninstaller
+                [IO.File]::Copy($uninstaller, $capturedUninstaller, $true)
             }
             [IO.File]::WriteAllText((Join-Path $cwd '../../bin/JindiDrama-amd64-installer.exe'), 'mock installer')
             $global:LASTEXITCODE = 0
         }
         $package = Join-Path $PSScriptRoot 'sign-windows-package.ps1'
         $published = Join-Path $root 'signed'
+        $uninstallerDigest = ''
         $env:JD_TEST_FAIL_NSIS = '1'
         Assert-SigningFailure {
             & $package -SigningThumbprint $thumbprint -SignTool $mockTool -BuildRoot $buildRoot -OutputDirectory $published
@@ -93,7 +106,11 @@ try {
         } 'NSIS did not run the verified uninstaller signing hook'
         if (Test-Path -LiteralPath $published) { throw 'A missing uninstall hook exposed partial output' }
         $env:JD_TEST_SKIP_NSIS_HOOK = $null
-        & $package -SigningThumbprint $thumbprint -SignTool $mockTool -BuildRoot $buildRoot -OutputDirectory $published
+        & $package -SigningThumbprint $thumbprint -SignTool $mockTool -BuildRoot $buildRoot -OutputDirectory $published `
+            -VerifiedUninstallerSHA256 ([ref]$uninstallerDigest)
+        if ($uninstallerDigest -cne (Get-FileHash -LiteralPath $capturedUninstaller -Algorithm SHA256).Hash) {
+            throw 'Package signing did not return the digest from the verified hook'
+        }
         if ((Get-ChildItem -LiteralPath $published -File).Count -ne 2 -or
             [IO.File]::ReadAllText((Join-Path $published 'JindiDrama.exe')) -cne 'unsigned signed' -or
             [IO.File]::ReadAllText($original) -cne 'unsigned') {
