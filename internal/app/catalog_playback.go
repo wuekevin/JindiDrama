@@ -34,7 +34,7 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 		if errors.Is(err, provider.ErrEpisodeUnavailable) {
 			return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
 		}
-		return a.issueCatalogPlaybackTicket(ctx, ticket, ticket.EpisodeID, err)
+		return a.issueCatalogPlaybackTicket(ctx, ticket, ticket.EpisodeID, true, err)
 	}
 
 	drama, err := a.p.Drama(ctx, id)
@@ -63,10 +63,10 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 	}
 
 	ticket, err := a.p.ResolvePlayback(ctx, id, index)
-	return a.issueCatalogPlaybackTicket(ctx, ticket, episodeID, err)
+	return a.issueCatalogPlaybackTicket(ctx, ticket, episodeID, false, err)
 }
 
-func (a *App) issueCatalogPlaybackTicket(ctx context.Context, ticket provider.PlaybackTicket, episodeID string, err error) (provider.PlaybackTicket, error) {
+func (a *App) issueCatalogPlaybackTicket(ctx context.Context, ticket provider.PlaybackTicket, episodeID string, allowHLS bool, err error) (provider.PlaybackTicket, error) {
 	if err != nil || ctx.Err() != nil || ticket.Kind != "authorized" || episodeID == "" || ticket.EpisodeID != episodeID {
 		return provider.PlaybackTicket{}, errCatalogPlaybackUnavailable
 	}
@@ -81,13 +81,13 @@ func (a *App) issueCatalogPlaybackTicket(ctx context.Context, ticket provider.Pl
 	sources := make([]provider.MediaSource, 0, len(ticket.Sources))
 	seen := make(map[string]bool)
 	for _, source := range ticket.Sources {
-		if candidate, ok := catalogMediaSource(source, false); ok && !seen[candidate.Src] {
+		if candidate, ok := catalogMediaSource(source, false, allowHLS); ok && !seen[candidate.Src] {
 			sources = append(sources, candidate)
 			seen[candidate.Src] = true
 		}
 	}
 	if len(sources) == 0 {
-		if candidate, ok := catalogMediaSource(provider.MediaSource{Src: ticket.PlaybackURL}, true); ok {
+		if candidate, ok := catalogMediaSource(provider.MediaSource{Src: ticket.PlaybackURL}, true, allowHLS); ok {
 			sources = append(sources, candidate)
 		}
 	}
@@ -99,21 +99,30 @@ func (a *App) issueCatalogPlaybackTicket(ctx context.Context, ticket provider.Pl
 	}, expiry)
 }
 
-func catalogMediaSource(source provider.MediaSource, inferType bool) (provider.MediaSource, bool) {
+func catalogMediaSource(source provider.MediaSource, inferType, allowHLS bool) (provider.MediaSource, bool) {
 	u, ok := catalogHTTPSURL(source.Src)
 	if !ok {
 		return provider.MediaSource{}, false
 	}
 	mediaType, _, _ := mime.ParseMediaType(source.Type)
+	extension := strings.ToLower(path.Ext(u.Path))
 	if inferType {
-		switch strings.ToLower(path.Ext(u.Path)) {
+		switch extension {
 		case ".mp4":
 			mediaType = "video/mp4"
 		case ".webm":
 			mediaType = "video/webm"
+		case ".m3u8":
+			mediaType = catalogHLSType
 		}
 	}
-	if mediaType != "video/mp4" && mediaType != "video/webm" {
+	switch mediaType {
+	case "video/mp4", "video/webm":
+	case catalogHLSType:
+		if !allowHLS || extension != ".m3u8" || len(source.Src) > maxCatalogHLSURL {
+			return provider.MediaSource{}, false
+		}
+	default:
 		return provider.MediaSource{}, false
 	}
 	if source.Quality != "sd" && source.Quality != "hd" {

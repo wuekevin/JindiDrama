@@ -51,6 +51,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const upstream = "catalog.example.test"
 	const mediaHost = "media.example.test"
 	const mediaResponse = "synthetic WebM bytes"
+	const hlsResponse = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nsegment.ts?token=only-go\n#EXT-X-ENDLIST\n"
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
@@ -78,6 +79,10 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			}`))}, nil
 		case mediaHost:
 			mediaCalls.Add(1)
+			if req.URL.Path == "/four.m3u8" {
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {catalogHLSType}},
+					ContentLength: int64(len(hlsResponse)), Body: io.NopCloser(strings.NewReader(hlsResponse))}, nil
+			}
 			if req.URL.Path != "/three.webm" || req.URL.Query().Get("signature") != "synthetic-media-token" {
 				t.Errorf("unexpected media request: %s", req.URL)
 			}
@@ -112,7 +117,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		t.Fatalf("detail: %+v, %v", drama, err)
 	}
 	episodes, err := a.CatalogEpisodes(id)
-	if err != nil || len(episodes) != 4 || episodes[0].Available || episodes[1].Available || !episodes[2].Available || episodes[3].Available {
+	if err != nil || len(episodes) != 4 || episodes[0].Available || episodes[1].Available || !episodes[2].Available || !episodes[3].Available {
 		t.Fatalf("episodes: %+v, %v", episodes, err)
 	}
 	for _, attempt := range []struct {
@@ -123,7 +128,6 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	}{
 		{id, 1, provider.ErrEpisodeUnavailable, 1},
 		{id, 2, provider.ErrEpisodeUnavailable, 1},
-		{id, 4, provider.ErrEpisodeUnavailable, 1},
 		{id, 5, provider.ErrEpisodeUnavailable, 1},
 		{strings.TrimSuffix(id, cmsID) + "42", 3, errCatalogPlaybackUnavailable, 1},
 		{"other-source:42", 3, errCatalogPlaybackUnavailable, 0},
@@ -173,6 +177,24 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		string(body) != mediaResponse || mediaCalls.Load() != 1 {
 		t.Fatalf("relayed response: %d, %q, %v", response.StatusCode, body, err)
 	}
+	ticket, err = a.CatalogPlayback(id, 4)
+	if err != nil || ticket.EpisodeID != episodes[3].ID || len(ticket.Sources) != 1 ||
+		ticket.Sources[0].Type != catalogHLSType ||
+		!strings.HasSuffix(ticket.Sources[0].Src, catalogMediaPath+ticket.LeaseID+"/0.m3u8") {
+		t.Fatalf("HLS ticket: %+v, %v", ticket, err)
+	}
+	response, err = browser.Get(ticket.Sources[0].Src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	body, err = io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || response.Header.Get("Content-Type") != catalogHLSType ||
+		!strings.Contains(string(body), catalogMediaPath+ticket.LeaseID+"/hls/0") ||
+		strings.Contains(string(body), "segment.ts") || strings.Contains(string(body), "only-go") || mediaCalls.Load() != 2 {
+		t.Fatalf("HLS response: %d, %q, %v", response.StatusCode, body, err)
+	}
+
 }
 
 func TestAppleCMSClientDoesNotFollowRedirects(t *testing.T) {

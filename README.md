@@ -164,7 +164,7 @@ $env:JINDIDRAMA_LICENSED_MEDIA_DIR = 'C:\Media\JindiDrama'
 
 运营方可以为桌面应用配置一条自有或获授权的苹果 CMS V10 JSON API。请填写可从公网通过 HTTPS 访问的 API 路径，例如 `https://cms.example.com/api.php/provide/vod/`。应用从该地址读取首页目录、搜索、详情和分集。首页展示接口返回的第一页，搜索同样读取接口的第一页。片名、简介和分类通过目录读取。
 
-可播放分集需在 `vod_play_url` 中提供带集号的公网 HTTPS MP4 或 WebM 直链，例如 `第1集$https://media.example.com/episode-1.mp4`。目录支持常见的 `#` 分集与 `$$$` 路线分隔符。受限条目不可播放。该来源仅提供浏览和播放。
+可播放分集需在 `vod_play_url` 中提供带集号的公网 HTTPS 直链，格式支持 MP4、WebM 和未加密的 HLS 点播。例如 `第1集$https://media.example.com/episode-1.m3u8`。目录支持常见的 `#` 分集与 `$$$` 路线分隔符。HLS 分段使用 MPEG-TS 或 fMP4，清单和媒体服务器需可通过公网 HTTPS 直连。直播、加密和需要登录的链接不在支持范围内。该来源仅提供浏览和播放。片源联网范围见[隐私说明](docs/PRIVACY.md)。
 
 退出已打开的金帝短剧，再用下面的命令启动。删除环境变量并重新启动即可回到演示目录。
 

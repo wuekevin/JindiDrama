@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
+import type Hls from 'hls.js'
 import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
@@ -11,6 +12,8 @@ import { catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
 import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-contracts'
+
+const hlsType = 'application/vnd.apple.mpegurl'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,8 +36,12 @@ let generation = 0
 let expiresAt = 0
 let expiryTimer: number | undefined
 let activeLease: string | undefined
+let hls: Hls | undefined
 
 function stopMedia() {
+  const player = hls
+  hls = undefined
+  player?.destroy()
   const media = video.value
   if (!media) return
   media.pause()
@@ -50,12 +57,13 @@ function validateSources(ticket: PlaybackTicket, expectedEpisodeId: string) {
   const quality = demoQualityId(preferences.s.defaultQuality)
   const distinct = new Map<string, MediaSource>()
   for (const choice of ticket.sources ?? []) {
-    if (choice.type !== 'video/mp4' && choice.type !== 'video/webm') continue
+    if (choice.type !== 'video/mp4' && choice.type !== 'video/webm' && choice.type !== hlsType) continue
     try {
       const url = new URL(choice.src)
       if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port ||
           url.username || url.password || url.hash || url.search) continue
-      if (!new RegExp(`^/catalog-media/${token}/[0-9]+$`).test(url.pathname)) continue
+      const localPath = new RegExp(`^/catalog-media/${token}/[0-9]+${choice.type === hlsType ? '[.]m3u8' : ''}$`)
+      if (!localPath.test(url.pathname)) continue
       if (!distinct.has(url.href)) distinct.set(url.href, { ...choice, src: url.href })
     } catch { /* Invalid URLs never reach the media element. */ }
   }
@@ -137,8 +145,8 @@ async function load() {
   }
 }
 
-function mediaError(event: Event) {
-  if (event.currentTarget !== video.value || state.value !== 'ready') return
+function failMedia(media: HTMLVideoElement, choice: MediaSource) {
+  if (media !== video.value || choice !== source.value || state.value !== 'ready') return
   if (expiresAt <= Date.now()) {
     expireTicket()
     return
@@ -153,6 +161,43 @@ function mediaError(event: Event) {
   sources.value = []
   releaseLease()
 }
+
+function mediaError(event: Event) {
+  const media = video.value
+  const choice = source.value
+  if (media && choice && event.currentTarget === media) failMedia(media, choice)
+}
+
+watch([video, source], async ([media, choice]) => {
+  if (!media || !choice || choice.type !== hlsType || state.value !== 'ready') return
+  const current = generation
+  const isCurrent = () => current === generation && video.value === media && source.value === choice && state.value === 'ready'
+  if (expiresAt <= Date.now()) {
+    expireTicket()
+    return
+  }
+  if (media.canPlayType(hlsType)) {
+    media.src = choice.src
+    return
+  }
+  try {
+    const { default: HlsPlayer } = await import('hls.js')
+    if (!isCurrent()) return
+    if (expiresAt <= Date.now() || !HlsPlayer.isSupported()) {
+      failMedia(media, choice)
+      return
+    }
+    const player = new HlsPlayer({ lowLatencyMode: false, emeEnabled: false })
+    hls = player
+    player.on(HlsPlayer.Events.ERROR, (_, data) => {
+      if (data.fatal && hls === player && isCurrent()) failMedia(media, choice)
+    })
+    player.loadSource(choice.src)
+    if (hls === player) player.attachMedia(media)
+  } catch {
+    if (isCurrent()) failMedia(media, choice)
+  }
+}, { flush: 'post' })
 
 function applyPreferences(event: Event) {
   if (event.currentTarget !== video.value || !video.value) return
@@ -178,7 +223,7 @@ onBeforeUnmount(() => {
       <Skeleton v-if="state === 'loading'" class="loading" />
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline preload="metadata"
-        controlslist="nodownload" :src="source.src"
+        controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences" />
     </div>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">

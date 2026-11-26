@@ -7,19 +7,37 @@ const route = '/#/catalog/' + encodeURIComponent(id)
 const cmsId = 'apple-cms:0123456789abcdef0123456789abcdef:90071992547409931234'
 const cmsTitle = 'CMS 海岛来信'
 const mediaURL = 'http://127.0.0.1:45671'
+const hlsType = 'application/vnd.apple.mpegurl'
+const hlsSample = fs.readFileSync(new URL('../fixtures/hls/blue.mpegts', import.meta.url))
 const samples = {
   webm: fs.readFileSync(new URL('../../public/demo/demo-1.webm', import.meta.url)),
   mp4: fs.readFileSync(new URL('../../public/demo/demo-1.mp4', import.meta.url)),
 }
 
-async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry' | 'expires-live' | 'protected' | 'direct-url' | 'apple-cms' | 'apple-cms-empty') {
-  await page.addInitScript(({ id, mediaURL, mode, cmsTitle }) => {
-    const cms = mode === 'apple-cms' || mode === 'apple-cms-empty'
-    const drama = { id, title: cms ? cmsTitle : '远海来信', tags: cms ? ['海岛'] : [], summary: '授权播放测试目录', updatedTo: cms ? 3 : 2, episodeCount: 3 }
+async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry' | 'expires-live' | 'protected' | 'direct-url' | 'apple-cms' | 'apple-cms-empty' | 'apple-cms-hls' | 'apple-cms-hls-fallback' | 'apple-cms-hls-expires') {
+  await page.addInitScript(({ id, mediaURL, mode, cmsTitle, hlsType }) => {
+    const cms = mode.startsWith('apple-cms')
+    const hls = mode.startsWith('apple-cms-hls')
+    if (hls) {
+      // Chromium on macOS can use the system HLS decoder. Exercise MSE here.
+      const canPlayType = HTMLMediaElement.prototype.canPlayType
+      HTMLMediaElement.prototype.canPlayType = function (type) {
+        return type === hlsType ? '' : canPlayType.call(this, type)
+      }
+    }
+    const drama = { id, title: cms ? cmsTitle : '远海来信', tags: cms ? ['海岛'] : [], summary: '授权播放测试目录', updatedTo: cms && !hls ? 3 : 2, episodeCount: 3 }
     let attempt = 0
     const calls: string[] = []
     const released: string[] = []
-    const testState = { calls, released, release: () => {} }
+    const revoked: string[] = []
+    if (hls) {
+      const revokeObjectURL = URL.revokeObjectURL
+      URL.revokeObjectURL = (address) => {
+        revoked.push(address)
+        revokeObjectURL.call(URL, address)
+      }
+    }
+    const testState = { calls, released, revoked, release: () => {} }
     Object.assign(window, { catalogTest: testState, go: { app: { App: {
       StorageReady: async () => false,
       ProviderName: async () => cms ? 'apple-cms' : 'authorized-fixture',
@@ -28,18 +46,22 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       CatalogSearch: async (query: string) => query === '海岛' ? [drama] : [],
       Capabilities: async () => ({ catalog: 'ready', search: 'ready', playback: mode === 'blocked' ? 'not_authorized' : 'ready' }),
       CatalogDrama: async () => drama,
-      CatalogEpisodes: async () => [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms ? index === 3 : index < 3 })),
+      CatalogEpisodes: async () => [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms && !hls ? index === 3 : index < 3 })),
       CatalogPlayback: async (_id: string, index: number) => {
         calls.push('catalog:' + _id + ':' + index)
         const sequence = ++attempt
         const leaseId = String.fromCharCode(64 + index) + String.fromCharCode(64 + sequence).repeat(25)
         if (mode === 'stale' && index === 1) await new Promise<void>((resolve) => { testState.release = resolve })
         const expiresAt = mode === 'retry' && sequence === 1 ? '2001-01-01T00:00:00Z'
-          : new Date(Date.now() + (mode === 'expires-live' ? 3_000 : 120_000)).toISOString()
+          : new Date(Date.now() + (mode === 'apple-cms-hls-expires' ? 4_000 : mode === 'expires-live' ? 3_000 : 120_000)).toISOString()
         const format = index === 2 ? 'mp4' : 'webm'
         const path = mediaURL + '/catalog-media/' + leaseId
         const src = mode === 'direct-url' ? 'https://media.example.test/one.webm?upstream-secret=opaque-test' : path + '/0'
         const sources = [{ src, type: 'video/' + format }]
+        if (hls && index === 1) {
+          sources[0] = { src: path + '/0.m3u8', type: hlsType }
+          if (mode !== 'apple-cms-hls') sources.push({ src: path + '/1', type: 'video/webm' })
+        }
         if (mode === 'expires-live') sources.push({ src: path + '/1', type: 'video/webm' })
         return { kind: 'authorized', episodeId: 'episode-' + index, expiresAt, leaseId, sources,
           restrictions: mode === 'protected' ? ['no-download'] : [] }
@@ -48,13 +70,30 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       ResolvePlayback: async () => { calls.push('legacy') },
       SaveLibraryChanges: async () => { calls.push('library') },
     } } } })
-  }, { id: mode.startsWith('apple-cms') ? cmsId : id, mediaURL, mode, cmsTitle })
+  }, { id: mode.startsWith('apple-cms') ? cmsId : id, mediaURL, mode, cmsTitle, hlsType })
   const requests: string[] = []
   await page.route('https://media.example.test/**', async (request) => { requests.push(request.request().url()); await request.abort() })
   await page.route(mediaURL + '/**', async (interception) => {
     const requestURL = interception.request().url()
     requests.push(requestURL)
-    const format = new URL(requestURL).pathname.startsWith('/catalog-media/B') ? 'mp4' : 'webm'
+    const path = new URL(requestURL).pathname
+    if (mode.startsWith('apple-cms-hls') && (path.endsWith('.m3u8') || path.includes('/hls/'))) {
+      const origin = interception.request().headers()['origin']
+      const headers: Record<string, string> = origin ? { 'access-control-allow-origin': origin } : {}
+      if (mode === 'apple-cms-hls-fallback') {
+        await interception.fulfill({ status: 404, headers })
+      } else if (path.endsWith('/0.m3u8') && !path.includes('/hls/')) {
+        const body = `#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=32000\n${path.replace(/0[.]m3u8$/, 'hls/0.m3u8')}\n`
+        await interception.fulfill({ headers: { ...headers, 'content-type': hlsType }, body })
+      } else if (path.endsWith('.m3u8')) {
+        const body = `#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:2\n#EXT-X-PLAYLIST-TYPE:VOD\n#EXTINF:2,\n${path.replace(/0[.]m3u8$/, '1')}\n#EXT-X-ENDLIST\n`
+        await interception.fulfill({ headers: { ...headers, 'content-type': hlsType }, body })
+      } else {
+        await interception.fulfill({ headers: { ...headers, 'content-type': 'video/mp2t' }, body: hlsSample })
+      }
+      return
+    }
+    const format = path.startsWith('/catalog-media/B') ? 'mp4' : 'webm'
     const sample = samples[format]
     const range = /^bytes=(\d+)-(\d*)$/.exec(interception.request().headers()['range'] ?? '')
     const headers = { 'content-type': 'video/' + format, 'accept-ranges': 'bytes' }
@@ -71,6 +110,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
 
 const calls = (page: Page) => page.evaluate(() => (window as Window & { catalogTest?: { calls: string[] } }).catalogTest?.calls)
 const released = (page: Page) => page.evaluate(() => (window as Window & { catalogTest?: { released: string[] } }).catalogTest?.released)
+const revoked = (page: Page) => page.evaluate(() => (window as Window & { catalogTest?: { revoked: string[] } }).catalogTest?.revoked)
 
 test('authorized Provider detail opens actual playback, with pause and seek', async ({ page }, testInfo) => {
   const requests = await fixture(page, 'ready')
@@ -203,4 +243,94 @@ test('empty CMS home keeps the catalog heading and a catalog-specific empty stat
   await expect(catalog.getByTestId('empty')).toHaveText('暂无片源')
   await expect(page.getByText('暂无推荐内容')).toHaveCount(0)
   await expect(page.getByText('稍后再来看看吧')).toHaveCount(0)
+})
+
+
+test('CMS HLS decodes Chromium video under one lease, then switches episodes and exits', async ({ page }) => {
+  const requests = await fixture(page, 'apple-cms-hls')
+  await page.goto('/#/catalog/' + encodeURIComponent(cmsId) + '/play/1')
+  const video = page.getByLabel('第1集视频')
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(2)
+  await expect(video).toHaveAttribute('src', /^blob:/)
+  const objectURL = await video.getAttribute('src')
+  expect(await video.evaluate((v: HTMLVideoElement) => v.videoWidth)).toBe(64)
+  await video.evaluate((v: HTMLVideoElement) => v.play())
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime)).toBeGreaterThan(0.1)
+  await video.evaluate((v: HTMLVideoElement) => {
+    v.pause()
+    v.currentTime = 1.25
+  })
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.paused && !v.seeking && v.currentTime)).toBeCloseTo(1.25)
+  const hlsRoot = mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/'
+  expect([...new Set(requests)]).toEqual([hlsRoot + '0.m3u8', hlsRoot + 'hls/0.m3u8', hlsRoot + 'hls/1'])
+  const hlsRequestCount = requests.length
+
+  await page.getByRole('button', { name: '第2集' }).click()
+  await expect(video).toHaveCount(0)
+  await expect.poll(() => revoked(page)).toContain(objectURL)
+  await expect.poll(() => released(page)).toEqual(['A'.repeat(26)])
+  await expect.poll(() => page.getByLabel('第2集视频').evaluate((v: HTMLVideoElement) => v.duration)).toBeGreaterThan(10)
+  expect(requests.slice(hlsRequestCount).every((address) => address.startsWith(mediaURL + '/catalog-media/' + 'B'.repeat(26) + '/'))).toBe(true)
+  await page.getByRole('link', { name: '返回详情' }).click()
+  await expect(page.locator('video')).toHaveCount(0)
+  await expect.poll(() => released(page)).toEqual(['A'.repeat(26), 'B'.repeat(26)])
+})
+
+test('a fatal HLS response falls back to a direct source under the same lease', async ({ page }) => {
+  const requests = await fixture(page, 'apple-cms-hls-fallback')
+  await page.goto('/#/catalog/' + encodeURIComponent(cmsId) + '/play/1')
+  const video = page.getByLabel('第1集视频')
+  await expect(video).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth)).toBeGreaterThan(0)
+  const prefix = mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/'
+  expect(requests).toContain(prefix + '0.m3u8')
+  expect(requests).toContain(prefix + '1')
+  expect(await released(page)).toEqual([])
+})
+
+test('HLS ticket expiry destroys playback and suppresses its direct alternate', async ({ page }) => {
+  const requests = await fixture(page, 'apple-cms-hls-expires')
+  await page.goto('/#/catalog/' + encodeURIComponent(cmsId) + '/play/1')
+  const video = page.getByLabel('第1集视频')
+  await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.videoWidth)).toBe(64)
+  const objectURL = await video.getAttribute('src')
+  await video.evaluate((v: HTMLVideoElement) => v.play())
+  await expect(page.getByTestId('error')).toContainText('播放票据已过期')
+  await expect(video).toHaveCount(0)
+  await expect.poll(() => revoked(page)).toContain(objectURL)
+  await expect.poll(() => released(page)).toEqual(['A'.repeat(26)])
+  const prefix = mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/'
+  expect([...new Set(requests)]).toEqual([prefix + '0.m3u8', prefix + 'hls/0.m3u8', prefix + 'hls/1'])
+})
+
+
+test('switching episodes while hls.js loads discards the earlier stream', async ({ page }) => {
+  const requests = await fixture(page, 'apple-cms-hls')
+  let allowChunk = () => {}
+  const chunkGate = new Promise<void>((resolve) => { allowChunk = resolve })
+  const chunkRequested = page.waitForRequest('**/assets/hls-*.js')
+  await page.route('**/assets/hls-*.js', async (request) => {
+    await chunkGate
+    await request.continue()
+  })
+  try {
+    await page.goto('/#/catalog/' + encodeURIComponent(cmsId) + '/play/1')
+    await chunkRequested
+    await page.getByRole('button', { name: '第2集' }).click()
+    await expect.poll(() => released(page)).toEqual(['A'.repeat(26)])
+    await expect.poll(() => page.getByLabel('第2集视频').evaluate((v: HTMLVideoElement) => v.duration)).toBeGreaterThan(10)
+    const chunkReady = page.waitForResponse('**/assets/hls-*.js')
+    allowChunk()
+    await (await chunkReady).finished()
+    await page.evaluate(async () => {
+      // Drain microtasks after the module download and the Vue update.
+      await new Promise(requestAnimationFrame)
+      await new Promise(requestAnimationFrame)
+    })
+    expect(requests.length).toBeGreaterThan(0)
+    expect(requests.every((address) => address.startsWith(mediaURL + '/catalog-media/' + 'B'.repeat(26) + '/'))).toBe(true)
+    await expect(page.getByLabel('第1集视频')).toHaveCount(0)
+  } finally {
+    allowChunk()
+  }
 })

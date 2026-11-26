@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"io"
@@ -22,6 +23,7 @@ type catalogMediaLease struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	sources []provider.MediaSource
+	hls     *catalogHLSResources
 }
 
 type catalogMediaRelay struct {
@@ -61,7 +63,14 @@ func (r *catalogMediaRelay) issue(ticket provider.PlaybackTicket, expiry time.Ti
 		token = rand.Text()
 	}
 	ctx, cancel := context.WithDeadline(context.Background(), expiry)
-	r.leases[token] = catalogMediaLease{ctx: ctx, cancel: cancel, sources: ticket.Sources}
+	lease := catalogMediaLease{ctx: ctx, cancel: cancel, sources: ticket.Sources}
+	for _, source := range ticket.Sources {
+		if source.Type == catalogHLSType {
+			lease.hls = &catalogHLSResources{index: make(map[hlsResource]int)}
+			break
+		}
+	}
+	r.leases[token] = lease
 	context.AfterFunc(ctx, func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -74,6 +83,9 @@ func (r *catalogMediaRelay) issue(ticket provider.PlaybackTicket, expiry time.Ti
 	ticket.Sources = append([]provider.MediaSource(nil), ticket.Sources...)
 	for i := range ticket.Sources {
 		ticket.Sources[i].Src = "http://" + r.host + catalogMediaPath + token + "/" + strconv.Itoa(i)
+		if ticket.Sources[i].Type == catalogHLSType {
+			ticket.Sources[i].Src += ".m3u8"
+		}
 	}
 	return ticket, nil
 }
@@ -103,18 +115,49 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	suffix, pathOK := strings.CutPrefix(req.URL.Path, catalogMediaPath)
-	token, indexText, slash := strings.Cut(suffix, "/")
-	index, indexErr := strconv.Atoi(indexText)
-	if req.Host != r.host || req.URL.RawQuery != "" || !pathOK || !slash || indexErr != nil || index < 0 {
+	token, address, slash := strings.Cut(suffix, "/")
+	if req.Host != r.host || req.URL.RawQuery != "" || req.URL.ForceQuery || req.URL.RawPath != "" || !pathOK || !slash {
 		http.NotFound(w, req)
 		return
 	}
 	r.mu.Lock()
 	lease, found := r.leases[token]
 	r.mu.Unlock()
-	if !found || lease.ctx.Err() != nil || index >= len(lease.sources) {
+	if !found || lease.ctx.Err() != nil {
 		http.NotFound(w, req)
 		return
+	}
+	var upstreamURL, expectedType string
+	var hlsRequest, playlist, allowMaster bool
+	if child, ok := strings.CutPrefix(address, "hls/"); ok && lease.hls != nil {
+		resource, exists := lease.hls.resource(child)
+		if !exists {
+			http.NotFound(w, req)
+			return
+		}
+		upstreamURL, hlsRequest, playlist = resource.url, true, resource.playlist
+	} else {
+		indexText, extension := strings.CutSuffix(address, ".m3u8")
+		index, err := strconv.Atoi(indexText)
+		if err != nil || index < 0 || index >= len(lease.sources) {
+			http.NotFound(w, req)
+			return
+		}
+		source := lease.sources[index]
+		hlsRequest = source.Type == catalogHLSType
+		if extension != hlsRequest || (hlsRequest && strconv.Itoa(index) != indexText) {
+			http.NotFound(w, req)
+			return
+		}
+		upstreamURL, expectedType = source.Src, source.Type
+		playlist, allowMaster = hlsRequest, hlsRequest
+	}
+	if hlsRequest {
+		allowedOrigin := catalogHLSCORS(w, req)
+		if req.Method == http.MethodOptions && allowedOrigin {
+			catalogHLSPreflight(w, req)
+			return
+		}
 	}
 	if req.Method != http.MethodGet && req.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
@@ -126,7 +169,6 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		w.WriteHeader(http.StatusRequestedRangeNotSatisfiable)
 		return
 	}
-	source := lease.sources[index]
 	ctx, cancel := context.WithCancel(req.Context())
 	defer cancel()
 	controller := http.NewResponseController(w)
@@ -147,7 +189,12 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		}
 		// Keep the deadline through net/http's final response flush.
 	}()
-	up, err := http.NewRequestWithContext(ctx, req.Method, source.Src, nil)
+	method := req.Method
+	if playlist {
+		// A manifest is served only after validating and rewriting its full body.
+		method, rangeHeader = http.MethodGet, ""
+	}
+	up, err := http.NewRequestWithContext(ctx, method, upstreamURL, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
@@ -163,10 +210,37 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	defer res.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
 	encoding := res.Header.Get("Content-Encoding")
-	if err != nil || mediaType != source.Type || (encoding != "" && encoding != "identity") ||
-		res.ContentLength == 0 || !validCatalogResponseRange(res, rangeHeader) || lease.ctx.Err() != nil {
+	if err != nil || (encoding != "" && encoding != "identity") || res.ContentLength == 0 || lease.ctx.Err() != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
+	}
+	if playlist {
+		serveCatalogHLSManifest(w, req, up.URL, res, mediaType, lease, token, allowMaster)
+		return
+	}
+	if hlsRequest {
+		mediaType = canonicalCatalogHLSPayloadType(mediaType)
+	}
+	if mediaType == "" || (!hlsRequest && mediaType != expectedType) || !validCatalogResponseRange(res, rangeHeader) {
+		w.WriteHeader(http.StatusBadGateway)
+		return
+	}
+
+	var body io.Reader = res.Body
+	if hlsRequest && req.Method == http.MethodGet {
+		const prefixLimit = 512
+		count := int64(prefixLimit)
+		if res.ContentLength >= 0 {
+			count = min(count, res.ContentLength)
+		}
+		buffered := bufio.NewReaderSize(body, prefixLimit)
+		prefix, readErr := buffered.Peek(int(count))
+		if (readErr != nil && (readErr != io.EOF || res.ContentLength >= 0)) ||
+			!validCatalogHLSPayload(prefix, mediaType, res) || lease.ctx.Err() != nil {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		body = buffered
 	}
 
 	w.Header().Set("Content-Type", mediaType)
@@ -185,7 +259,6 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
-		var body io.Reader = res.Body
 		if res.ContentLength >= 0 {
 			body = io.LimitReader(body, res.ContentLength)
 		}

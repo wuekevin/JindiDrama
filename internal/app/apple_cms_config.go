@@ -38,7 +38,7 @@ func configureAppleCMS(a *App, raw string, client *http.Client) error {
 		u.RawPath = ""
 	}
 	a.p = applecms.New(*u, client, func(raw string) (provider.MediaSource, bool) {
-		return catalogMediaSource(provider.MediaSource{Src: raw}, true)
+		return catalogMediaSource(provider.MediaSource{Src: raw}, true, true)
 	})
 	return nil
 }
