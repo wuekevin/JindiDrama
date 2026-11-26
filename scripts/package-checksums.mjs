@@ -1,9 +1,10 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, realpathSync } from 'node:fs'
 import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { hostedPackageHeader } from './package-provenance.mjs'
+import { hostedPackageHeader, packageVersionPattern } from './package-provenance.mjs'
 
 const manifest = 'SHA256SUMS.txt'
 const sidecars = ['RELEASE-NOTES.md', 'RELEASE-ROLLBACK.md', 'PRIVACY.md', 'FRONTEND-LICENSES.md', 'GO-LICENSES.md']
@@ -103,6 +104,37 @@ export async function verifyHostedPackage(directory, platform, env = process.env
   return checksums
 }
 
+async function verifyReleaseTag(tag, directory) {
+  if (!packageVersionPattern.test(tag)) throw new Error('Expected a valid release version')
+  let revision
+  try {
+    revision = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', 'refs/tags/' + tag + '^{commit}'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim()
+  } catch (error) {
+    throw new Error('Cannot resolve local Git tag ' + tag + ' to a commit', { cause: error })
+  }
+  const checksums = await verify(directory, 'release')
+  const name = 'RELEASE-NOTES.md'
+  const notes = await readVerifiedText(directory, name, checksums.get(name))
+  const lines = notes.split(/\r?\n/, 4)
+  const runLink = /\]\(https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/actions\/runs\/([1-9]\d*)\/attempts\/([1-9]\d*)\)$/.exec(lines[3])
+  if (!runLink) throw new Error('Release notes are missing GitHub build provenance')
+  const [, repository, run, attempt] = runLink
+  const header = hostedPackageHeader({
+    PACKAGE_MODE: 'release',
+    PACKAGE_VERSION: tag,
+    GITHUB_ACTIONS: 'true',
+    GITHUB_REPOSITORY: repository,
+    GITHUB_SHA: revision,
+    GITHUB_RUN_ID: run,
+    GITHUB_RUN_ATTEMPT: attempt,
+  })
+  if (header.some((line, index) => lines[index] !== line)) {
+    throw new Error('Release handoff version or build commit does not match the local release tag')
+  }
+  console.log('Release tag ' + tag + ' matches build commit ' + revision)
+}
+
 function isMainModule(entry) {
   // Older Node 22 versions lack import.meta.main. Eval uses argv[1] for the first user argument.
   if (!entry || entry === '-' || process.execArgv.some((arg) => /^(-[ep]+$|--(eval|print)(=|$))/.test(arg))) return false
@@ -120,9 +152,11 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verify(directory, platform)
   } else if (first === '--verify-hosted' && platformPackages.has(platform) && directory && extra.length === 0) {
     await verifyHostedPackage(directory, platform)
+  } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
+    await verifyReleaseTag(platform, directory)
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory>')
   }
 }

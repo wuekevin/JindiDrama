@@ -38,7 +38,7 @@ function generate(directory) {
   assert.equal(result.status, 0, result.stderr)
 }
 
-async function fixture(t) {
+async function fixture(t, notes = releaseNotes) {
   const root = await mkdtemp(join(tmpdir(), 'jindi-release-handoff-'))
   t.after(() => rm(root, { recursive: true, force: true }))
   const windows = join(root, 'windows')
@@ -46,7 +46,7 @@ async function fixture(t) {
   const output = join(root, 'release')
   for (const [platform, dir] of [['windows', windows], ['macos', mac]]) {
     await mkdir(dir)
-    await writeFile(join(dir, 'RELEASE-NOTES.md'), releaseNotes)
+    await writeFile(join(dir, 'RELEASE-NOTES.md'), notes)
     await writeFile(join(dir, 'RELEASE-ROLLBACK.md'), 'rollback\n')
     await writeFile(join(dir, 'PRIVACY.md'), platform === 'windows' ? 'privacy\r\n' : 'privacy\n')
     await writeFile(join(dir, 'FRONTEND-LICENSES.md'), 'frontend licenses ' + platform)
@@ -59,6 +59,49 @@ async function fixture(t) {
   generate(mac)
   return { windows, mac, output, args: [windows, mac, output] }
 }
+
+function git(cwd, ...args) {
+  const result = spawnSync('git', args, { cwd, encoding: 'utf8' })
+  if (result.error) throw result.error
+  assert.equal(result.status, 0, result.stderr)
+  return result.stdout.trim()
+}
+
+test('verifies the handoff against the explicitly named local release tag', async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), 'jindi-release-tag-'))
+  t.after(() => rm(cwd, { recursive: true, force: true }))
+  git(cwd, 'init', '--quiet', '--object-format=sha1')
+  const commit = (message) => git(cwd, '-c', 'user.name=JindiDrama',
+    '-c', 'user.email=test@example.com', '-c', 'commit.gpgsign=false', 'commit', '--quiet',
+    '--allow-empty', '-m', message)
+  commit('packaged source')
+  const sha = git(cwd, 'rev-parse', 'HEAD')
+  git(cwd, 'branch', version)
+  const { output, args } = await fixture(t, releaseNotes.replaceAll(revision, sha))
+  const assembled = run(assemble, args, { env: { ...env, GITHUB_SHA: sha } })
+  assert.equal(assembled.status, 0, assembled.stderr)
+
+  const check = (tag = version) => run(checksums, ['--verify-release-tag', tag, output], { cwd })
+  assert.match(check().stderr, /Cannot resolve local Git tag/)
+  assert.match(check('--not-a-tag').stderr, /Expected a valid release version/)
+  git(cwd, 'tag', version)
+  const lightweight = check()
+  assert.equal(lightweight.status, 0, lightweight.stderr)
+  assert.match(lightweight.stdout, new RegExp(sha))
+  git(cwd, 'tag', 'v0.1.0-rc.2')
+  assert.match(check('v0.1.0-rc.2').stderr, /does not match the local release tag/)
+  commit('wrong source')
+  git(cwd, 'tag', '--force', version)
+  assert.match(check().stderr, /does not match the local release tag/)
+
+  git(cwd, '-c', 'user.name=JindiDrama', '-c', 'user.email=test@example.com',
+    '-c', 'tag.gpgSign=false', 'tag', '--force', '-a', version, sha, '-m', 'candidate')
+  const annotated = check()
+  assert.equal(annotated.status, 0, annotated.stderr)
+  assert.match(annotated.stdout, new RegExp(sha))
+  await writeFile(join(output, 'JindiDrama.exe'), 'changed')
+  assert.match(check().stderr, /SHA-256 mismatch: JindiDrama.exe/)
+})
 
 test('assembles both verified platforms and emits one complete release manifest', async (t) => {
   const { output, args } = await fixture(t)

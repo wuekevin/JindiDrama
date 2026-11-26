@@ -106,7 +106,7 @@ GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-win
 正式打包检查所选提交的完整 Git 历史。可先运行 `bash scripts/verify-distribution-source.sh`，再按照验收记录准备发行。
 
 1. 在拟发布提交上以 `release` 模式运行 `package` 工作流。签名、公证、双平台验收和下载复验全部通过后，会产生 `release-handoff-<版本>-attempt-<轮次>`。如果一轮失败，重跑全部任务或重新发起打包，使两个平台产物来自同一轮。下载交付包并解压到干净目录。
-2. 在仓库中运行 `node scripts/package-checksums.mjs --verify release "<解压目录>"`。核对 `RELEASE-NOTES.md` 中的版本、提交、打包运行和轮次。发行标签应指向说明中的同一个提交。
+2. 在本地仓库准备指向构建提交的拟发布标签。运行 `node scripts/package-checksums.mjs --verify-release-tag v0.1.0 "<解压目录>"`，将 `v0.1.0` 替换为拟发布标签。命令校验交付包内全部文件的 SHA-256，以及发行说明中的版本和构建提交。核对说明中的 GitHub 打包运行和轮次后再发布。
 3. 用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。确认草稿的资产名称和 SHA-256 后，由维护者发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
 
 #### Windows 证书库签名

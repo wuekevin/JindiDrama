@@ -1,3 +1,5 @@
+export const packageVersionPattern = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/
+
 export function githubBuildSource({ GITHUB_SHA: sha, GITHUB_REPOSITORY: repository,
   GITHUB_RUN_ID: runID, GITHUB_RUN_ATTEMPT: attempt }) {
   if (!/^[0-9a-f]{40}$/.test(sha ?? '') || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? '') ||
@@ -12,7 +14,7 @@ export function githubBuildSource({ GITHUB_SHA: sha, GITHUB_REPOSITORY: reposito
 export function hostedPackageHeader(env) {
   const { PACKAGE_VERSION: version, PACKAGE_MODE: mode, GITHUB_ACTIONS: inActions } = env
   if (inActions !== 'true' || !['smoke', 'release'].includes(mode) ||
-      !/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version ?? '')) {
+      !packageVersionPattern.test(version ?? '')) {
     throw new Error('Expected provenance from a GitHub Actions package build')
   }
   return [
