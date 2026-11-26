@@ -122,6 +122,8 @@ node scripts/package-checksums.mjs --verify-release-draft v0.1.0 "<解压目录>
 
 #### Windows 证书库签名
 
+托管正式打包使用签发方许可且与 Windows 证书库兼容的 PFX。公开受信任的代码签名私钥通常由硬件或托管签名服务保护。若签发方提供的是不可导出的密钥，应先确认可用的签名方式。当前本机脚本支持 Windows 证书库中可访问的硬件密钥，托管正式交付仍需相应的签名工作流和原生验收。[CA/Browser Forum 代码签名要求](https://cabforum.org/working-groups/code-signing/requirements/)
+
 GitHub 托管版使用已配置的 PFX 凭据临时导入证书库，签名时按指纹选择证书。使用已有硬件密钥或不可导出私钥的维护者，可在对应 Windows 环境先执行 Wails Windows NSIS 构建，再从项目根目录运行下列命令。需要 PowerShell 7、Windows SDK 的 SignTool、命令路径中支持 `!uninstfinalize` 的 NSIS 3，以及当前用户 `My` 证书库中具有可访问密钥的签名证书。若证书位于本机 `My` 库，添加 `-MachineStore`。
 
 ```powershell

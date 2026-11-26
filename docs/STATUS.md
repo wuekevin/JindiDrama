@@ -1,5 +1,21 @@
 # 发行源码验收
 
+## 当前发行候选
+
+截至 2026-11-27，`v0.1.0-smoke.20261127.49` 是最新本地候选，打包源提交为 `9208b80b42e77f4d00e87e77090a5ce59d5566a2`。下方记录包含历史验收，各版本的证据按对应提交使用。
+
+| 项目 | 当前状态 | 完成条件 |
+|---|---|---|
+| .49 本地构建 | 两平台 13 项 SHA-256、391 项浏览器测试和 Apple Silicon 成品启动及回滚通过 | [Windows 校验清单](../build/bin/smoke-20261127.49/windows/SHA256SUMS.txt) · [macOS 校验清单](../build/bin/smoke-20261127.49/macos/SHA256SUMS.txt) |
+| .49 GitHub 原生验收 | 等待独立测试分支推送授权。上一轮 .44 的 Windows、Apple Silicon、Intel Mac 通过 | 当前候选的四项冒烟任务全部成功，并下载复验两份归档和内部清单。[GitHub .44 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269) |
+| Windows 正式签名 | 托管打包要求签名 PFX。证书库脚本可使用 Windows 上的硬件密钥，已通过本地夹具 | 确认维护者实际可用的签名路径；正式成品的便携程序、安装器和卸载器通过原生验签及时间戳检查。[签名说明](../README.md#windows-证书库签名) |
+| macOS 正式签名与公证 | 本地成品为临时签名 | 为 `release-macos` 配置 Developer ID Application 和公证凭据；双架构归档通过票据验证与分发策略检查。[签名环境](../README.md#签名环境) |
+| 正式发布版在线更新 | Apple Silicon 的系统保存、校验、重试与剪贴板已通过隔离验收 | 发布签名安装包后，用旧版实际验证 GitHub 版本发现与下载校验。[原生更新日志](../build/bin/qa-native-update-download-49/verify.log) |
+| 苹果 CMS 公网联调 | Go 直连已用合成授权片源验证目录及播放 | 使用可供项目联调的授权 HTTPS 端点和测试剧目，验证目录、搜索、详情、播放与授权限制。 |
+| 红果官方接口 | 等待第三方桌面接入授权、接口文档和测试环境 | 按[上游授权规定](UPSTREAM-AUTHORIZATION.md)验证目录、播放、登录、互动和同步。 |
+
+GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均为 0。以上门槛尚未全部通过。
+
 本分支用于从独立发行历史构建。应用提供演示目录、授权本地片库、苹果 CMS V10 授权片源、播放、收藏、观看历史、互动、设置和桌面版本更新。CMS 由 Go 直连配置地址，桌面运行无需 Docker 或参考应用。
 
 - 从源码提交 `a791627946d6ecf45fc8c7842e74281ed25387b1` 的 bundle 克隆后，Node 22 锁文件安装、前端构建、79 项前端单测和 213 项独立 Playwright 测试通过。Go vet、全量 Go 测试、竞态检查和工作流静态检查通过。
