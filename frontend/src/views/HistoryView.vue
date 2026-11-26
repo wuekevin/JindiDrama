@@ -56,7 +56,8 @@ type Row = ReturnType<typeof historyDay> & {
   detailAvailable?: boolean
 }
 const recentHistory = computed(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt))
-const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSLibraryDetails(
+const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS,
+  canRetry: canRetryCMS, retryDetail: retryCMS, retrying: retryingCMS } = useCMSLibraryDetails(
   () => recentHistory.value.map(({ dramaId }) => dramaId).filter(isAppleCMSDramaId),
 )
 const rows = computed<Row[]>(() => recentHistory.value.flatMap((h): Row[] => {
@@ -197,9 +198,12 @@ const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
               :src="r.d.cover" :alt="r.d.title" :loading="r.cms ? 'lazy' : undefined" @error="fallbackCatalogCover" @click="rowClick(r)" />
             <div class="b"><h3 class="clamp-2">{{ r.d.title }}</h3><p class="tg">{{ issueText(r) }}<span v-if="r.issue && r.status === 'unknown'"> · 完成状态未知</span><span v-else-if="r.issue && r.status === 'done'"> · 已看完</span></p><p class="ep">第{{ r.h.episode }}集<template v-if="r.h.episodeCountAtWatch && (!r.detailAvailable && r.cms || r.h.episodeCountAtWatch !== r.d.episodeCount)"> / 当时共{{ r.h.episodeCountAtWatch }}集</template><template v-else-if="!r.issue"> / 共{{ r.d.episodeCount }}集</template></p>
               <div class="pg"><ProgressBar :value="r.h.percent" /><i>{{ r.h.percent }}%</i></div></div>
-            <div class="ac" :class="{ 'only-menu': r.cms && !r.detailAvailable }"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.age) }}</span>
+            <div class="ac" :class="{ 'only-menu': r.cms && !r.detailAvailable && !canRetryCMS(r.d.id) }"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.age) }}</span>
               <template v-if="r.issue">
                 <button v-if="!r.cms || r.detailAvailable" class="done" @click="openDetails(r)">{{ r.issue === 'catalog' ? '查看详情' : r.issue === 'library' ? '查看片库' : '选集' }}</button>
+                <button v-else-if="canRetryCMS(r.d.id)" class="done" :disabled="retryingCMS.has(r.d.id)" @click="retryCMS(r.d.id)">
+                  {{ retryingCMS.has(r.d.id) ? '正在核验…' : '重试核验' }}
+                </button>
               </template>
               <button v-else-if="r.status === 'done'" class="done" data-testid="done-badge" aria-label="已看完，重播本集" @click="resume(r)">已看完 · 重播<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />{{ r.continuation === undefined ? '重播本集' : r.continuation !== r.h.episode ? '看下一集' : '继续观看' }}</button>
               <div class="mw" @keydown.esc.stop="closeMenu"><button aria-label="更多" :aria-expanded="menu === r.d.id" data-testid="h-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn on-dark"><li><button data-testid="h-delete" @click="delOne(r.d.id)">删除此记录</button></li><li v-if="!r.cms || r.detailAvailable"><button @click="openDetails(r)">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li></ul></div></div>

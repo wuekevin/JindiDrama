@@ -1281,6 +1281,44 @@ test('CMS detail can toggle favorites while playback is unavailable', async ({ p
 const cmsFavoriteReference = (id: string) => id.split(':').slice(1).join(':')
 const cmsFavoriteLabel = (id: string) => '苹果 CMS 短剧 · ' + cmsFavoriteReference(id)
 
+for (const [path, item, play] of [
+  ['favorites', 'fav-card', 'fav-play'], ['history', 'history-item', 'resume'],
+] as const) {
+  test(`CMS ${path} rechecks a failed bookmark without leaving the page`, async ({ page }, testInfo) => {
+    const desktop = await cmsLibraryFixture(page, [{
+      dramaId: cmsId, episode: 3, percent: 25, watchedAt: Date.now(),
+      positionMs: 6000, durationMs: 24000, episodeCountAtWatch: 3,
+    }], [cmsId])
+    desktop.catalog.available = [3]
+    desktop.catalog.offline = true
+    await page.goto('/#/' + path)
+
+    const row = page.getByTestId(item)
+    const retry = row.getByRole('button', { name: '重试核验' })
+    await expect(retry).toBeEnabled()
+    await expect(row).toContainText('当前片源不可用')
+    await expect(row.getByTestId(play)).toHaveCount(0)
+    await row.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath('cms-' + path + '-retry.png') })
+
+    desktop.catalog.offline = false
+    desktop.catalog.detailDelayMs = 500
+    await retry.click()
+    await expect(row.getByRole('button', { name: '正在核验…' })).toBeDisabled()
+    await expect(row.getByTestId(play)).toHaveText('继续观看')
+    await expect(retry).toHaveCount(0)
+    expect(desktop.favorites()).toEqual([cmsId])
+    expect(desktop.rows()[0]).toMatchObject({ episode: 3, positionMs: 6000 })
+    expect(desktop.writes).toHaveLength(0)
+    expect(await page.evaluate(() => (window as unknown as {
+      catalogTest: { lookups: string[] }
+    }).catalogTest.lookups)).toEqual([cmsId, cmsId])
+    await row.getByTestId(play).click()
+    await expect(page).toHaveURL(/\/play\/3$/)
+    await expect.poll(() => position(historyVideo(page, 3))).toBeCloseTo(6, 2)
+  })
+}
+
 async function holdCMSDetails(page: Page, catalog: CatalogState) {
   let release!: () => void
   const pending = new Promise<void>((resolve) => { release = resolve })
@@ -1298,6 +1336,7 @@ test('CMS favorites stay removable when the source is disabled, switched, or the
   const cards = page.getByTestId('fav-card')
   const unavailable = cards.filter({ hasText: '当前片源不可用' })
   await expect(unavailable).toHaveCount(3)
+  await expect(unavailable.getByRole('button', { name: '重试核验' })).toHaveCount(0)
   const reads = () => page.evaluate(() => (window as unknown as { catalogTest: { lookups: string[] } }).catalogTest.lookups)
   expect(await reads()).toEqual([])
   await expect(page.getByTestId('fav-play')).toHaveCount(0)
@@ -1321,6 +1360,7 @@ test('CMS favorites stay removable when the source is disabled, switched, or the
   await expect(cards.filter({ hasText: cmsTitle })).toBeVisible()
   await expect(unavailable).toHaveCount(1)
   await expect(unavailable.getByTestId('fav-play')).toHaveCount(0)
+  await expect(unavailable.getByRole('button', { name: '重试核验' })).toHaveCount(0)
   await unavailable.getByTestId('fav-unfav').click()
   await expect.poll(desktop.favorites).toEqual([obsolete])
 

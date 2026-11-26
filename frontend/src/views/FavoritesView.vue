@@ -44,7 +44,8 @@ type Row = {
   detailAvailable: boolean
   localReference?: string
 }
-const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSLibraryDetails(
+const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS,
+  canRetry: canRetryCMS, retryDetail: retryCMS, retrying: retryingCMS } = useCMSLibraryDetails(
   () => lib.favorites.filter(isAppleCMSDramaId),
 )
 const rows = computed(() => lib.favorites.flatMap((id): Row[] => {
@@ -178,7 +179,11 @@ const open = (r: Row) => (batch.value ? pick(r.d.id) : openDetails(r))
           <p v-else class="up">{{ issueLabels[r.issue] }}</p>
           <p class="lw">{{ r.last ? `上次看到：第${r.last}集` : '尚未观看' }}</p>
           <div class="pg"><ProgressBar :value="r.pct" /><i>{{ r.pct }}%</i></div></div>
-        <div class="ops"><button v-if="r.action" class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.action }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
+        <div class="ops"><button v-if="r.action" class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.action }}</button>
+          <button v-else-if="r.cms && canRetryCMS(r.d.id)" class="p" :disabled="retryingCMS.has(r.d.id)" @click="retryCMS(r.d.id)">
+            {{ retryingCMS.has(r.d.id) ? '正在核验…' : '重试核验' }}
+          </button>
+          <button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
       </li></ul>
     <BaseButton v-if="hasMoreCMS" class="cms-more" variant="ghost" :disabled="loadingCMS" @click="loadMoreCMS">
       {{ loadingCMS ? '正在核验片源收藏…' : '核验更多片源收藏' }}

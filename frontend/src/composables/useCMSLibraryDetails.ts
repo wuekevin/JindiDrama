@@ -10,7 +10,7 @@ async function lookupDetail(id: string, wanted: () => boolean) {
   if (activeLookups < concurrentLookups) activeLookups++
   else await new Promise<void>((resolve) => waitingLookups.push(resolve))
   try {
-    return wanted() ? await getDetail(id, 'normal', true).catch(() => null) : null
+    return wanted() ? await getDetail(id, 'normal', true) : null
   } finally {
     // Transfer the slot to the next waiter before allowing a new lookup to start.
     const next = waitingLookups.shift()
@@ -21,6 +21,8 @@ async function lookupDetail(id: string, wanted: () => boolean) {
 
 export function useCMSLibraryDetails(ids: () => string[]) {
   const details = reactive(new Map<string, DramaDetail | null>())
+  const failed = reactive(new Set<string>())
+  const retrying = reactive(new Set<string>())
   const remaining = computed(() => ids().filter((id) => !details.has(id)))
   const loading = ref(false)
   let active = true
@@ -41,6 +43,33 @@ export function useCMSLibraryDetails(ids: () => string[]) {
     return loadMore()
   }
 
+  async function refreshDetail(id: string) {
+    const wanted = () => active && ids().includes(id)
+    if (!wanted()) return
+    try {
+      const detail = await lookupDetail(id, wanted)
+      if (!wanted()) return
+      failed.delete(id)
+      details.set(id, detail?.appleCMS ? detail : null)
+    } catch {
+      if (!wanted()) return
+      failed.add(id)
+      details.set(id, null)
+    }
+  }
+
+  const canRetry = (id: string) => details.get(id) === null && failed.has(id)
+
+  async function retryDetail(id: string) {
+    if (!canRetry(id) || retrying.has(id)) return
+    retrying.add(id)
+    try {
+      await refreshDetail(id)
+    } finally {
+      retrying.delete(id)
+    }
+  }
+
   async function loadBatch() {
     const batch = remaining.value.slice(0, batchSize)
     loading.value = true
@@ -50,10 +79,7 @@ export function useCMSLibraryDetails(ids: () => string[]) {
       let index = 0
       async function lookup() {
         while (active && index < batch.length) {
-          const id = batch[index++]
-          if (!ids().includes(id)) continue
-          const detail = await lookupDetail(id, () => active && ids().includes(id))
-          if (active && ids().includes(id)) details.set(id, detail?.appleCMS ? detail : null)
+          await refreshDetail(batch[index++])
         }
       }
       await Promise.all(Array.from({ length: Math.min(concurrentLookups, batch.length) }, lookup))
@@ -69,5 +95,6 @@ export function useCMSLibraryDetails(ids: () => string[]) {
     void loadMore()
   }, { immediate: true })
 
-  return { details, loadMore, retryFailed, loading, hasMore: computed(() => remaining.value.length > 0) }
+  return { details, loadMore, retryFailed, canRetry, retryDetail, retrying, loading,
+    hasMore: computed(() => remaining.value.length > 0) }
 }
