@@ -598,3 +598,10 @@
 - Apple Silicon 从最终 ZIP 验证桌面启动、退出、隔离 SQLite 与成品回滚。Go vet、Go 全量、App/更新/CMS Provider 竞态、122 项 Vitest、Node 和 Python 发行工具各 13 项及 Windows 发行脚本测试通过。源码、三个成品切片及 npm 生产依赖扫描均未报告已知漏洞。
 - 本批为本地测试包。Windows 和 Intel Mac 的本批原生、正式签名与公证、真实授权公网片源仍待验收。只读核对 GitHub Release、签名环境和仓库级 Actions secrets 数量均为 0，本机没有可用的代码签名身份。
 - [Windows SHA-256](../build/bin/smoke-20261127.45/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.45/macos/SHA256SUMS.txt) · [浏览器回归](../build/bin/smoke-20261127.45/evidence/e2e.log) · [Apple Silicon 原生](../build/bin/smoke-20261127.45/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate45-packages.md)
+
+## E03 苹果 CMS 详情页演职信息（2026-11-27）
+
+- 已核验的剧目详情同时映射 `vod_actor` 和 `vod_director`。后台清理标签及链接、处理常见姓名分隔符并去重。每个字段最多显示 12 个姓名，缺失和无效字段跳过。详情以纯文本展示。[苹果 CMS 视频接口文档](https://github.com/magicblack/maccms10/blob/master/%E8%AF%B4%E6%98%8E%E6%96%87%E6%A1%A3/API%E6%8E%A5%E5%8F%A3%E8%AF%B4%E6%98%8E.txt)
+- 对照详情设计稿，1448×1086 和 1280×860、220% 缩放验证长姓名换行、标签与内容对齐。Chromium 验证演职信息缺失的剧目可正常选集，切换详情不残留旧名单。[默认截图](../build/bin/qa-cms-credits/cms-credits-default.png) · [220% 截图](../build/bin/qa-cms-credits/cms-credits-220.png)
+- Apple Silicon 实测 Go 处理本机合成详情后由 WKWebView 显示清理过的主演和导演，打开另一剧目时隐藏缺失字段。退出后 SQLite 完整性为 `ok`。
+- 生产构建、122 项 Vitest、82 项详情与播放 Playwright、Go vet、Go 全量及 App/Provider 竞态、Windows x64 生产交叉编译通过。真实授权公网片源和本批 Windows 原生仍待验收。[BMad 记录](../_bmad-output/plan-e03-cms-credits.md)

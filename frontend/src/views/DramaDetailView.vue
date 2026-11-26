@@ -156,6 +156,14 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
               <ChevronRight :size="14" />
             </RouterLink>
           </div>
+          <dl v-if="detail.catalogCredits" class="cms-credits">
+            <div v-if="detail.catalogCredits.cast?.length">
+              <dt>主演</dt><dd>{{ detail.catalogCredits.cast.join('、') }}</dd>
+            </div>
+            <div v-if="detail.catalogCredits.directors?.length">
+              <dt>导演</dt><dd>{{ detail.catalogCredits.directors.join('、') }}</dd>
+            </div>
+          </dl>
           <p class="status"><b>更新状态</b><template v-if="detail.schedule"> {{ detail.schedule }} <u>|</u></template> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
           <div v-if="detail.drama.providerOnly">
             <p v-if="!detail.catalogPlayback || !firstAvailableEpisode" class="status">当前剧目播放暂不可用。</p>
@@ -238,6 +246,15 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
 .sum { position: relative; margin-top: 8px; h4 { font-size: 17px; margin-bottom: 6px; } p { font-size: 14.5px; line-height: 1.6; color: var(--c-text-2); max-width: 760px; padding-right: 60px; &.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; } } .exp { position: absolute; right: 8px; top: 34px; display: inline-flex; align-items: center; font-size: 13px; } }
 .cast { display: flex; white-space: nowrap; align-items: center; gap: 12px; margin-top: 12px; h4 { font-size: 17px; margin-right: 6px; } }
 .cm { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 12px 0 6px; border-radius: 26px; background: var(--c-surface); border: 1px solid var(--c-border); width: 200px; i { width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-weight: 700; flex: none; } span { flex: 1; text-align: left; b { display: block; font-size: 14px; } em { font-style: normal; font-size: 12px; color: var(--c-text-2); } } }
+.cms-credits {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 14.5px;
+  div { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px; }
+  dt { font-weight: 700; }
+  dd { margin: 0; color: var(--c-text-2); overflow-wrap: anywhere; }
+}
 .status { margin-top: 14px; font-size: 14.5px; color: var(--c-text-2); b { color: var(--c-text); margin-right: 10px; } u { text-decoration: none; margin: 0 10px; color: var(--c-text-3); } }
 .cta { display: flex; gap: 16px; margin-top: 14px; align-items: center; :deep(.btn.lg) { min-width: 186px; } :deep(.btn.ghost) { min-width: 144px; } }
 .cont { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 24px 0 14px; border-radius: 26px; background: var(--c-surface); border: 1px solid var(--c-border-strong); min-width: 200px; text-align: left; span { font-size: 15px; font-weight: 600; em { display: block; font-style: normal; font-size: 12px; font-weight: 400; color: var(--c-text-2); } } &:hover { background: var(--c-surface-hover); } }

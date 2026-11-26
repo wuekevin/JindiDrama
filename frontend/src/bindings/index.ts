@@ -104,7 +104,7 @@ interface GoApp {
   CatalogPage?(query: string, page: number): Promise<CatalogPage>
   CatalogGenres?(): Promise<CatalogGenre[]>
   CatalogGenrePage?(genre: string, page: number): Promise<CatalogPage>
-  CatalogDetail?(id: string): Promise<{ drama: CatalogDrama; episodes: Episode[]; genreId?: string }>
+  CatalogDetail?(id: string): Promise<{ drama: CatalogDrama; episodes: Episode[]; genreId?: string; cast?: string[]; directors?: string[] }>
   CatalogDrama?(id: string): Promise<CatalogDrama>
   CatalogEpisodes?(id: string): Promise<Episode[]>
   CatalogPlayback?(id: string, episode: number): Promise<PlaybackTicket>
@@ -397,7 +397,7 @@ export function loadProviderDetail(id: string, activeCatalog = false) {
   if (activeCatalog) {
     const appleCMS = isAppleCMSDramaId(id)
     if (appleCMS && app.CatalogDetail) {
-      return app.CatalogDetail(id).then(({ drama, episodes, genreId }) => [drama, episodes, genreId] as const)
+      return app.CatalogDetail(id).then(({ drama, episodes, ...metadata }) => [drama, episodes, metadata] as const)
     }
     if (!app.CatalogDrama || !app.CatalogEpisodes) return
     const requests = [app.CatalogDrama(id), app.CatalogEpisodes(id)] as const

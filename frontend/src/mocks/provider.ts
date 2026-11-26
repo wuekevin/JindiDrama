@@ -217,7 +217,7 @@ export async function searchDramas(q: string, f: SearchFilters = {}, mode: 'norm
 }
 
 export interface DemoHighlight { id: number; title: string; dur: string }
-export interface DramaDetail { drama: Drama; episodes: { id?: string; index: number; available: boolean }[]; catalogPlayback?: boolean; appleCMS?: boolean; catalogGenreID?: string; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
+export interface DramaDetail { drama: Drama; episodes: { id?: string; index: number; available: boolean }[]; catalogPlayback?: boolean; appleCMS?: boolean; catalogGenreID?: string; catalogCredits?: { cast?: string[]; directors?: string[] }; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
 const DEMO_HIGHLIGHTS: DemoHighlight[] = [1, 2, 3].map((id) => ({ id, title: `演示片段 ${id}`, dur: '00:24' }))
 export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', catalogRoute = false): Promise<DramaDetail | null> {
   await delay(120)
@@ -231,16 +231,20 @@ export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', c
     try {
       const detail = await loadProviderDetail(id, true)
       if (!detail) throw new Error('目录暂不可用')
-      const [record, episodes, genreID] = detail
+      const [record, episodes, metadata] = detail
       if (record?.id !== id) return null
       const drama = providerCard(record)
+      const genre = metadata?.genreId
+      const credits = metadata?.cast?.length || metadata?.directors?.length
+        ? { cast: metadata.cast, directors: metadata.directors } : undefined
       return {
         drama, episodes: (episodes ?? []).filter(({ dramaId, index }) =>
           dramaId === id && Number.isInteger(index) && index > 0 && index <= drama.episodeCount,
         ).map((episode) => ({ ...episode, available: episode.available && episode.index <= drama.updatedTo })),
         catalogPlayback: capabilities.playback === 'ready' && hasCatalogPlayback(),
         appleCMS,
-        catalogGenreID: typeof genreID === 'string' && /^[1-9][0-9]{0,29}$/.test(genreID) ? genreID : undefined,
+        catalogGenreID: typeof genre === 'string' && /^[1-9][0-9]{0,29}$/.test(genre) ? genre : undefined,
+        catalogCredits: credits,
         cast: [], long: record.summary, seasons: [], highlights: [],
       }
     } catch (error) {

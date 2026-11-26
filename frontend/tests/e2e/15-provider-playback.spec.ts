@@ -716,6 +716,40 @@ test('CMS detail offers playable same-source titles and ignores recommendations 
   await expect(section).toHaveCount(0)
 })
 
+test('CMS detail shows supplied credits and hides missing data on the next title', async ({ page }, testInfo) => {
+  await cmsLibraryFixture(page)
+  await page.goto('/#/home')
+  const nextID = cmsId.replace(/:[0-9]+$/, ':51')
+  await page.evaluate(({ id, title }) => {
+    const app = (window as unknown as { go: { app: { App: Record<string, unknown> } } }).go.app.App
+    app.CatalogDetail = async (requested: string) => ({
+      drama: { id: requested, title: requested === id ? title : '无演职信息的样片', tags: ['海岛'], summary: '授权目录样本', episodeCount: 1, updatedTo: 1 },
+      episodes: [{ id: 'episode-1', dramaId: requested, index: 1, available: true }],
+      ...(requested === id ? { cast: ['林舟', '雨岚', '长'.repeat(38)], directors: ['顾远'] } : {}),
+    })
+  }, { id: cmsId, title: cmsTitle })
+
+  await page.getByRole('region', { name: '片源目录' }).getByTestId('drama-card').click()
+  const cast = page.getByText('林舟、雨岚、' + '长'.repeat(38), { exact: true })
+  await expect(cast).toBeVisible()
+  await expect(page.getByText('顾远', { exact: true })).toBeVisible()
+  await expect(page.getByText('演示主演')).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('cms-credits-default.png') })
+
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((html) => { html.style.setProperty('--user-zoom', '2.2') })
+  await expect(page.getByTestId('page-detail')).toHaveClass(/\bcompact\b/)
+  await cast.scrollIntoViewIfNeeded()
+  await expect(cast).toBeInViewport({ ratio: 0.95 })
+  expect(await cast.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath('cms-credits-220.png') })
+  await page.evaluate((id) => { window.location.hash = '/catalog/' + encodeURIComponent(id) }, nextID)
+  await expect(page.getByRole('heading', { name: '无演职信息的样片' })).toBeVisible()
+  await expect(page.getByText('主演', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('导演', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '第1集' })).toBeEnabled()
+})
+
 test('CMS desktop startup restores the latest current-source bookmark paused', async ({ page }) => {
   const otherSource = 'apple-cms:ffffffffffffffffffffffffffffffff:90071992547409931234'
   await cmsLibraryFixture(page, [{ ...startupCMSHistory, dramaId: otherSource, watchedAt: 200 }, startupCMSHistory])

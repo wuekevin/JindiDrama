@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"jindi-drama/internal/provider"
 )
@@ -65,9 +66,11 @@ type CatalogPage struct {
 }
 
 type CatalogDetail struct {
-	Drama    provider.Drama     `json:"drama"`
-	Episodes []provider.Episode `json:"episodes"`
-	GenreID  string             `json:"genreId,omitempty"`
+	Drama     provider.Drama     `json:"drama"`
+	Episodes  []provider.Episode `json:"episodes"`
+	GenreID   string             `json:"genreId,omitempty"`
+	Cast      []string           `json:"cast,omitempty"`
+	Directors []string           `json:"directors,omitempty"`
 }
 
 type CatalogGenre struct {
@@ -257,9 +260,9 @@ func (p *Provider) Episodes(ctx context.Context, id string) ([]provider.Episode,
 	return result.Episodes, err
 }
 
-// CatalogDetail projects the title and episode availability from the same record.
+// CatalogDetail projects metadata and episode availability from the same record.
 func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail, error) {
-	drama, sources, genre, err := p.detail(ctx, id)
+	drama, sources, raw, err := p.detail(ctx, id)
 	if err != nil {
 		return CatalogDetail{}, err
 	}
@@ -269,7 +272,10 @@ func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail,
 			ID: episodeID(id, index), DramaID: id, Index: index, Available: len(sources[index]) > 0,
 		})
 	}
-	return CatalogDetail{Drama: drama, Episodes: episodes, GenreID: genre}, nil
+	return CatalogDetail{
+		Drama: drama, Episodes: episodes, GenreID: genreID(scalar(raw.TypeID).text()),
+		Cast: creditNames(raw.Actor), Directors: creditNames(raw.Director),
+	}, nil
 }
 
 func (p *Provider) ResolvePlayback(ctx context.Context, id string, index int) (provider.PlaybackTicket, error) {
@@ -302,25 +308,25 @@ func (p *Provider) OwnsDramaID(id string) bool {
 	return ok
 }
 
-func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, string, error) {
+func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, record, error) {
 	vodID, ok := p.dramaID(id)
 	if !ok {
-		return provider.Drama{}, nil, "", provider.ErrNotFound
+		return provider.Drama{}, nil, record{}, provider.ErrNotFound
 	}
 	data, err := p.request(ctx, url.Values{"ac": {"detail"}, "ids": {vodID}})
 	if err != nil {
-		return provider.Drama{}, nil, "", err
+		return provider.Drama{}, nil, record{}, err
 	}
 	items := data.List
 	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID {
-		return provider.Drama{}, nil, "", provider.ErrNotFound
+		return provider.Drama{}, nil, record{}, provider.ErrNotFound
 	}
 	title := metadataText(items[0].Name)
 	if title == "" {
-		return provider.Drama{}, nil, "", errUpstream
+		return provider.Drama{}, nil, record{}, errUpstream
 	}
 	drama, sources := p.normalize(items[0], vodID, title)
-	return drama, sources, genreID(scalar(items[0].TypeID).text()), nil
+	return drama, sources, items[0], nil
 }
 
 // scalar retains JSON number spelling instead of decoding IDs through float64.
@@ -371,6 +377,8 @@ type record struct {
 	Picture    json.RawMessage `json:"vod_pic"`
 	Category   string          `json:"type_name"`
 	Summary    string          `json:"vod_content"`
+	Actor      json.RawMessage `json:"vod_actor"`
+	Director   json.RawMessage `json:"vod_director"`
 	Total      json.RawMessage `json:"vod_total"`
 	PlayURL    string          `json:"vod_play_url"`
 	Locked     json.RawMessage `json:"locked"`
@@ -476,6 +484,29 @@ func metadataText(value string) string {
 func genreText(value string) string {
 	// Strip tags decoded from HTML entities and URLs split by markup.
 	return strings.TrimSpace(genreURL.ReplaceAllString(htmlTag.ReplaceAllString(metadataText(value), ""), ""))
+}
+
+func creditNames(raw json.RawMessage) []string {
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		return nil
+	}
+	const maxNames = 12
+	const maxNameRunes = 80
+	var names []string
+	for field := range strings.FieldsFuncSeq(genreText(text), func(r rune) bool {
+		return strings.ContainsRune(",，、;；\r\n", r)
+	}) {
+		name := strings.Join(strings.Fields(field), " ")
+		if name == "" || utf8.RuneCountInString(name) > maxNameRunes || slices.Contains(names, name) {
+			continue
+		}
+		names = append(names, name)
+		if len(names) == maxNames {
+			break
+		}
+	}
+	return names
 }
 
 func (item record) restricted() bool {

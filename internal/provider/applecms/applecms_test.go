@@ -49,7 +49,7 @@ func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 			q.Get("ac") != "detail" || q.Get("at") != "json" || q.Get("token") != "qa" || q.Has("t") {
 			t.Errorf("unexpected CMS request: %s %s", r.Method, r.URL)
 		}
-		item := fmt.Sprintf(`{"vod_id":%s,"vod_name":"<b>海岛来信</b> http://catalog.example.test/vod?access=private","type_id":"007","type_name":"剧情 <a href='https://media.example.test/a?sig=private'>HTTPS&#58;//media.example.test/a?sig=private&amp;key=hidden</a>","vod_content":"<p>海岛 &amp; 信</p> https://catalog.example.test/vod?access=private","vod_total":"6","vod_play_url":%q}`, wideID, routes)
+		item := fmt.Sprintf(`{"vod_id":%s,"vod_name":"<b>海岛来信</b> http://catalog.example.test/vod?access=private","type_id":"007","vod_actor":"<b>林舟</b>，雨岚、林舟; &lt;i&gt;Anne  Marie&lt;/i&gt;，https://example.test/a?key=private","vod_director":"顾远、顾远","type_name":"剧情 <a href='https://media.example.test/a?sig=private'>HTTPS&#58;//media.example.test/a?sig=private&amp;key=hidden</a>","vod_content":"<p>海岛 &amp; 信</p> https://catalog.example.test/vod?access=private","vod_total":"6","vod_play_url":%q}`, wideID, routes)
 		if q.Has("ids") {
 			if q.Get("ids") != wideID || q.Has("pg") || q.Has("wd") {
 				t.Errorf("unexpected detail query: %s", r.URL)
@@ -90,6 +90,10 @@ func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 	if err != nil || combined.Drama.ID != drama.ID || combined.GenreID != "7" || len(combined.Episodes) != 6 {
 		t.Fatalf("combined detail = %+v, %v", combined, err)
 	}
+	if !slices.Equal(combined.Cast, []string{"林舟", "雨岚", "Anne Marie"}) ||
+		!slices.Equal(combined.Directors, []string{"顾远"}) {
+		t.Fatalf("unexpected credits: %+v, %+v", combined.Cast, combined.Directors)
+	}
 	episodes := combined.Episodes
 	for index, ep := range episodes {
 		if ep.Index != index+1 || ep.DramaID != drama.ID || ep.Available != (ep.Index == 3 || ep.Index == 5) {
@@ -109,6 +113,22 @@ func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 	changed := fixtureProvider(t, server.URL+"/vod?token=changed", server.Client())
 	if _, err = changed.Drama(t.Context(), drama.ID); !errors.Is(err, provider.ErrNotFound) || requests.Load() != 6 {
 		t.Fatalf("ID crossed source boundary: %v, %d requests", err, requests.Load())
+	}
+}
+
+func TestCreditNamesRejectsInvalidFieldsAndBoundsEntries(t *testing.T) {
+	for _, raw := range []string{"", "null", "42", `["林舟"]`, `{"name":"林舟"}`} {
+		if names := creditNames([]byte(raw)); len(names) != 0 {
+			t.Errorf("unexpected names for %q: %v", raw, names)
+		}
+	}
+	entries := []string{strings.Repeat("名", 81), "//example.test/credit", ""}
+	for i := 1; i <= 14; i++ {
+		entries = append(entries, fmt.Sprintf("主演%d", i))
+	}
+	data := []byte(fmt.Sprintf("%q", strings.Join(entries, "、")))
+	if names := creditNames(data); len(names) != 12 || names[0] != "主演1" || names[11] != "主演12" {
+		t.Fatalf("unexpected bounded names: %v", names)
 	}
 }
 
