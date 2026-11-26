@@ -565,3 +565,8 @@
 - Windows NSIS 安装器 22.53 MiB，Windows x64 便携 EXE 32.29 MiB，macOS Universal ZIP 40.86 MiB。三者封装与压缩方式不同。Universal ZIP 实测含 arm64 和 x86_64 两个切片，最低系统版本均为 macOS 13.0。
 - 同提交的 Windows 与 macOS CI 首轮通过。每平台 383 项 Playwright，通过苹果 CMS 暂停续看、媒体不可用回退和分享详情回归。Windows 原生 CMS 系统协议及托盘回调仍待验证，正式签名、公证与授权公网片源待验收。[双平台 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45878898001)
 - [Windows 清单](../build/bin/github-smoke-20261127.44/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/github-smoke-20261127.44/macos/SHA256SUMS.txt) · [原始 ZIP 清单](../build/bin/github-smoke-20261127.44/raw/SHA256SUMS.txt) · [归档复核](../build/bin/github-smoke-20261127.44/evidence/archived-checks.log) · [BMad 记录](../_bmad-output/plan-e13-candidate44-hosted-packages.md)
+
+## E13 Windows 安装包 CMS 协议冒烟已接入（2026-11-27）
+
+- 安装步骤核对 `jindi` URL 协议及带引号的处理命令。复用隔离配置和现有 Win32 窗口检查，经 Windows Shell 打开固定的合成 CMS 分享链接，等待转发进程退出以及原窗口恢复。普通二次启动检查保留。卸载后检查已移除协议。
+- Smoke 和 release 共用该步骤。PowerShell 语法、会话标记测试、工作流 YAML、Go vet、Go 全量竞态测试和 Windows x64 生产交叉编译均通过。本轮使用与 .44 相同的前端源码和已构建资源。Windows 系统 Shell 实际转发留待下一批托管验收。[BMad 记录](../_bmad-output/plan-e13-windows-cms-protocol-smoke.md)

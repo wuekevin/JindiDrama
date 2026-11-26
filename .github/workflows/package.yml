@@ -259,6 +259,8 @@ jobs:
           } finally {
             if ($preInstallRun) { $preInstallRun.Dispose() }
           }
+          $protocolKey = 'Registry::HKEY_CLASSES_ROOT\jindi'
+          if (Test-Path -LiteralPath $protocolKey) { throw 'A jindi URL handler already exists on the runner' }
           $install = Start-Process -FilePath $inst -ArgumentList "/S" -Wait -PassThru
           if ($install.ExitCode -ne 0) { throw "Installer exited with $($install.ExitCode)" }
           $exe = "C:\Program Files\JindiDrama\JindiDrama.exe"
@@ -278,6 +280,18 @@ jobs:
             $packaged = (Get-FileHash -LiteralPath $portable).Hash
             if ((Get-FileHash $exe).Hash -ne $packaged) { throw "Installed application differs from packaged executable" }
             Write-Host "安装目录与中文桌面快捷方式验证通过"
+            $protocol = Get-Item -LiteralPath $protocolKey
+            $command = $null
+            try {
+              $command = $protocol.OpenSubKey('shell\open\command')
+              if ($null -eq $command -or $protocol.GetValueNames() -cnotcontains 'URL Protocol' -or
+                  $command.GetValue('') -cne ('"' + $exe + '" "%1"')) {
+                throw 'Installer did not register the expected jindi URL handler'
+              }
+            } finally {
+              if ($command) { $command.Dispose() }
+              $protocol.Dispose()
+            }
             $fixtureDirectory = Join-Path (Split-Path -Parent $exe) ('jindi-uninstall-fixture-' + [Guid]::NewGuid().ToString('N'))
             $null = [IO.Directory]::CreateDirectory($fixtureDirectory)
             $fixtureFile = Join-Path $fixtureDirectory 'keep.txt'
@@ -285,7 +299,7 @@ jobs:
             $fixtureHash = (Get-FileHash -LiteralPath $fixtureFile).Hash
             & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
             & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -NativeProbe $nativeProbe
-            & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe
+            & ./scripts/smoke-windows-desktop.ps1 -Application $exe -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Minimize -NativeProbe $nativeProbe -VerifyCMSProtocol
             & ./scripts/smoke-windows-desktop.ps1 -Application $portable -ExpectedVersion $env:PACKAGE_VERSION -CloseScenario Tray -NativeProbe $nativeProbe
             $runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($startupRegistryPath)
             if ($runKey.GetValueNames() -contains 'JindiDrama') { throw 'A JindiDrama Run entry already exists on the runner' }
@@ -367,6 +381,7 @@ jobs:
               if ($lockCheckFailure) { throw $lockCheckFailure }
               if ($null -eq $checkFailure) {
                 if ($runKey.GetValueNames() -contains 'JindiDrama') { throw 'The installed application Run entry remains after uninstall' }
+                if (Test-Path -LiteralPath $protocolKey) { throw 'The installed jindi URL handler remains after uninstall' }
 
                 # A second install and uninstall must preserve the same value name for a different executable path.
                 $runFixture = '"' + (Join-Path $env:RUNNER_TEMP ('other-jindi-' + [Guid]::NewGuid().ToString('N') + '.exe')) + '"'
@@ -388,6 +403,7 @@ jobs:
                 if ($installedRun -cne $runFixture -or $runKey.GetValue('JindiDrama') -cne $runFixture) {
                   throw 'Install and uninstall must preserve a Run entry for a different executable'
                 }
+                if (Test-Path -LiteralPath $protocolKey) { throw 'The reinstalled jindi URL handler remains after uninstall' }
                 Write-Host 'Uninstall removed the matching Run entry and preserved a different one'
               }
             } catch {

@@ -6,7 +6,8 @@ param(
     [ValidateRange(5, 180)][int]$StartupTimeoutSeconds = 45,
     [ValidateSet('Exit', 'Minimize', 'Tray')][string]$CloseScenario = 'Exit',
     [string]$NativeProbe,
-    [switch]$RequireNotificationArea
+    [switch]$RequireNotificationArea,
+    [switch]$VerifyCMSProtocol
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,6 +76,30 @@ function Send-NativeClose([Diagnostics.Process]$Process) {
     if (-not $Process.CloseMainWindow()) { throw 'Unable to send the native window-close request' }
 }
 
+function Start-CMSProtocol([Diagnostics.ProcessStartInfo]$AppStart) {
+    # ShellExecute uses the caller's environment and cannot use ProcessStartInfo.Environment.
+    $keys = @('APPDATA', 'LOCALAPPDATA', 'JINDIDRAMA_DATA_DIR', 'WEBVIEW2_USER_DATA_FOLDER',
+        'JINDIDRAMA_LICENSED_MEDIA_DIR', 'JINDIDRAMA_CMS_URL')
+    $prior = @{}
+    foreach ($key in $keys) {
+        $prior[$key] = [Environment]::GetEnvironmentVariable($key)
+    }
+    try {
+        foreach ($key in $keys) {
+            [Environment]::SetEnvironmentVariable($key, $AppStart.Environment[$key])
+        }
+        $launch = [Diagnostics.ProcessStartInfo]::new('jindi://catalog/apple-cms:0123456789abcdef0123456789abcdef:1')
+        $launch.UseShellExecute = $true
+        $launch.ErrorDialog = $false
+        $launch.WorkingDirectory = $AppStart.WorkingDirectory
+        return [Diagnostics.Process]::Start($launch)
+    } finally {
+        foreach ($key in $keys) {
+            [Environment]::SetEnvironmentVariable($key, $prior[$key])
+        }
+    }
+}
+
 if (-not $IsWindows) { throw 'This check requires a Windows desktop session' }
 $exe = (Resolve-Path -LiteralPath $Application).Path
 if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Application file does not exist: $exe" }
@@ -85,6 +110,9 @@ if ($NativeProbe) {
 }
 if ($RequireNotificationArea -and $CloseScenario -ne 'Tray') {
     throw '-RequireNotificationArea applies only to the Tray scenario'
+}
+if ($VerifyCMSProtocol -and $CloseScenario -ne 'Minimize') {
+    throw '-VerifyCMSProtocol applies only to the Minimize scenario'
 }
 
 $root = Join-Path ([IO.Path]::GetTempPath()) ('jindi-desktop-smoke-' + [Guid]::NewGuid().ToString('N'))
@@ -210,6 +238,23 @@ try {
             param($state) $state.Main -eq $mainWindow -and $state.Visible -and -not $state.Minimized -and $state.Tray -eq 0
         })
         Write-Host "Native window close and relaunch verified ($CloseScenario, tray callback exercised: $useTray)."
+
+        if ($VerifyCMSProtocol) {
+            $relaunch.Dispose()
+            $relaunch = $null
+            Send-NativeClose $app
+            [void](Wait-WindowState $app 'minimized window before CMS protocol activation' {
+                param($state) $state.Main -eq $mainWindow -and $state.Visible -and $state.Minimized
+            })
+            $relaunch = Start-CMSProtocol $start
+            if ($null -eq $relaunch -or -not $relaunch.WaitForExit(10000) -or $relaunch.ExitCode -ne 0) {
+                throw 'The installed CMS protocol did not forward to the existing process'
+            }
+            [void](Wait-WindowState $app 'same window restored by Windows CMS protocol activation' {
+                param($state) $state.Main -eq $mainWindow -and $state.Visible -and -not $state.Minimized
+            })
+            Write-Host 'Installed CMS share protocol restored the original application window.'
+        }
     }
 } catch {
     $failure = $_
