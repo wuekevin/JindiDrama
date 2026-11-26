@@ -391,3 +391,11 @@
 - Chromium 使用真实视频复现切备用源时 1.5 倍恢复成 1 倍。修复后在倍速事件尚未送达时切备用源仍保留 1.5 倍，范围外的 3 倍不会改变手动切集后的 1.5 倍，自动下一集会继承 1.25 倍。用 Chromium MediaSource 触发实际 hls.js 恢复，补载前的 1.5 倍在替换缓冲流和再次解码后仍生效。
 - Apple Silicon 使用仅替换上游 HTTP 的 Wails 夹具，原生倍速菜单从 1 倍改为 1.5 倍。切集后菜单保持 1.5 倍，退出时 SQLite 保存 1.5。复用同一 SQLite、清洁 WebKit 数据重新打开时菜单仍选中 1.5 倍，正常退出且数据库完整性为 `ok`。
 - 类型检查、生产构建、122 项 Vitest、43 项目录播放 Playwright、Go vet 和全量测试、Windows amd64 生产交叉构建通过。本轮累计到本地候选。真实授权公网片源、Windows 与 Intel Mac 原生播放及签名公证仍待验收。
+
+## E13 CMS 播放批次本地打包验收 .40（2026-11-26）
+
+- 从独立发行源码 `76ae67981629490c597545124244ec551118d823` 构建 `v0.1.0-smoke.20261126.40`，包含苹果 CMS 首页续播、片尾播放方式、共享音量与倍速修复。Windows amd64 安装器为 22.50 MiB，便携版为 32.23 MiB。macOS Universal ZIP 为 40.80 MiB，两个切片的最低系统均为 macOS 13.0。
+- Windows 安装器通过完整性检查，内含主程序和随包便携版逐字节一致，WebView2 安装组件与 Wails 依赖中原件一致。macOS 最终 ZIP 从 Apple Silicon 原生启动，应用版本、Wails 页面就绪、正常退出和隔离 SQLite 完整性均通过。
+- Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立 shasum 和随包发行说明中的命令。篡改隐私说明副本时校验拒绝。三份程序切片的 Go 二进制漏洞扫描和 npm 生产依赖审计均无报告。
+- 类型检查、生产构建、122 项 Vitest、365 项全量 Chromium、Go vet、Go 全量、Node 发行工具 12 项、Python macOS 工具 11 项通过。68 个前端文件的 SHA-256 与回归使用的生产构建一致。
+- 本批为本地 smoke。Windows 测试包未签名，macOS 使用 ad-hoc 签名且未公证。Windows 原生安装与 WebView2、Intel Mac 启动、正式签名和公证、真实授权公网片源仍待验收。
