@@ -33,7 +33,12 @@ const discovery = computed(() => searchDiscovery(route.query))
 const browseTopics = computed(() => discovery.value === 'topics')
 const feed = computed(() => discovery.value === 'topics' ? undefined : discovery.value)
 const topic = computed(() => typeof route.query.topic === 'string' ? route.query.topic.trim() : '')
-const discoveryTitle = computed(() => feed.value ? feedLabels[feed.value] : browseTopics.value ? '按题材浏览' : '')
+const catalogLabel = ref<string>()
+const discoveryTitle = computed(() => {
+  if (feed.value === 'today' && catalogLabel.value) return catalogLabel.value
+  if (feed.value) return feedLabels[feed.value]
+  return browseTopics.value ? '按题材浏览' : ''
+})
 const topics = ref<string[]>([])
 const knownTopic = computed(() => topics.value.includes(topic.value))
 const kind = computed(() => String(route.query.kind ?? ''))
@@ -60,8 +65,10 @@ async function run() {
     let results: Drama[]
     let localOnly = false
     let tags: string[] = []
+    let label: string | undefined
     if (section) {
       const home = await loadCatalogHome(mode)
+      label = home.catalogLabel
       results = section === 'today' ? home.todayNew : home.rankings[section]
     } else if (topicBrowse) {
       const dramas = await searchDramas('', {}, mode, catalog.card)
@@ -82,6 +89,7 @@ async function run() {
       }
     }
     if (my !== token) return
+    catalogLabel.value = label
     localResultsOnly.value = localOnly
     topics.value = tags
     items.value = results

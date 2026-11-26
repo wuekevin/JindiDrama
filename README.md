@@ -159,3 +159,24 @@ Windows（PowerShell）
 $env:JINDIDRAMA_LICENSED_MEDIA_DIR = 'C:\Media\JindiDrama'
 & 'C:\Program Files\JindiDrama\JindiDrama.exe'
 ```
+
+## 苹果 CMS V10 授权片源
+
+运营方可以为桌面应用配置一条自有或获授权的苹果 CMS V10 JSON API。请填写可从公网通过 HTTPS 访问的 API 路径，例如 `https://cms.example.com/api.php/provide/vod/`。应用从该地址读取首页目录、搜索、详情和分集。首页展示接口返回的第一页，搜索同样读取接口的第一页。片名、简介和分类通过目录读取。
+
+可播放分集需在 `vod_play_url` 中提供带集号的公网 HTTPS MP4 或 WebM 直链，例如 `第1集$https://media.example.com/episode-1.mp4`。目录支持常见的 `#` 分集与 `$$$` 路线分隔符。受限条目不可播放。该来源仅提供浏览和播放。
+
+退出已打开的金帝短剧，再用下面的命令启动。删除环境变量并重新启动即可回到演示目录。
+
+macOS（终端）
+
+```sh
+JINDIDRAMA_CMS_URL='https://cms.example.com/api.php/provide/vod/' '/Applications/JindiDrama.app/Contents/MacOS/JindiDrama'
+```
+
+Windows（PowerShell）
+
+```powershell
+$env:JINDIDRAMA_CMS_URL = 'https://cms.example.com/api.php/provide/vod/'
+& 'C:\Program Files\JindiDrama\JindiDrama.exe'
+```

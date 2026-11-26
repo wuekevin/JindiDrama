@@ -39,6 +39,9 @@ func main() {
 		return
 	}
 	a := app.NewWithAssets(webAssets)
+	if err := app.ConfigureAppleCMS(a, os.Getenv("JINDIDRAMA_CMS_URL")); err != nil {
+		println(err.Error())
+	}
 	app.SetFrontendReadyHandler(a, func() {
 		documentReady.Store(true)
 		session.Load().Ready()

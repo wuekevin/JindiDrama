@@ -5,7 +5,7 @@ import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKING
 import { posterSvg } from './posters'
 
 const delay = (ms = 120) => new Promise((r) => setTimeout(r, ms))
-export interface HomePayload { banners: typeof BANNERS; categories: typeof CATEGORIES; todayNew: Drama[]; rankings: Record<'hot'|'rise'|'new', Drama[]> }
+export interface HomePayload { catalogLabel?: string; banners: typeof BANNERS; categories: typeof CATEGORIES; todayNew: Drama[]; rankings: Record<'hot'|'rise'|'new', Drama[]> }
 
 const catalogCover = posterSvg({ hue: 218, hue2: 229, seed: 4 })
 
@@ -46,6 +46,9 @@ export async function loadCatalogHome(mode: 'normal'|'empty'|'error' = 'normal')
     if (!selection) throw new Error('目录暂不可用')
     feed = selection
     const cards = new Map((records ?? []).filter(({ id }) => id).map((record) => [record.id, providerCard(record)]))
+    if (feed.catalogLabel) {
+      return { catalogLabel: feed.catalogLabel, banners: [], categories: [], todayNew: [...cards.values()], rankings: { hot: [], rise: [], new: [] } }
+    }
     const referenced = new Set([feed.todayNew, feed.rankings.hot, feed.rankings.rise, feed.rankings.new].flatMap((ids) => ids ?? []))
     await Promise.all([...referenced].filter((id) => !cards.has(id)).map(async (id) => {
       try {

@@ -29,8 +29,9 @@ var AllCapabilities = []string{"catalog", "search", "playback", "account_login",
 type Capabilities map[string]CapabilityState
 
 type HomeFeed struct {
-	TodayNew []string `json:"todayNew"`
-	Rankings Rankings `json:"rankings"`
+	CatalogLabel string   `json:"catalogLabel,omitempty"`
+	TodayNew     []string `json:"todayNew"`
+	Rankings     Rankings `json:"rankings"`
 }
 
 type Rankings struct {

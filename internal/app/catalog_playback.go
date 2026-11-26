@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"jindi-drama/internal/provider"
+	"jindi-drama/internal/provider/applecms"
 )
 
 var errCatalogPlaybackUnavailable = errors.New("授权播放源暂不可用")
@@ -25,6 +26,15 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 	}
 	if id == "" || index < 1 {
 		return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
+	}
+
+	if cms, ok := a.p.(*applecms.Provider); ok {
+		// CMS resolves eligibility, episode ID and sources from one exact detail.
+		ticket, err := cms.ResolvePlayback(ctx, id, index)
+		if errors.Is(err, provider.ErrEpisodeUnavailable) {
+			return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
+		}
+		return a.issueCatalogPlaybackTicket(ctx, ticket, ticket.EpisodeID, err)
 	}
 
 	drama, err := a.p.Drama(ctx, id)
@@ -53,7 +63,11 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 	}
 
 	ticket, err := a.p.ResolvePlayback(ctx, id, index)
-	if err != nil || ctx.Err() != nil || ticket.Kind != "authorized" || ticket.EpisodeID != episodeID {
+	return a.issueCatalogPlaybackTicket(ctx, ticket, episodeID, err)
+}
+
+func (a *App) issueCatalogPlaybackTicket(ctx context.Context, ticket provider.PlaybackTicket, episodeID string, err error) (provider.PlaybackTicket, error) {
+	if err != nil || ctx.Err() != nil || ticket.Kind != "authorized" || episodeID == "" || ticket.EpisodeID != episodeID {
 		return provider.PlaybackTicket{}, errCatalogPlaybackUnavailable
 	}
 	expiry, err := time.Parse(time.RFC3339, ticket.ExpiresAt)
@@ -86,10 +100,8 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 }
 
 func catalogMediaSource(source provider.MediaSource, inferType bool) (provider.MediaSource, bool) {
-	u, err := url.Parse(source.Src)
-	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.Fragment != "" ||
-		(u.Port() != "" && u.Port() != "443") ||
-		strings.ContainsAny(source.Src, "\\\r\n\t ") || !catalogMediaHostname(u.Hostname()) {
+	u, ok := catalogHTTPSURL(source.Src)
+	if !ok {
 		return provider.MediaSource{}, false
 	}
 	mediaType, _, _ := mime.ParseMediaType(source.Type)
@@ -109,6 +121,16 @@ func catalogMediaSource(source provider.MediaSource, inferType bool) (provider.M
 	}
 	source.Type = mediaType
 	return source, true
+}
+
+func catalogHTTPSURL(raw string) (*url.URL, bool) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.Fragment != "" ||
+		(u.Port() != "" && u.Port() != "443") ||
+		strings.ContainsAny(raw, "\\\r\n\t ") || !catalogMediaHostname(u.Hostname()) {
+		return nil, false
+	}
+	return u, true
 }
 
 func catalogMediaHostname(host string) bool {

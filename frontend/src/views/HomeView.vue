@@ -28,6 +28,7 @@ const mode = () => (['empty', 'error', 'loading'].includes(String(route.query.st
 const load = () => catalog.loadHome(mode())
 onMounted(load); watch(() => route.query.state, load)
 const home = computed(() => catalog.home)
+const catalogTitle = computed(() => home.value?.catalogLabel ?? '今日上新')
 const { card } = useLicensedCatalog()
 const ranking = computed(() => home.value?.rankings[tab.value].slice(0, 5) ?? [])
 const resume = computed(() => lib.history.flatMap((history) => {
@@ -56,7 +57,13 @@ const autoplay = computed(() => route.query.static === undefined)
       <div class="sk-row"><Skeleton v-for="i in 6" :key="i" style="height: 230px" /></div>
     </template>
     <ErrorState v-else-if="catalog.status === 'error'" :message="catalog.error" @retry="load" />
-    <EmptyState v-else-if="catalog.status === 'empty'" title="暂无推荐内容" hint="稍后再来看看吧" />
+    <template v-else-if="catalog.status === 'empty'">
+      <section v-if="home?.catalogLabel" class="block" :aria-label="catalogTitle">
+        <div class="sec-h"><h2>{{ catalogTitle }}</h2></div>
+        <EmptyState title="暂无片源" />
+      </section>
+      <EmptyState v-else title="暂无推荐内容" hint="稍后再来看看吧" />
+    </template>
     <template v-else-if="home">
       <HeroCarousel v-if="home.banners.length" :banners="home.banners" :autoplay="autoplay" :is-fav="lib.isFav" @watch="watchNow" @fav="fav" />
 
@@ -68,12 +75,12 @@ const autoplay = computed(() => route.query.static === undefined)
         <button class="more" data-testid="more-topics" @click="router.push({ name: 'search', query: { browse: 'topics' } })">更多<ChevronRight :size="14" /></button>
       </section>
 
-      <section v-if="home.todayNew.length || home.banners.length" class="block" aria-label="今日上新">
-        <div class="sec-h"><h2>今日上新</h2><span class="muted">共 {{ home.todayNew.length }} 部</span><span class="new">NEW</span><button class="link" data-testid="all-today-new" @click="router.push({ name: 'search', query: { feed: 'today' } })">查看更多<ChevronRight :size="15" /></button></div>
-        <div class="grid6"><NewDramaCard v-for="d in home.todayNew.slice(0, 6)" :key="d.id" :drama="d" badge="今日上新" @open="openDrama($event, d.providerOnly)" /></div>
+      <section v-if="home.todayNew.length || home.banners.length" class="block" :aria-label="catalogTitle">
+        <div class="sec-h"><h2>{{ catalogTitle }}</h2><span class="muted">共 {{ home.todayNew.length }} 部</span><span v-if="!home.catalogLabel" class="new">NEW</span><button class="link" data-testid="all-today-new" @click="router.push({ name: 'search', query: { feed: 'today' } })">查看更多<ChevronRight :size="15" /></button></div>
+        <div class="grid6"><NewDramaCard v-for="d in home.todayNew.slice(0, 6)" :key="d.id" :drama="d" :badge="home.catalogLabel ? undefined : catalogTitle" @open="openDrama($event, d.providerOnly)" /></div>
       </section>
 
-      <section id="rank" class="block rank" aria-label="排行榜">
+      <section v-if="!home.catalogLabel" id="rank" class="block rank" aria-label="排行榜">
         <div class="sec-h"><Medal :size="26" color="#f4b740" /><h2>排行榜</h2>
           <div class="seg" role="tablist"><button v-for="t in tabs" :key="t.k" role="tab" :aria-selected="tab === t.k" :class="{ on: tab === t.k }" :data-testid="`rank-${t.k}`" @click="selectRank(t.k)">{{ t.l }}</button></div>
           <button class="link" data-testid="full-ranking" @click="router.push({ name: 'search', query: { feed: tab } })">完整榜单<ChevronRight :size="15" /></button></div>

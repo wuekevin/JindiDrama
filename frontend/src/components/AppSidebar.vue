@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { House, Flame, Cat, Video, Bot, ChartNoAxesColumn, Heart, Clock, Settings } from 'lucide-vue-next'
 import BrandLogo from './BrandLogo.vue'
+import { activeProviderName } from '@/bindings'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 
 const route = useRoute(); const router = useRouter()
@@ -21,7 +22,14 @@ const lib = [
   { key: 'settings', label: '设置', icon: Settings, to: '/settings' },
 ]
 const active = computed(() => String(route.meta.nav ?? ''))
-const visibleMain = computed(() => catalog.demoCatalog ? main : main.filter(({ key }) => key === 'home' || key === 'rank'))
+const cmsCatalog = ref(false)
+onMounted(() => {
+  void activeProviderName()?.then((name) => { cmsCatalog.value = name === 'apple-cms' }, () => {})
+})
+const visibleMain = computed(() => {
+  if (cmsCatalog.value) return main.filter(({ key }) => key === 'home')
+  return catalog.demoCatalog ? main : main.filter(({ key }) => key === 'home' || key === 'rank')
+})
 function go(to: string) { router.push(to) }
 </script>
 <template>

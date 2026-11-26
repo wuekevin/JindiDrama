@@ -128,6 +128,7 @@ export function setWindowCloseSetting(action: string) {
 export const windowTrayAvailable = () => api()?.WindowTrayAvailable?.()
 export const hideWindowToTray = () => api()?.HideWindowToTray?.()
 interface HomeFeed {
+  catalogLabel?: string
   todayNew: string[]
   rankings: Record<'hot' | 'rise' | 'new', string[]>
 }
