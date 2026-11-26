@@ -318,3 +318,62 @@ func TestDemoExportRejectsNewWorkDuringShutdown(t *testing.T) {
 		t.Fatalf("demo export during shutdown: saved=%v, err=%v", saved, err)
 	}
 }
+
+func TestLicensedExportFallsBackToAvailableFormat(t *testing.T) {
+	for _, change := range []string{"removed", "empty"} {
+		t.Run(change, func(t *testing.T) {
+			dir := t.TempDir()
+			for name, content := range map[string]string{
+				"catalog.json": `[{"id":"local-alternate","title":"替代片源","license":"允许复制","allowExport":true,"episodes":[["episode.webm","episode.mp4"]]}]`,
+				"episode.mp4":  "mp4 fixture", "episode.webm": "webm fixture",
+			} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			media, err := licensed.New(dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = media.Close() })
+			a := New()
+			ConfigureLicensedMedia(a, media, nil)
+			mp4 := filepath.Join(dir, "episode.mp4")
+			if change == "removed" {
+				err = os.Remove(mp4)
+			} else {
+				err = os.Truncate(mp4, 0)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			const filename = "JindiDrama-local-alternate-1.webm"
+			target := filepath.Join(t.TempDir(), filename)
+			saved, err := a.exportLicensedEpisode("local-alternate", 1, func(options runtime.SaveDialogOptions) (string, error) {
+				if options.DefaultFilename != filename {
+					t.Fatalf("suggested filename: %q", options.DefaultFilename)
+				}
+				return target, nil
+			})
+			if err != nil || !saved {
+				t.Fatalf("save alternate format: saved=%t err=%v", saved, err)
+			}
+			body, err := os.ReadFile(target)
+			if err != nil || string(body) != "webm fixture" {
+				t.Fatalf("exported data: %q, %v", body, err)
+			}
+
+			if err := os.Remove(filepath.Join(dir, "episode.webm")); err != nil {
+				t.Fatal(err)
+			}
+			saved, err = a.exportLicensedEpisode("local-alternate", 1, func(runtime.SaveDialogOptions) (string, error) {
+				t.Fatal("save dialog opened with no readable sources")
+				return "", nil
+			})
+			if err == nil || saved {
+				t.Fatalf("all formats unavailable: saved=%t err=%v", saved, err)
+			}
+		})
+	}
+}

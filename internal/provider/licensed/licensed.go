@@ -271,15 +271,24 @@ func (p *DemoProvider) OpenExport(id string, episode int) (*os.File, string, err
 	if episode < 1 || episode > len(episodes) {
 		return nil, "", provider.ErrEpisodeUnavailable
 	}
-	source := episodes[episode-1][0]
-	for _, candidate := range episodes[episode-1] {
-		if candidate.Type == "video/mp4" {
-			source = candidate
+	sources := episodes[episode-1]
+	preferred := 0
+	for i, source := range sources {
+		if source.Type == "video/mp4" {
+			preferred = i
 			break
 		}
 	}
-	file, _, err := p.openMedia(p.media[source.Src].name)
-	return file, path.Ext(source.Src), err
+	lastErr := provider.ErrEpisodeUnavailable
+	for offset := range len(sources) {
+		source := sources[(preferred+offset)%len(sources)]
+		file, _, err := p.openMedia(p.media[source.Src].name)
+		if err == nil {
+			return file, path.Ext(source.Src), nil
+		}
+		lastErr = err
+	}
+	return nil, "", lastErr
 }
 
 func (p *DemoProvider) Middleware(next http.Handler) http.Handler {
