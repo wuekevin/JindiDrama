@@ -1,8 +1,11 @@
 package sqlite
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +18,10 @@ func PrepareRollbackCopy(source, output string, target int) error {
 		return fmt.Errorf("无效的回滚目标版本 v%d", target)
 	}
 	source, err := filepath.Abs(source)
+	if err != nil {
+		return err
+	}
+	source, err = filepath.EvalSymlinks(source)
 	if err != nil {
 		return err
 	}
@@ -66,12 +73,73 @@ func PrepareRollbackCopy(source, output string, target int) error {
 }
 
 func snapshotDatabase(source, staged string) error {
-	db, err := openDatabase(source, "ro")
+	files, err := rollbackSourceFiles(source)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
-	return (&Store{db: db, Path: source}).Backup(staged)
+	// Opening even a read-only WAL database can create sidecars. Let SQLite
+	// open and, if necessary, recover a private copy of the durable file set.
+	for suffix := range files {
+		if err := copyDatabaseFile(source+suffix, staged+suffix); err != nil {
+			return err
+		}
+	}
+	for suffix := range files {
+		original, err := rollbackDigest(source + suffix)
+		if err != nil {
+			return err
+		}
+		copied, err := rollbackDigest(staged + suffix)
+		if err != nil {
+			return err
+		}
+		if original != copied {
+			return errors.New("源数据库正在变化，请退出应用后重试")
+		}
+	}
+	after, err := rollbackSourceFiles(source)
+	if err != nil {
+		return err
+	}
+	if !maps.EqualFunc(files, after, sameRollbackFile) {
+		return errors.New("源数据库正在变化，请退出应用后重试")
+	}
+	return nil
+}
+
+func rollbackDigest(path string) (digest [sha256.Size]byte, err error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return digest, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return digest, err
+	}
+	return [sha256.Size]byte(hash.Sum(nil)), nil
+}
+
+func rollbackSourceFiles(source string) (map[string]os.FileInfo, error) {
+	files := make(map[string]os.FileInfo)
+	for _, suffix := range []string{"", "-wal", "-journal"} {
+		info, err := os.Stat(source + suffix)
+		if suffix != "" && errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, errors.New("源数据库及辅助文件必须是普通文件")
+		}
+		files[suffix] = info
+	}
+	return files, nil
+}
+
+func sameRollbackFile(before, after os.FileInfo) bool {
+	return os.SameFile(before, after) && before.Size() == after.Size() && before.ModTime().Equal(after.ModTime())
 }
 
 func downgradeSnapshot(path string, target int) error {

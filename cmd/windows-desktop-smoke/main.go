@@ -17,6 +17,9 @@ func main() {
 }
 
 func run(args []string) error {
+	if len(args) == 3 && args[0] == "verify-rollback" {
+		return verifyRollback(args[1], args[2])
+	}
 	if len(args) == 2 && args[0] == "verify-db" {
 		return sqlite.VerifyDesktopDatabase(args[1])
 	}

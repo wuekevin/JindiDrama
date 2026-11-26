@@ -38,4 +38,4 @@ v2 能读取收藏顺序、观看进度、搜索历史和旧版认识的设置�
 
 默认数据目录为 macOS 的 `~/Library/Application Support/JindiDrama` 和 Windows 的 `%APPDATA%\JindiDrama`。如果路径含有空格，请保留命令中的引号。
 
-SQLite 快照包括源库已提交的内容，完整性检查通过后才发布兼容副本。[SQLite VACUUM INTO](https://www.sqlite.org/lang_vacuum.html)
+工具在私有目录校验源数据库和持久辅助文件的副本，再应用降级迁移。若源文件在复制期间发生变化，需退出应用后重试。通过完整性检查后才生成目标文件。

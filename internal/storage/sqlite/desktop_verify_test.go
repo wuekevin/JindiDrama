@@ -133,3 +133,47 @@ func TestVerifyDesktopDatabaseRejectsMissingOrCorruptFile(t *testing.T) {
 		t.Fatal("verification accepted a corrupt database with a valid header")
 	}
 }
+
+func TestVerifyDesktopRollbackChecksLegacySchema(t *testing.T) {
+	dir := t.TempDir()
+	newer := filepath.Join(dir, "current.db")
+	store, err := Open(newer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDesktopRollback(newer); err == nil {
+		t.Fatal("accepted the current schema as a rollback copy")
+	}
+	older := filepath.Join(dir, "old.db")
+	if err := PrepareRollbackCopy(newer, older, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyDesktopRollback(older); err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		stmt, want string
+	}{
+		{"CREATE TABLE leftover (id INTEGER)", "unexpected schema objects"},
+		{"DROP INDEX idx_history_watched", "idx_history_watched"},
+	} {
+		copy := filepath.Join(t.TempDir(), "old.db")
+		if err := PrepareRollbackCopy(newer, copy, 2); err != nil {
+			t.Fatal(err)
+		}
+		db, err := openDatabase(copy, "rw")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = db.Exec(test.stmt)
+		if closeErr := db.Close(); err != nil || closeErr != nil {
+			t.Fatalf("change legacy schema: %v %v", err, closeErr)
+		}
+		if err := VerifyDesktopRollback(copy); err == nil || !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("expected %q, got %v", test.want, err)
+		}
+	}
+}

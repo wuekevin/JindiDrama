@@ -271,3 +271,34 @@ func TestConcurrentOpenCanMigrateSameOlderDatabase(t *testing.T) {
 		}
 	}
 }
+
+func TestPrepareRollbackCopyDoesNotCreateClosedSourceSidecars(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "closed.db")
+	store, err := Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetFavorites([]string{"d2", "d1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	checkSidecars := func() {
+		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+			if _, err := os.Lstat(source + suffix); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("unexpected source sidecar %s: %v", suffix, err)
+			}
+		}
+	}
+	checkSidecars()
+	output := filepath.Join(dir, "older.db")
+	if err := PrepareRollbackCopy(source, output, 2); err != nil {
+		t.Fatal(err)
+	}
+	checkSidecars()
+	if err := VerifyDesktopRollback(output); err != nil {
+		t.Fatal(err)
+	}
+}

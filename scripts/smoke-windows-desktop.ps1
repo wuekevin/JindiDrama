@@ -159,7 +159,10 @@ try {
             throw 'Normal exit left a running-session marker'
         }
 
-        Invoke-DesktopProbe @('verify-db', (Join-Path $dataDir 'jindi.db'))
+        $database = Join-Path $dataDir 'jindi.db'
+        Invoke-DesktopProbe @('verify-db', $database)
+        Invoke-DesktopProbe @('verify-rollback', $exe, $database)
+        Write-Host "Packaged SQLite rollback and unchanged source verified: $exe"
         Write-Host "Clean exit, SQLite integrity, and current application schema verified: $exe"
     } else {
         $initial = Wait-WindowState $app 'visible main window' {

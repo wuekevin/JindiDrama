@@ -520,3 +520,10 @@
 - 当前桌面程序可通过 `--prepare-rollback` 生成独立的旧版 SQLite 副本。命令在启动 WebView 和应用配置前执行，原源码工具共用同一入口。回滚指南给出 macOS 和 Windows 调用方式。
 - Apple Silicon 用当前原生程序将隔离 v10 实例转为 v2。旧版提交 `f97bd81afd803e530d91dbc7bc28fe4b88d99e39` 的真实数据层读回收藏顺序、第 3 集的 7345 毫秒进度、搜索与设置。原库 SHA-256 不变，原评论和弹幕仍存在。副本首次打开前无 SQLite 辅助文件，完整性通过。缺少参数和已有目标分别返回失败，且未启动桌面配置。
 - 从本地 ad-hoc 测试应用复验回滚命令、普通窗口启动、正常退出和隔离 SQLite。Go vet、Go 全量、回滚模块竞态检查和 Windows amd64 GUI 版交叉编译通过。Windows 原生回滚仍待执行。本轮未触发 GitHub 打包。[回滚指南](RELEASE-ROLLBACK.md) · [BMad 记录](../_bmad-output/plan-e13-desktop-rollback-command.md)
+
+## E13 双平台成品回滚冒烟（2026-11-27）
+
+- Windows 安装版和便携版的正常退出冒烟、macOS 解包后的 Apple Silicon 和 Intel 冒烟均接入成品回滚探针。探针调用同一成品程序生成独立 SQLite v2 副本，核对旧版结构和索引、数据库完整性、源库及 WAL / journal 字节，以及是否创建正常启动配置或副本辅助文件。Windows 另检查独立 WebView2 路径。
+- 加强校验后，Apple Silicon 复现旧版回滚命令会在已关闭的 WAL 模式原库旁生成 WAL。现在只在私有目录复制并核验原库、WAL 和 journal，直接在这份副本上降级。源文件仍在变化时，工具返回失败并提示退出应用后重试。
+- Apple Silicon 从修复后的本地 ad-hoc 归档实测正常窗口、正常退出及成品回滚。探针通过带中文和空格路径的独立 v10 数据库，正确拒绝未产出副本、创建了启动配置或在原库旁新增 WAL 的测试程序。Go vet、Go 全量、SQLite 与探针竞态和 13 项 Python/macOS 工具测试通过，Windows x64 桌面程序与探针交叉编译通过。
+- Windows 安装版与便携版及 Intel 成品的新增回滚步骤尚待下一批原生验收。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e13-rollback-package-smoke.md)

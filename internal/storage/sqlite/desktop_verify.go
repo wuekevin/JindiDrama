@@ -13,6 +13,15 @@ import (
 // The app must have exited before this check starts. Copying SQLite's files
 // lets the verifier account for committed WAL data without touching the profile.
 func VerifyDesktopDatabase(path string) error {
+	return verifyDesktopDatabase(path, len(migrations))
+}
+
+// VerifyDesktopRollback checks a rollback copy for the original desktop schema.
+func VerifyDesktopRollback(path string) error {
+	return verifyDesktopDatabase(path, 2)
+}
+
+func verifyDesktopDatabase(path string, want int) error {
 	snapshot, err := os.MkdirTemp("", "jindi-sqlite-verify-")
 	if err != nil {
 		return err
@@ -53,29 +62,36 @@ func VerifyDesktopDatabase(path string) error {
 	if err != nil {
 		return fmt.Errorf("desktop schema migration history: %w", err)
 	}
-	if want := len(migrations); version != want {
+	if version != want {
 		return fmt.Errorf("desktop schema version v%d, expected v%d", version, want)
 	}
-	if err := verifyDesktopBusinessSchema(tx); err != nil {
-		return err
+	if want == len(migrations) {
+		if err := verifyDesktopBusinessSchema(tx); err != nil {
+			return err
+		}
 	}
 
 	// Compare against the schema built from the actual migrations. This
 	// covers required columns, constraints and explicit indexes without
 	// maintaining a second copy of the application's schema.
-	expected, err := Open(":memory:")
+	expected, err := openDatabase(":memory:", "rwc")
 	if err != nil {
 		return fmt.Errorf("build expected desktop schema: %w", err)
 	}
 	defer expected.Close()
-	rows, err := expected.db.Query(`
+	if err := (&Store{db: expected}).Migrate(want); err != nil {
+		return fmt.Errorf("migrate expected desktop schema: %w", err)
+	}
+	rows, err := expected.Query(`
 SELECT type, name, sql FROM sqlite_schema
 WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY name`)
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
+	expectedObjects := 0
 	for rows.Next() {
+		expectedObjects++
 		var kind, name, want string
 		if err := rows.Scan(&kind, &name, &want); err != nil {
 			return err
@@ -89,7 +105,20 @@ WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY name`)
 			return err
 		}
 	}
-	return rows.Err()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if want < len(migrations) {
+		var actualObjects int
+		err := tx.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*'`).Scan(&actualObjects)
+		if err != nil {
+			return err
+		}
+		if actualObjects != expectedObjects {
+			return errors.New("rollback database contains unexpected schema objects")
+		}
+	}
+	return nil
 }
 
 func copyDatabaseFile(source, target string) error {
