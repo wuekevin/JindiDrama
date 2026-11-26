@@ -500,3 +500,11 @@
 - 生产前端构建、122 项 Vitest、197 项播放、互动、设置与目录 Playwright 通过。全屏样式定稿后复跑 CMS 快捷键用例，竖屏样片按原比例显示，左右保留黑边。Go vet 和 Go 全量通过。
 - Apple Silicon 使用原生 Wails、WKWebView 和本机合成的授权接口夹具，实测自定义 K 播放暂停、暂停时右方向键快进约 10 秒、F 进入和退出全屏、评论输入 K 时保持暂停，以及正常退出后 SQLite 完整性。真实公网授权片源仍待联调。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e10-cms-playback-shortcuts.md)
 - [全屏截图](../build/bin/qa-cms-shortcuts/chromium-fullscreen.png) · [原生验收](../build/bin/qa-cms-shortcuts/apple-silicon.txt)
+
+## E10 苹果 CMS 播放高缩放（2026-11-27）
+
+- 在 1280×860 窗口、220% 缩放下，修复前普通播放区域高 1023 像素。修复后高 559 像素，滚动到播放器后可同时看到整幅视频和原生播放控件。
+- 对照播放设计稿复核操作控件与画面位置，并核对竖屏样片在普通和全屏模式按原比例显示。Chromium 全屏后退出、切集、提交本机评论、发送本机弹幕均通过。
+- 生产前端构建、122 项 Vitest、82 项演示与片源播放 Playwright 通过。快速评审后加强对原比例、评论和弹幕实际提交的断言，定稿专项复跑通过。
+- Apple Silicon 用原生 Wails、WKWebView 和本机合成片源复测。在 860 像素高的窗口内播放器实测 559 像素，播放、快进、进出全屏、评论输入和退出后 SQLite 完整性通过。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e10-cms-playback-zoom.md)
+- [窗口截图](../build/bin/qa-cms-playback-zoom/cms-window-220.png) · [全屏截图](../build/bin/qa-cms-playback-zoom/cms-fullscreen-220.png) · [评论截图](../build/bin/qa-cms-playback-zoom/cms-comments-220.png) · [弹幕截图](../build/bin/qa-cms-playback-zoom/cms-danmaku-220.png) · [原生验收](../build/bin/qa-cms-playback-zoom/apple-silicon.txt)

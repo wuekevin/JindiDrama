@@ -691,7 +691,7 @@ onBeforeUnmount(() => {
 h1 { font-size: 28px; overflow-wrap: anywhere; }
 .episode-label { color: var(--c-text-2); }
 .stage { --danmaku-top: 8px; --danmaku-bottom: 60px; position: relative; min-height: 260px; display: grid; place-items: center; border-radius: 18px; overflow: hidden; background: var(--c-surface-solid); }
-video { display: block; width: 100%; max-width: 960px; max-height: 65vh; background: #000; }
+video { display: block; width: 100%; max-width: 960px; max-height: calc(65vh / var(--z, 1)); background: #000; }
 .stage:fullscreen { border-radius: 0; background: #000; }
 .stage:fullscreen video {
   position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain;

@@ -25,6 +25,7 @@ type SavedDanmaku = { id: number; offsetMs: number; text: string }
 type CatalogState = {
   id: string; provider: string; available: number[]
   playMode?: PlayMode
+  dpi?: number
   shortcuts?: Record<string, string>
   holdPlaybackEpisode?: number
   home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
@@ -99,7 +100,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       GetSetting: async (key: string) => key === 'app'
         ? JSON.stringify({
           startPage: '上次观看',
-          ...(libraryFixture ? await desktop.readDesktopCatalog().then(({ playMode, shortcuts }) => ({ playMode, shortcuts })) : {}),
+          ...(libraryFixture ? await desktop.readDesktopCatalog().then(({ playMode, dpi, shortcuts }) => ({ playMode, dpi, shortcuts })) : {}),
         })
         : '',
       ProviderName: async () => {
@@ -645,6 +646,75 @@ test('CMS shortcut bindings operate the native video and leave local editors alo
   await expect(historyVideo(page, 2)).toHaveJSProperty('paused', true)
   await page.keyboard.press('Control+ArrowLeft')
   await expect(page).toHaveURL(/\/play\/1$/)
+})
+
+test('CMS fullscreen and local controls remain usable at 220% zoom', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  let commentSnapshot = ''
+  await page.exposeFunction('readCMSComments', () => commentSnapshot)
+  await page.exposeFunction('saveCMSComments', (_id: string, _episode: number, snapshot: string) => {
+    commentSnapshot = snapshot
+  })
+  await page.exposeFunction('saveCMSDanmaku', (_id: string, _episode: number, offsetMs: number, text: string) =>
+    ({ id: 1, offsetMs, text }),
+  )
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.dpi = 220
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(1000)
+  await expect(page.locator('html')).toHaveCSS('--user-zoom', '2.2')
+  await expect.poll(() => video.evaluate((media) =>
+    Math.round(media.getBoundingClientRect().height),
+  )).toBeLessThanOrEqual(Math.ceil(860 * 0.65))
+  await video.scrollIntoViewIfNeeded()
+  await expect(video).toBeInViewport({ ratio: 0.99 })
+  await page.keyboard.press('Space')
+  await expect.poll(() => position(video)).toBeGreaterThan(0.2)
+  await page.keyboard.press('Space')
+  await expect(video).toHaveJSProperty('paused', true)
+  await page.screenshot({ path: testInfo.outputPath('cms-window-220.png') })
+
+  await page.keyboard.press('f')
+  await expect.poll(() => video.evaluate((media) => {
+    const stage = document.fullscreenElement
+    if (!stage?.contains(media)) return null
+    const box = media.getBoundingClientRect()
+    return [box.x, box.y, box.width, box.height].map(Math.round)
+  })).toEqual([0, 0, 1280, 860])
+  await expect(video).toHaveCSS('object-fit', 'contain')
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.videoWidth / media.videoHeight))
+    .toBeCloseTo(9 / 16, 4)
+  await page.screenshot({ path: testInfo.outputPath('cms-fullscreen-220.png') })
+  await page.keyboard.press('f')
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement)).toBe(null)
+
+  await page.getByRole('button', { name: '第2集', exact: true }).click()
+  await expect(page).toHaveURL(/\/play\/2$/)
+  await page.getByRole('button', { name: '本机评论', exact: true }).click()
+  const comments = page.getByTestId('comment-panel')
+  const commentInput = comments.getByTestId('comment-input')
+  await commentInput.fill('高缩放评论')
+  const publish = comments.getByTestId('comment-post')
+  await expect(publish).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('cms-comments-220.png') })
+  await publish.click()
+  await expect(comments.getByTestId('comment')).toContainText('高缩放评论')
+  await expect.poll(() => commentSnapshot).toContain('高缩放评论')
+  await comments.getByTestId('comment-close').click()
+  await expect(comments).toHaveCount(0)
+  await page.getByRole('button', { name: '本机弹幕', exact: true }).click()
+  const panel = page.getByTestId('danmaku-settings')
+  const danmaku = panel.getByTestId('dm-input')
+  await danmaku.fill('高缩放弹幕')
+  const send = panel.getByTestId('dm-send')
+  await send.scrollIntoViewIfNeeded()
+  await expect(send).toBeInViewport()
+  await expect(danmaku).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('cms-danmaku-220.png') })
+  await send.click()
+  await panel.getByText('本集本机弹幕').click()
+  await expect(panel.getByRole('list', { name: '本机弹幕记录' })).toContainText('高缩放弹幕')
 })
 
 test('CMS overlays local danmaku at the native media position and keeps episodes isolated', async ({ page }, testInfo) => {
