@@ -8,11 +8,11 @@
 - 首次安装使用 BMad 上游提交 `e435a22574fe55722841086e5566420178b98df3` 的 Core Tools 与 Method 模块，版本为 `6.13.0-next`。
 
 ## 项目是什么
-Go + Wails v2 桌面应用，前端 Vue 3 + TypeScript + Vite + Pinia + Vue Router(hash) + SCSS。十个页面（首页、搜索、详情、播放、评论、弹幕设置、收藏、历史、登录、设置）按 1448×1086 的产品设计基线实现。本地存储 SQLite（modernc，纯 Go）。数据来自自制演示目录和经配置的授权本地片库。官方内容源待授权后启用。
+Go + Wails v2 桌面应用，前端 Vue 3 + TypeScript + Vite + Pinia + Vue Router(hash) + SCSS。十个页面（首页、搜索、详情、播放、评论、弹幕设置、收藏、历史、登录、设置）按 1448×1086 的产品设计基线实现。本地存储 SQLite（modernc，纯 Go）。默认使用自制演示目录，也支持经配置的授权本地片库和苹果 CMS V10 片源。Go 直接请求配置的 CMS 地址。红果官方内容源仍待联调。
 
 ## 目录
 - `frontend/` 前端；`frontend/tests/e2e/` Playwright；`src/**/*.spec.ts` Vitest；`frontend/tools/` 截图脚本
-- `internal/provider/{mock,licensed,authorized,hongguoweb,registry}` Provider 适配层；界面只能经 Provider 取数据
+- `internal/provider/{mock,licensed,applecms,authorized,hongguoweb,registry}` Provider 适配层；界面只能经 Provider 取数据
 - `internal/app` Wails 绑定；`internal/storage/sqlite`、`internal/cache`、`internal/observability`、`internal/update`、`internal/autostart`
 - `build/windows/installer/project.nsi` 自定义 NSIS 模板（安装目录 `Program Files\JindiDrama`，快捷方式名「金帝短剧」）
 - `.github/workflows/ci.yml`（push 即跑，Windows+macOS）、`package.yml`（手动触发出安装包）
