@@ -6,6 +6,7 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus, historyDay, agoText, watchHours } from '@/composables'
+import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama, HistoryEntry } from '@/types'
 
@@ -28,10 +29,9 @@ function refreshCalendar() {
 onMounted(() => {
   refreshCalendar()
   if (root.value) {
-    layoutObserver = new ResizeObserver(([entry]) => {
-      layoutWidth.value = entry.contentRect.width
+    layoutObserver = observeContentWidth(root.value, (width) => {
+      layoutWidth.value = width
     })
-    layoutObserver.observe(root.value)
   }
   window.addEventListener('focus', refreshCalendar)
   document.addEventListener('visibilitychange', refreshCalendar)

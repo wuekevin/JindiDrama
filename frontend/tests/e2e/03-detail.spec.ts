@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, deferPanelResize } from './fixtures'
 import fs from 'node:fs'
 test.describe('03 短剧详情', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/drama/d1'); await page.waitForSelector('[data-testid=ep]') })
@@ -181,6 +181,7 @@ test('a detail route change resets the recommendation batch even when the next d
 for (const [width, dpi] of [[1280, 150], [1280, 220], [2560, 220]]) {
   test(`detail keeps actions, seasons and clip controls reachable at ${width}px and ${dpi}% zoom`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 860 })
+    await deferPanelResize(page, 'page-detail')
     await page.addInitScript((zoom) => {
       localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: zoom }))
       localStorage.setItem('jindi.library.v1', JSON.stringify({

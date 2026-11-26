@@ -11,6 +11,7 @@ import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
 import { copyShareLink } from '@/router/shareLinks'
 import { catalogPlaybackRoute, continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
@@ -21,12 +22,9 @@ const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
 onMounted(() => {
   if (!root.value) return
-  // Use local CSS width so page zoom behaves consistently in Chromium and WKWebView.
-  layoutObserver = new ResizeObserver(([entry]) => {
-    const width = entry.contentRect.width
+  layoutObserver = observeContentWidth(root.value, (width) => {
     layout.value = width <= 660 ? 'compact' : width <= 1080 ? 'stacked' : 'wide'
   })
-  layoutObserver.observe(root.value)
 })
 onBeforeUnmount(() => layoutObserver?.disconnect())
 const id = computed(() => String(route.params.id))

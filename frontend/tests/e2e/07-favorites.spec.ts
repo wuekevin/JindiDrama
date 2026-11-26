@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, deferPanelResize } from './fixtures'
 test.describe('07 我的收藏', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/favorites'); await page.evaluate(() => localStorage.removeItem('jindi.library.v1')); await page.reload(); await page.waitForSelector('[data-testid=fav-card]') })
   test('screenshot + count', async ({ page }) => { await expect(page.getByTestId('fav-count')).toContainText('11'); await page.screenshot({ path: '../design/rendered/07-我的收藏.png' }) })
@@ -26,18 +26,8 @@ test.describe('07 我的收藏', () => {
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=fav-card]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/07-${w}x${h}.png` }) })
 })
 
-function deferFavoritesResize() {
-  // Exercise the page before its own observer can report the initial size.
-  const BrowserResizeObserver = window.ResizeObserver
-  window.ResizeObserver = class extends BrowserResizeObserver {
-    observe(target: Element, options?: ResizeObserverOptions) {
-      if (!target.matches('[data-testid="page-favorites"]')) super.observe(target, options)
-    }
-  }
-}
-
 test('favorites chooses the correct layout at fractional initial widths', async ({ page }) => {
-  await page.addInitScript(deferFavoritesResize)
+  await deferPanelResize(page, 'page-favorites')
   let contentWidth = 570.25
   await page.route('**/', async (route) => {
     const response = await route.fetch()
@@ -58,7 +48,7 @@ test('favorites chooses the correct layout at fractional initial widths', async 
 for (const dpi of [150, 220]) {
   test(`favorites keeps toolbar, cards and batch operations reachable at ${dpi}% zoom`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 860 })
-    await page.addInitScript(deferFavoritesResize)
+    await deferPanelResize(page, 'page-favorites')
     await page.addInitScript((dpi) => {
       localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi }))
     }, dpi)

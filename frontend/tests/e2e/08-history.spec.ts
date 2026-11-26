@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { test, expect } from './fixtures'
+import { test, expect, deferPanelResize } from './fixtures'
 test.describe('08 观看历史', () => {
   test.beforeEach(async ({ page }) => {
     // The demo groups use relative timestamps. Anchor them away from midnight.
@@ -645,6 +645,7 @@ test('terminal and locked bookmarks keep replay or selection available without o
 
 test('history keeps grid, list, filters and selection reachable at the saved 220% zoom', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 860 })
+  await deferPanelResize(page, 'page-history')
   await page.addInitScript(() => {
     localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: 220 }))
     if (localStorage.getItem('jindi.library.v1')) return
@@ -786,6 +787,7 @@ test('clear history can remove an older record whose drama is absent from the ca
 
 test('history header wraps before the compact list breakpoint at 220% zoom', async ({ page }) => {
   await page.setViewportSize({ width: 1640, height: 860 })
+  await deferPanelResize(page, 'page-history')
   await page.addInitScript(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 })))
   await page.goto('/#/history')
   const title = page.getByRole('heading', { name: '观看历史', exact: true })

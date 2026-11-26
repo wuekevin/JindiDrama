@@ -6,6 +6,7 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus } from '@/composables'
+import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama } from '@/types'
 
@@ -13,17 +14,11 @@ const router = useRouter(); const lib = useLibraryStore()
 const root = ref<HTMLElement>()
 const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
-function updateLayout(width: number) {
-  layout.value = width <= 570 ? 'compact' : width <= 1050 ? 'stacked' : 'wide'
-}
 onMounted(() => {
-  const element = root.value
-  if (!element) return
-  // Measure the content box in layout pixels before the first observer callback.
-  const { width, paddingLeft, paddingRight } = getComputedStyle(element)
-  updateLayout(parseFloat(width) - parseFloat(paddingLeft) - parseFloat(paddingRight))
-  layoutObserver = new ResizeObserver(([entry]) => updateLayout(entry.contentRect.width))
-  layoutObserver.observe(element)
+  if (!root.value) return
+  layoutObserver = observeContentWidth(root.value, (width) => {
+    layout.value = width <= 570 ? 'compact' : width <= 1050 ? 'stacked' : 'wide'
+  })
 })
 onBeforeUnmount(() => layoutObserver?.disconnect())
 const tab = ref<'all'|'watching'|'done'|'manju'|'real'>('all'); const sort = ref<'recent'|'update'|'heat'>('recent'); const genre = ref(''); const view = ref<'grid'|'list'>('grid')
