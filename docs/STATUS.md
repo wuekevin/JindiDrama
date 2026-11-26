@@ -707,3 +707,8 @@
 - Windows x64 安装器 22.54 MiB、便携版 32.34 MiB。核对了 PE 版本、NSIS 内嵌程序和 WebView2 引导程序。macOS Universal ZIP 40.88 MiB，包含 arm64 和 x86_64，两者最低系统版本均为 macOS 13.0。Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立命令、随包命令与归档复验。[Windows 清单](../build/bin/smoke-20261127.49/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.49/macos/SHA256SUMS.txt)
 - 从最终 ZIP 完成 Apple Silicon 原生窗口就绪、正常退出、SQLite 完整性和回滚。16 项 macOS 工具测试、13 项 Node 发行工具测试和 Windows PowerShell 夹具通过。Go 源码、Windows x64 和 macOS 双切片、npm 生产依赖扫描均未报告已知漏洞。[原生验收](../build/bin/smoke-20261127.49/evidence/macos-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate49-packages.md)
 - 本批为本地 smoke。Windows 包未签名，macOS 为本地临时签名。GitHub 只读核对显示仓库的 Release、签名环境和仓库级 Actions secrets 均为 0，本机有效代码签名身份为 0。当前候选的 Windows 与 Intel Mac 原生、正式签名和公证、正式安装包更新与授权公网片源仍待验收。[发行前置条件](../build/bin/smoke-20261127.49/evidence/release-prerequisites.log)
+
+## E13 Apple Silicon 原生安装包下载（2026-11-27）
+
+- 使用 .49 同一份生产前端和应用源码，用测试构建替换 Go 更新请求的 HTTP 传输。Apple Silicon 从设置页实际检查更新、打开 macOS 保存对话框、选定隔离目录并操作系统剪贴板。取消时没有安装包请求。模拟限流和摘要错误时分别显示对应提示，目标目录没有暂存或输出文件，并可继续重试。[界面证据](../build/bin/qa-native-update-download-49/native-ui.log)
+- 第三次请求成功写入测试 ZIP。系统命令核对独立 SHA-256 和 ZIP 完整性。原生剪贴板路径与设置页及实际输出路径一致，验证后恢复剪贴板内容。应用正常退出，隔离 SQLite 完整性为 `ok`。本次使用合成发布及安装包，项目正式签名 Release 和线上下载仍待验收。[验收日志](../build/bin/qa-native-update-download-49/verify.log) · [BMad 记录](../_bmad-output/plan-e13-native-update-download.md)
