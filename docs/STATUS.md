@@ -678,3 +678,10 @@
 
 - 正式安装验收在启动前复验最终安装器和便携程序的签名、发布者及时间戳。安装、升级和重装后的卸载器必须与同轮 NSIS 签名钩子记录的 SHA-256 一致，再验签。摘要仅在签名和成品验收步骤间传递，交付文件名单不变。[NSIS 签名钩子](https://nsis.sourceforge.io/Docs/Chapter5.html#uninstfinalize) · [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)
 - 本机 PowerShell 夹具验证摘要匹配、修改后拒绝、缺少签名回执的清理，以及成功时交出准确摘要。用 NSIS 3.13 编译隔离样例，从安装器提取的卸载器与钩子输出逐字节一致。工作流 YAML、PowerShell AST、13 项 Node 发行工具测试通过。真实 Windows 签名和原生安装仍待正式验收。[夹具日志](../build/bin/qa-windows-uninstaller-hash/package-fixture.log) · [BMad 记录](../_bmad-output/plan-e13-windows-uninstaller-hash.md)
+
+## E13 .48 累计候选本地打包（2026-11-27）
+
+- 从隔离发行源码 `2262527a7da5c26acaa30aa3bf7f6719e9d288a7` 构建 `v0.1.0-smoke.20261127.48`。浏览器和两平台打包的前端资源逐项摘要一致。391 项 Playwright、122 项 Vitest、Go vet、Go 全量和 App/CMS/更新/开机启动竞态测试通过。16 项 macOS 工具、13 项 Node 发行工具和 Windows PowerShell 夹具通过。[浏览器回归](../build/bin/smoke-20261127.48/evidence/e2e.log)
+- Windows x64 安装器 22.53 MiB、便携程序 32.33 MiB、macOS Universal ZIP 40.87 MiB。NSIS 包内主程序与便携程序一致，WebView2 引导程序与依赖原件一致，PE 版本字段为 0.1.0.0。macOS 两个切片的最低系统版本均为 13.0。Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立命令、随包指令和归档复核。[Windows 清单](../build/bin/smoke-20261127.48/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.48/macos/SHA256SUMS.txt)
+- Apple Silicon 从最终 ZIP 验证桌面启动、正常退出、隔离 SQLite 与成品回滚。最初检出和 Windows 编译遇到磁盘空间不足，回收隔离临时副本后恢复。macOS ZIP 的解压验收在腾出空间后使用同一份文件复跑通过。[Apple Silicon 原生](../build/bin/smoke-20261127.48/evidence/macos-native.log)
+- Go 源码、Windows x64、macOS arm64 与 x86_64 二进制及 npm 生产依赖扫描未报告已知漏洞。GitHub 仓库签名环境、仓库级 Actions secrets、Release 及本机有效代码签名身份均尚未配置。当前源码的 Windows 和 Intel Mac 原生、正式签名与公证以及授权公网片源仍待验收。[BMad 记录](../_bmad-output/plan-e13-local-candidate48-packages.md)
