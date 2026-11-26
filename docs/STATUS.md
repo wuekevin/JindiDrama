@@ -667,3 +667,9 @@
 - 从隔离发行源码 `14ce2ff7733f6bf8601685843b8b5fdede69e925` 构建 `v0.1.0-smoke.20261127.47`，复用已通过 164 项相关 Playwright 的前端资源。在 macOS 26.6.2 上验证 arm64，最低系统版本为 macOS 13.0，ad-hoc 签名通过。首次构建遇到磁盘空间不足，清理经核对的 .46 临时重复副本后通过。
 - 通过真实 WKWebView 操作演示视频顶栏「最小化」与本地片库「关闭时最小化」。两者都在定期记录前更新隔离 SQLite，记录分别为 0→98 ms 和 5800→5993 ms。恢复系统窗口时仍处于播放状态。正常退出后两套 SQLite 完整性均为 `ok`。[演示日志](../build/bin/qa-native-playback-hide-47/demo-run.log) · [片库日志](../build/bin/qa-native-playback-hide-47/licensed-run.log)
 - 重启后演示在保存的位置暂停，片库打开原分集并从约 7 秒继续。Windows 和 Intel Mac 的当前候选原生验收、签名与公证仍待集中执行。[演示重启](../build/bin/qa-native-playback-hide-47/demo-reopen.log) · [片库重启](../build/bin/qa-native-playback-hide-47/licensed-reopen.log) · [BMad 记录](../_bmad-output/plan-e11-native-playback-hide-acceptance.md)
+
+## E13 macOS 公证核对签名团队与提交结果（2026-11-27）
+
+- 提交公证前用系统 codesign 核对 Apple Developer ID Application 签名和已配置的 Team ID。脚本要求本轮 notarytool JSON 明确返回 `Accepted`，通过后才附加并校验票据。响应保存在私有临时目录并随本轮文件清理。[Apple 签名要求](https://developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements/) · [Apple 公证流程](https://developer.apple.com/documentation/Security/customizing-the-notarization-workflow)
+- 旧脚本可在工具退出成功、提交状态无效时继续。新夹具覆盖了拒绝、未完成、错误类型、缺失字段和截断结果。本机真实 codesign 校验了 Developer ID 应用的正确与错误团队，并确认项目 .47 的临时签名应用在联系 Apple 前被拒绝。
+- 16 项 macOS 工具测试、13 项 Node 发行工具测试、Bash 语法和发行源码历史检查通过。完整签名与线上公证仍待正式凭据验收。[测试日志](../build/bin/qa-macos-notary-acceptance/python-tests.log) · [BMad 记录](../_bmad-output/plan-e13-macos-notary-acceptance.md)

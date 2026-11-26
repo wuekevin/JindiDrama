@@ -19,6 +19,10 @@ case "$1" in
     team_id=${APPLE_TEAM_ID:?Missing APPLE_TEAM_ID}
     apple_password=${APPLE_APP_PASSWORD:?Missing APPLE_APP_PASSWORD}
     unset APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD
+    if [[ ! $team_id =~ ^[A-Z0-9]{10}$ ]]; then
+      echo "Invalid Apple Team ID" >&2
+      exit 1
+    fi
     ;;
   *)
     echo "Unknown macOS release operation: $1" >&2
@@ -43,7 +47,7 @@ cleanup() {
     echo "Could not unregister the temporary signing keychain" >&2
     if (( status == 0 )); then status=1; fi
   fi
-  if [[ -n $work ]] && { ! rm -f -- "$work/certificate.p12" "$work/notarize.zip" "$work/release.keychain-db" ||
+  if [[ -n $work ]] && { ! rm -f -- "$work/certificate.p12" "$work/notarize.zip" "$work/notary-response.json" "$work/release.keychain-db" ||
                          ! rmdir -- "$work"; }; then
     echo "Could not remove temporary macOS release files" >&2
     if (( status == 0 )); then status=1; fi
@@ -83,9 +87,21 @@ if [[ $1 == sign ]]; then
   unset keychain_password
   run_interruptible codesign --force --deep --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$app"
 else
+  requirement='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists'
+  requirement+=' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
+  requirement+=" and certificate leaf[subject.OU] = \"$team_id\""
+  run_interruptible codesign --verify --deep --strict -R="$requirement" "$app"
   run_interruptible ditto -c -k --keepParent "$app" "$archive"
-  run_interruptible xcrun notarytool submit "$archive" --apple-id "$apple_id" --team-id "$team_id" --password "$apple_password" --wait
+  response="$work/notary-response.json"
+  run_interruptible xcrun notarytool submit "$archive" --apple-id "$apple_id" --team-id "$team_id" \
+    --password "$apple_password" --wait --output-format json > "$response"
   unset apple_password
+  if ! notary_status=$(/usr/bin/plutil -extract status raw -expect string -o - "$response" 2>/dev/null) ||
+     [[ $notary_status != Accepted ]]; then
+    echo "Apple did not accept this notarization submission" >&2
+    exit 1
+  fi
+  echo "Apple accepted this notarization submission"
   run_interruptible xcrun stapler staple "$app"
   run_interruptible xcrun stapler validate "$app"
 fi
