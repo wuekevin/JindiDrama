@@ -597,7 +597,7 @@ test('CMS expiry and a shorter replacement preserve a saved bookmark until the u
   expect(desktop.writes).toEqual([])
 })
 
-async function failWithMediaError(video: ReturnType<typeof historyVideo>, options?: { resetPosition?: boolean; pauseFirst?: boolean; volume?: number }) {
+async function failWithMediaError(video: ReturnType<typeof historyVideo>, options?: { resetPosition?: boolean; pauseFirst?: boolean; volume?: number; speed?: number }) {
   return video.evaluate(async (media: HTMLVideoElement, options) => {
     const probe = document.createElement('video')
     const error = await new Promise<MediaError | null>((resolve) => {
@@ -613,6 +613,7 @@ async function failWithMediaError(video: ReturnType<typeof historyVideo>, option
       media.dispatchEvent(new Event('pause'))
     }
     if (options?.volume !== undefined) media.volume = options.volume
+    if (options?.speed !== undefined) media.playbackRate = options.speed
     media.dispatchEvent(new Event('error'))
     return checkpoint
   }, options)
@@ -670,6 +671,54 @@ test('CMS native volume carries across a fallback and a manual episode change', 
   const second = historyVideo(page, 2)
   await expect.poll(() => durationMs(second)).toBeGreaterThan(1000)
   await expect(second).toHaveJSProperty('volume', 0)
+})
+
+test('CMS shares supported native rates across a fallback and a manual episode change', async ({ page }) => {
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await failWithMediaError(first, { speed: 1.5 })
+  await expect(first).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await expect(first).toHaveJSProperty('playbackRate', 1.5)
+  await expect(first).toHaveJSProperty('defaultPlaybackRate', 1.5)
+  await first.evaluate(async (media: HTMLVideoElement) => {
+    const changed = new Promise<void>((resolve) => media.addEventListener('ratechange', () => resolve(), { once: true }))
+    media.playbackRate = 3
+    await changed
+  })
+  await page.getByRole('button', { name: '第2集' }).click()
+  const second = historyVideo(page, 2)
+  await playHistoryVideo(second)
+  await expect(second).toHaveJSProperty('playbackRate', 1.5)
+})
+
+test('CMS HLS recovery retains the latest rate before the native event is delivered', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.format = 'hls'
+  await page.addInitScript(() => {
+    const create = URL.createObjectURL
+    URL.createObjectURL = (object) => {
+      if (object instanceof MediaSource) Object.assign(window, { cmsMediaSource: object })
+      return create(object)
+    }
+  })
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  const original = await video.getAttribute('src')
+  expect(original).toMatch(/^blob:/)
+  const recoveredRate = await video.evaluate((media: HTMLVideoElement) => {
+    const source = (window as unknown as { cmsMediaSource: MediaSource }).cmsMediaSource
+    media.playbackRate = 1.5
+    source.dispatchEvent(new Event('sourceclose'))
+    return media.playbackRate
+  })
+  expect(recoveredRate).toBe(1.5)
+  await expect.poll(() => video.getAttribute('src')).not.toBe(original)
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await expect(video).toHaveJSProperty('playbackRate', 1.5)
 })
 
 test('CMS media fallback keeps the sampled bookmark when a failed decoder resets time', async ({ page }) => {
@@ -748,6 +797,7 @@ test('CMS continuous play saves completion and decodes the adjacent episode thro
   const completedDuration = await durationMs(first)
   await first.evaluate((media: HTMLVideoElement) => {
     media.volume = 0.41
+    media.playbackRate = 1.25
     media.muted = true
   })
   await playHistoryVideo(first)
@@ -757,6 +807,7 @@ test('CMS continuous play saves completion and decodes the adjacent episode thro
   await expect(second).toHaveAttribute('src', secondPrefix + '1')
   await expect.poll(() => second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
   await expect(second).toHaveJSProperty('volume', 0.41)
+  await expect(second).toHaveJSProperty('playbackRate', 1.25)
   await expect(second).toHaveJSProperty('muted', true)
   await expect.poll(() => position(second)).toBeGreaterThan(0.1)
   await expect.poll(() => desktop.rows()[0]).toMatchObject({

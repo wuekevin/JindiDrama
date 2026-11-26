@@ -10,7 +10,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
-import { normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
+import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
@@ -68,7 +68,7 @@ type MediaHistory = {
 type Advance = { fromGeneration: number; path: string; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
-let volumeMedia: HTMLVideoElement | undefined
+let preferenceMedia: HTMLVideoElement | undefined
 let nextEpisode: Advance | undefined
 const autoStart = shallowRef<Advance>()
 let manualNavigation: ReturnType<typeof router.push> | undefined
@@ -231,7 +231,7 @@ function onEnded(event: Event) {
 }
 
 function saveOnExit() {
-  syncVolume()
+  syncMediaPreferences()
   saveProgress(true)
 }
 
@@ -258,8 +258,8 @@ function selectEpisode(index: number) {
 }
 
 function stopMedia(failed = false) {
-  syncVolume()
-  volumeMedia = undefined
+  syncMediaPreferences()
+  preferenceMedia = undefined
   saveProgress(true, failed)
   mediaHistory = undefined
   const player = hls
@@ -413,7 +413,9 @@ watch([video, source], async ([media, choice]) => {
   const path = route.path
   if (watchTarget) {
     const target = watchTarget
-    volumeMedia = media
+    preferenceMedia = media
+    media.defaultPlaybackRate = settings.speed
+    media.playbackRate = settings.speed
     const checkpoint = library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
     mediaHistory = {
       generation: current, path, target, media, source: choice, checkpoint,
@@ -439,7 +441,14 @@ watch([video, source], async ([media, choice]) => {
       failMedia(media, choice)
       return
     }
-    const player = new HlsPlayer({ lowLatencyMode: false, emeEnabled: false })
+    class CatalogHlsPlayer extends HlsPlayer {
+      override recoverMediaError() {
+        // Recovery reloads the element before queued preference events can run.
+        if (hls === this && isCurrent()) syncMediaPreferences()
+        super.recoverMediaError()
+      }
+    }
+    const player = new CatalogHlsPlayer({ lowLatencyMode: false, emeEnabled: false })
     hls = player
     player.on(HlsPlayer.Events.ERROR, (_, data) => {
       if (data.fatal && hls === player && isCurrent()) failMedia(media, choice)
@@ -451,20 +460,24 @@ watch([video, source], async ([media, choice]) => {
   }
 }, { flush: 'post' })
 
-function applyPreferences(event: Event) {
+function onLoadedMetadata(event: Event) {
   if (event.currentTarget !== video.value || !video.value) return
-  video.value.playbackRate = settings.speed
+  if (video.value !== preferenceMedia) video.value.playbackRate = settings.speed
   onPlayable(event)
 }
 
-function syncVolume() {
-  if (!volumeMedia || Date.now() >= expiresAt) return
-  const volume = normalizePlaybackVolume(volumeMedia.volume * 100)
+function syncMediaPreferences() {
+  if (!preferenceMedia || Date.now() >= expiresAt) return
+  const volume = normalizePlaybackVolume(preferenceMedia.volume * 100)
   if (volume !== settings.volume) settings.volume = volume
+  const rate = preferenceMedia.playbackRate
+  if (!isPlaybackSpeed(rate)) return
+  settings.speed = rate
+  if (preferenceMedia.defaultPlaybackRate !== rate) preferenceMedia.defaultPlaybackRate = rate
 }
 
-function onVolumeChange(event: Event) {
-  if (event.currentTarget === volumeMedia) syncVolume()
+function onMediaPreferenceChange(event: Event) {
+  if (event.currentTarget === preferenceMedia) syncMediaPreferences()
 }
 
 watch(() => route.path, load, { immediate: true })
@@ -494,9 +507,9 @@ onBeforeUnmount(() => {
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline :preload="autoStart ? 'auto' : 'metadata'"
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
-        :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences"
+        :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="onLoadedMetadata"
         @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
-        @playing="onPlaying" @volumechange="onVolumeChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
+        @playing="onPlaying" @volumechange="onMediaPreferenceChange" @ratechange="onMediaPreferenceChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
     </div>
     <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
