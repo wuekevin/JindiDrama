@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +47,7 @@ func readyCatalogPlayback() *catalogPlaybackFixture {
 func TestCatalogPlaybackUsesActiveProviderAndReturnsOnlyAllowedSources(t *testing.T) {
 	p := readyCatalogPlayback()
 	a := NewWith(p)
+	t.Cleanup(a.closeCatalogMedia)
 	ConfigureLicensedMedia(a, &licensed.DemoProvider{}, nil)
 	p.ticket.Sources = append([]provider.MediaSource{
 		{Src: "https://127.0.0.1/one.mp4", Type: "video/mp4"},
@@ -52,8 +55,13 @@ func TestCatalogPlaybackUsesActiveProviderAndReturnsOnlyAllowedSources(t *testin
 	}, p.ticket.Sources...)
 	got, err := a.CatalogPlayback("local-overlap", 1)
 	if err != nil || got.Kind != "authorized" || got.EpisodeID != "feed-1" || len(got.Sources) != 1 ||
-		got.Sources[0] != p.ticket.Sources[2] || got.ExpiresAt != p.ticket.ExpiresAt {
+		got.Sources[0].Type != "video/mp4" || got.Sources[0].Quality != "sd" ||
+		got.LeaseID == "" || !strings.HasPrefix(got.Sources[0].Src, "http://127.0.0.1:") || got.ExpiresAt != p.ticket.ExpiresAt {
 		t.Fatalf("resolved authorized source: %+v err=%v", got, err)
+	}
+	renderer, err := json.Marshal(got)
+	if err != nil || strings.Contains(string(renderer), "test-opaque") || strings.Contains(string(renderer), "example.test") {
+		t.Fatalf("upstream must not appear in renderer ticket: %s, err=%v", renderer, err)
 	}
 	p.ticket.Sources = nil
 	p.ticket.PlaybackURL = "https://media.example.test/one.webm?authorization=test-opaque"

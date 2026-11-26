@@ -80,14 +80,15 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 	if len(sources) == 0 {
 		return provider.PlaybackTicket{}, errCatalogPlaybackUnavailable
 	}
-	return provider.PlaybackTicket{
+	return a.issueCatalogMedia(provider.PlaybackTicket{
 		Kind: ticket.Kind, EpisodeID: episodeID, Sources: sources, ExpiresAt: ticket.ExpiresAt,
-	}, nil
+	}, expiry)
 }
 
 func catalogMediaSource(source provider.MediaSource, inferType bool) (provider.MediaSource, bool) {
 	u, err := url.Parse(source.Src)
 	if err != nil || u.Scheme != "https" || u.Opaque != "" || u.User != nil || u.Fragment != "" ||
+		(u.Port() != "" && u.Port() != "443") ||
 		strings.ContainsAny(source.Src, "\\\r\n\t ") || !catalogMediaHostname(u.Hostname()) {
 		return provider.MediaSource{}, false
 	}

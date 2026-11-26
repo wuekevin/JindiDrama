@@ -46,6 +46,7 @@ func (a *App) openStore(path string) error {
 }
 
 func (a *App) close() {
+	a.closeCatalogMedia()
 	if a.store != nil {
 		a.store.Close()
 	}

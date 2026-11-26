@@ -70,6 +70,7 @@ type PlaybackTicket struct {
 	Sources      []MediaSource `json:"sources,omitempty"`
 	PlaybackURL  string        `json:"playbackUrl,omitempty"`
 	ExpiresAt    string        `json:"expiresAt,omitempty"`
+	LeaseID      string        `json:"leaseId,omitempty"`
 	Restrictions []string      `json:"restrictions,omitempty"`
 }
 

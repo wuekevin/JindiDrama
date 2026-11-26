@@ -19,9 +19,14 @@ import (
 )
 
 type App struct {
-	ctx               context.Context
-	assets            fs.FS
-	frontendReady     func()
+	ctx           context.Context
+	assets        fs.FS
+	frontendReady func()
+
+	catalogMediaMu     sync.Mutex
+	catalogMedia       *catalogMediaRelay
+	catalogMediaClosed bool
+
 	p                 provider.VideoProvider
 	licensed          *licensed.DemoProvider
 	licensedErr       error

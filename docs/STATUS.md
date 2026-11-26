@@ -326,3 +326,10 @@
 - 独立播放页支持播放、暂停、拖动、切集和重新取票。过期后卸载视频，较晚返回的旧请求不会发起媒体加载。票据不写入导航 URL、本地历史或应用日志，也不开放下载或导出入口。
 - Chromium 用受控 HTTPS 和仓库自制 MP4、WebM 实测解码、暂停与拖动，六项专项通过，包括权限关闭、过期重试、播放中到期、受保护票据和切集竞态。生产构建、117 项 Vitest、288 项 Playwright、Go 全量测试、vet、App 竞态和 Go 源码漏洞扫描通过。[播放截图](../design/rendered/15-provider-playback.png)
 - Apple Silicon 独立归档启动、版本、退出和 SQLite 冒烟通过，Windows amd64 交叉编译通过。实测媒体由夹具提供。正式红果接口、授权与真实 CDN 仍待联调，CDN 需支持 WebView 匿名跨域和 Range。现有 .29 双平台包早于此修复。
+
+## E12 授权媒体签名地址隔离与转发（2026-11-26）
+
+- 授权播放的 CDN 签名地址留在 Go 内存中。WebView 只收到带有效期的本机播放入口。切集、离开、失败和过期会释放入口，Go 到期清除记录并取消正在传输的数据。旧演示和授权本地片库仍走原播放链路。
+- Go 校验 DNS 返回的公网 IP 并使用核对后的地址建立 HTTPS 连接，保留原域名证书校验，拒绝跳转、私网和特殊地址。只接收 GET、HEAD 与单一 Range，验证响应 MIME、区间、长度并流式返回内容。浏览器 Cookie、Authorization、Referer 和 CDN Set-Cookie 都不会跨层转发。
+- Apple Silicon 原生 WebKit 用 Go 夹具读取本机 Range、播放到至少 1 秒、暂停、返回和正常退出，SQLite 完整性通过。Chromium 通过七项播放专项和 289 项全量回归，117 项 Vitest、Go 全量、vet、App 竞态、源码漏洞扫描及 Windows amd64 交叉编译通过。[原生播放截图](../design/rendered/16-provider-relay-native.png)
+- 正式红果接口、授权范围及 CDN 仍待联调。发布前需确认 CDN 支持有效 HTTPS 证书、直接媒体响应和 Range，并确认授权允许本机转发。现有 .29 双平台包早于此改动。

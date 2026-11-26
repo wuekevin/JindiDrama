@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
-import { resolveCatalogPlayback } from '@/bindings'
+import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
@@ -32,6 +32,7 @@ const source = computed(() => sources.value[selected.value])
 let generation = 0
 let expiresAt = 0
 let expiryTimer: number | undefined
+let activeLease: string | undefined
 
 function stopMedia() {
   const media = video.value
@@ -44,22 +45,32 @@ function stopMedia() {
 function validateSources(ticket: PlaybackTicket, expectedEpisodeId: string) {
   if (ticket.kind !== 'authorized' || ticket.episodeId !== expectedEpisodeId || ticket.restrictions?.length) return []
   if (!(Date.parse(ticket.expiresAt ?? '') > Date.now())) return []
+  const token = ticket.leaseId
+  if (!token || !/^[A-Z2-7]{26,}$/.test(token)) return []
   const quality = demoQualityId(preferences.s.defaultQuality)
   const distinct = new Map<string, MediaSource>()
   for (const choice of ticket.sources ?? []) {
     if (choice.type !== 'video/mp4' && choice.type !== 'video/webm') continue
     try {
       const url = new URL(choice.src)
-      if (url.protocol !== 'https:' || url.username || url.password || url.hash) continue
-      if (!/\.[a-z][a-z0-9-]*\.?$/i.test(url.hostname) || /\.(?:local|localhost|internal|lan|home)\.?$/i.test(url.hostname)) continue
+      if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port ||
+          url.username || url.password || url.hash || url.search) continue
+      if (!new RegExp(`^/catalog-media/${token}/[0-9]+$`).test(url.pathname)) continue
       if (!distinct.has(url.href)) distinct.set(url.href, { ...choice, src: url.href })
     } catch { /* Invalid URLs never reach the media element. */ }
   }
   return [...distinct.values()].sort((left, right) => Number(right.quality === quality) - Number(left.quality === quality))
 }
 
+function releaseLease(token = activeLease) {
+  if (!token) return
+  if (token === activeLease) activeLease = undefined
+  void releaseCatalogPlayback(token)?.catch(() => {})
+}
+
 function expireTicket() {
   stopMedia()
+  releaseLease()
   sources.value = []
   state.value = 'error'
   error.value = '播放票据已过期，请重试。'
@@ -82,6 +93,7 @@ async function load() {
   const targetEpisode = episode.value
   clearTimeout(expiryTimer)
   stopMedia()
+  releaseLease()
   sources.value = []
   selected.value = 0
   error.value = ''
@@ -103,10 +115,17 @@ async function load() {
       return
     }
     const ticket = await resolveCatalogPlayback(targetId, targetEpisode)
-    if (current !== generation) return
+    if (current !== generation) {
+      if (ticket?.leaseId) releaseLease(ticket.leaseId)
+      return
+    }
     if (!ticket) throw new Error()
     const choices = validateSources(ticket, requested.id)
-    if (!choices.length) throw new Error()
+    if (!choices.length) {
+      if (ticket.leaseId) releaseLease(ticket.leaseId)
+      throw new Error()
+    }
+    activeLease = ticket.leaseId
     expiresAt = Date.parse(ticket.expiresAt ?? '')
     sources.value = choices
     state.value = 'ready'
@@ -132,6 +151,7 @@ function mediaError(event: Event) {
   state.value = 'error'
   error.value = '媒体加载失败，请重试。'
   sources.value = []
+  releaseLease()
 }
 
 function applyPreferences(event: Event) {
@@ -145,6 +165,7 @@ onBeforeUnmount(() => {
   generation++
   clearTimeout(expiryTimer)
   stopMedia()
+  releaseLease()
 })
 </script>
 
@@ -157,7 +178,7 @@ onBeforeUnmount(() => {
       <Skeleton v-if="state === 'loading'" class="loading" />
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline preload="metadata"
-        crossorigin="anonymous" controlslist="nodownload" :src="source.src"
+        controlslist="nodownload" :src="source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences" />
     </div>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
