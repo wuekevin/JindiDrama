@@ -427,3 +427,12 @@
 - 本机 HTTP 夹具确认 429 后各入口没有产生额外的上游请求，分类入口无需等待正在进行的刷新，另一 Provider 实例不受影响。HTTP 夹具用 1 秒 Retry-After 验证自然到期后恢复。截止时间比较另行验证较短值不会替换已有较晚值，并核对零、过期日期、无效值和超出整数范围的秒数。
 - 新取票核验触发限流时，Wails 播放页显示固定限流提示与重试入口。Apple Silicon 本机夹具返回 429 后触发提示，冷却结束后重试并实际解码第 3 集。
 - 前端类型检查、生产构建、122 项 Vitest、61 项目录及播放回归、Go vet、Go 全量、CMS Provider 与 App 竞态和 Windows amd64 生产交叉构建通过。本轮累计到本地候选，.40 测试包早于此修复。
+
+## E13 CMS 目录和媒体恢复批次本地打包 .41（2026-11-27）
+
+- 从隔离发行源码 `427bc10b10bb331fff4ac6edf4b60f7b9154f046` 构建 `v0.1.0-smoke.20261127.41`。本批包含目录详情与分集合并、媒体停滞转发取消和原生重试、HTTP 429 冷却。Windows amd64 安装器为 22.50 MiB，便携版为 32.26 MiB，macOS Universal ZIP 为 40.83 MiB。
+- Windows 安装器完整性通过。内置应用与便携版字节一致，WebView2 安装组件与 Wails 原件一致。Universal ZIP 的 arm64 和 x86_64 切片最低系统均为 macOS 13.0。Apple Silicon 从最终 ZIP 启动，验证应用版本、Wails 页面、正常退出和隔离 SQLite 完整性。
+- Windows 7 项及 macOS 6 项 SHA-256 通过项目校验器、独立 shasum 和随包说明命令。产物移入项目后的 13 项 SHA-256 一致。Go 源码和三份程序切片漏洞检查、npm 生产审计均无报告。
+- 同一份 68 个文件的前端生产构建用于打包和回归，SHA-256 一致。122 项 Vitest、368 项全量 Chromium、Go vet、Go 全量、12 项 Node 发行工具、11 项 Python macOS 工具及两个 Windows 发行脚本 PowerShell 夹具通过。
+- 正式发行仍待真实授权公网片源联调、Windows 安装及 WebView2、Intel Mac 原生启动、Windows 正式签名和 macOS 公证。GitHub 发行环境和仓库级 Actions secrets 复核均为 0。本机无有效代码签名身份，x86_64 启动仍被系统拒绝。本批使用本地工具链。
+- [Windows SHA-256](../build/bin/smoke-20261127.41/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.41/macos/SHA256SUMS.txt) · [原生启动](../build/bin/smoke-20261127.41/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-cms-recovery-batch-smoke.md)
