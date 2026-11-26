@@ -9,6 +9,7 @@ import { useRelatedDramas } from '@/mocks/recommendations'
 import { usePlayer, resolveMediaMode } from '@/player/usePlayer'
 import { demoQualityId, demoSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
+import { observeContentWidth } from '@/layoutWidth'
 import { playbackEndAction } from '@/player/preferences'
 import { episodeDuration, fmt } from '@/player/machine'
 import { normalizeDanmakuText } from '@/bindings/danmakuRecovery'
@@ -38,8 +39,7 @@ const companion = ref<HTMLElement>()
 const stacked = ref(false)
 watch(watchRoot, (element, _, onCleanup) => {
   if (!element) return
-  const observer = new ResizeObserver(([entry]) => { stacked.value = entry.contentRect.width <= 980 })
-  observer.observe(element)
+  const observer = observeContentWidth(element, (width) => { stacked.value = width <= 980 })
   onCleanup(() => observer.disconnect())
 }, { flush: 'post' })
 const mine = ref<DanmakuItem[]>([])

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { Camera, ChevronLeft, Cast, PictureInPicture2, Pause, Play, SkipForward, Settings2, MessageSquareText, MessageCircle, Download, Volume2, VolumeX, Maximize, RotateCw, Loader } from 'lucide-vue-next'
 import type { usePlayer } from '@/player/usePlayer'
 import { DEMO_QUALITIES, demoQualityId } from '@/player/demoMedia'
@@ -28,12 +28,23 @@ onMounted(() => {
   const surface = root.value
   const controls = footer.value
   if (!surface || !controls) return
-  controlObserver = new ResizeObserver(() => {
-    surfaceWidth.value = surface.clientWidth
+  const updatePopupHeight = () => {
     popupHeight.value = Math.max(36, surface.clientHeight - controls.offsetHeight - 10)
-  })
+  }
+  const updateControls = () => {
+    surfaceWidth.value = surface.clientWidth
+    updatePopupHeight()
+  }
+  controlObserver = new ResizeObserver(updateControls)
   controlObserver.observe(surface)
   controlObserver.observe(controls, { box: 'border-box' })
+  // The parent can switch to its stacked grid during the first render.
+  void nextTick(async () => {
+    if (!surface.isConnected) return
+    updateControls()
+    await nextTick()
+    if (surface.isConnected) updatePopupHeight()
+  })
 })
 onBeforeUnmount(() => controlObserver?.disconnect())
 const bg = computed(() => posterSvg({ hue: 350, hue2: 20, seed: 1 + (props.episode % 3) }))

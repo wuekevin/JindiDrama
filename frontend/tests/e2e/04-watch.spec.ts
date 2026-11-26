@@ -134,6 +134,22 @@ for (const dpi of [100, 150, 220]) {
     await page.setViewportSize(dpi === 100 ? { width: 1448, height: 1086 } : { width: 1280, height: 860 })
     await page.addInitScript((zoom) => {
       localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: zoom }))
+      const NativeResizeObserver = window.ResizeObserver
+      const deferred: Array<() => void> = []
+      let holdInitialResize = true
+      window.ResizeObserver = class extends NativeResizeObserver {
+        observe(target: Element, options?: ResizeObserverOptions) {
+          if (holdInitialResize && target.matches('[data-testid=page-watch], [data-testid=player], [data-testid=player] > footer')) {
+            deferred.push(() => super.observe(target, options))
+            return
+          }
+          super.observe(target, options)
+        }
+      }
+      window.addEventListener('test-release-player-resize', () => {
+        holdInitialResize = false
+        for (const observe of deferred) observe()
+      }, { once: true })
     }, dpi)
     await page.goto('/#/watch/d1/32?t=192&paused')
     const player = page.getByTestId('player')
@@ -156,11 +172,26 @@ for (const dpi of [100, 150, 220]) {
       const playBox = (await player.getByTestId('toggle').boundingBox())!
       const fullscreenBox = (await player.getByTestId('fullscreen').boundingBox())!
       expect(Math.abs(playBox.y - fullscreenBox.y)).toBeLessThanOrEqual(1)
+    } else {
+      await expect(page.getByTestId('page-watch')).toHaveClass(/\bstacked\b/)
+      await expect(player).toHaveClass(/\bsnug\b/)
+      if (dpi === 150) {
+        await expect(player).not.toHaveClass(/\bcompactControls\b/)
+      } else {
+        await expect(player).toHaveClass(/\bcompactControls\b/)
+        expect(await player.evaluate((surface) => {
+          const footer = surface.querySelector('footer')!
+          const maxHeight = getComputedStyle(surface).getPropertyValue('--popup-height').trim()
+          return maxHeight === `${Math.max(36, surface.clientHeight - footer.offsetHeight - 10)}px`
+        })).toBe(true)
+      }
     }
     await page.screenshot({ path: testInfo.outputPath('player.png') })
     const quality = player.getByTestId('quality')
     await quality.press('Enter')
+    await expect(player.locator('.quality-pop')).toBeVisible()
     await checkControls()
+    await page.evaluate(() => window.dispatchEvent(new Event('test-release-player-resize')))
     await page.keyboard.press('Escape')
     await expect(quality).toBeFocused()
     await quality.press('Enter')
