@@ -508,3 +508,9 @@
 - 生产前端构建、122 项 Vitest、82 项演示与片源播放 Playwright 通过。快速评审后加强对原比例、评论和弹幕实际提交的断言，定稿专项复跑通过。
 - Apple Silicon 用原生 Wails、WKWebView 和本机合成片源复测。在 860 像素高的窗口内播放器实测 559 像素，播放、快进、进出全屏、评论输入和退出后 SQLite 完整性通过。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e10-cms-playback-zoom.md)
 - [窗口截图](../build/bin/qa-cms-playback-zoom/cms-window-220.png) · [全屏截图](../build/bin/qa-cms-playback-zoom/cms-fullscreen-220.png) · [评论截图](../build/bin/qa-cms-playback-zoom/cms-comments-220.png) · [弹幕截图](../build/bin/qa-cms-playback-zoom/cms-danmaku-220.png) · [原生验收](../build/bin/qa-cms-playback-zoom/apple-silicon.txt)
+
+## E13 GitHub Release 草稿资产核验（2026-11-27）
+
+- `--verify-release-draft` 先核验本地标签和交付包，再核对 GitHub 草稿的仓库、标签、发布渠道，以及每个上传资产的名称、状态、字节数和 SHA-256。校验范围包含 Windows 安装包、便携版、macOS Universal ZIP、随包文档与 SHA-256 清单自身。发行指南记录了只读查询和核验命令。
+- Node 22 和 Node 26 的 13 项发行工具测试均通过，覆盖错误渠道、缺失或重复资产、无效 ID、上传状态、大小和两平台摘要。现有 .42 测试包重新校验 13 项原始 SHA-256。用同一批二进制构建本机稳定版与候选版草稿夹具，两轮各核对 11 项文件。修改清单摘要时正确失败。
+- GitHub 当前没有 JindiDrama Release，实际草稿和正式签名资产仍待验收。本轮未推送、未创建草稿或触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e13-release-draft-verification.md) · [GitHub Release 查询接口](https://docs.github.com/en/rest/releases/releases#get-a-release)

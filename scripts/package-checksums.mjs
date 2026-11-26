@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, realpathSync } from 'node:fs'
-import { readFile, readdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { hostedPackageHeader, packageVersionPattern } from './package-provenance.mjs'
@@ -50,6 +50,11 @@ export async function writeManifest(directory, checksums) {
 }
 
 export async function verify(directory, platform) {
+  const { checksums } = await verifyFiles(directory, platform)
+  return checksums
+}
+
+async function verifyFiles(directory, platform) {
   const expected = new Set(platform === 'release' ? releaseFiles : [...platformPackages.get(platform), ...sidecars])
   const entries = await readdir(directory, { withFileTypes: true })
   const files = new Set()
@@ -63,9 +68,9 @@ export async function verify(directory, platform) {
     if (!files.has(name)) throw new Error(`Missing artifact file: ${name}`)
   }
 
-  const contents = await readFile(join(directory, manifest), 'utf8')
+  const contents = await readFile(join(directory, manifest))
   const checksums = new Map()
-  for (const line of contents.replace(/\r?\n$/, '').split(/\r?\n/)) {
+  for (const line of contents.toString('utf8').replace(/\r?\n$/, '').split(/\r?\n/)) {
     const match = /^([a-fA-F0-9]{64})  (.+)$/.exec(line)
     if (!match) throw new Error(`Malformed ${manifest} entry`)
     const [, digest, name] = match
@@ -81,7 +86,8 @@ export async function verify(directory, platform) {
     if (await hashFile(join(directory, name)) !== digest) throw new Error(`SHA-256 mismatch: ${name}`)
     console.log(`${name}: OK`)
   }
-  return checksums
+  const manifestFile = { digest: createHash('sha256').update(contents).digest('hex'), size: contents.length }
+  return { checksums, manifestFile }
 }
 
 export async function readVerifiedText(directory, name, digest) {
@@ -113,7 +119,7 @@ async function verifyReleaseTag(tag, directory) {
   } catch (error) {
     throw new Error('Cannot resolve local Git tag ' + tag + ' to a commit', { cause: error })
   }
-  const checksums = await verify(directory, 'release')
+  const { checksums, manifestFile } = await verifyFiles(directory, 'release')
   const name = 'RELEASE-NOTES.md'
   const notes = await readVerifiedText(directory, name, checksums.get(name))
   const lines = notes.split(/\r?\n/, 4)
@@ -133,6 +139,38 @@ async function verifyReleaseTag(tag, directory) {
     throw new Error('Release handoff version or build commit does not match the local release tag')
   }
   console.log('Release tag ' + tag + ' matches build commit ' + revision)
+  return { checksums, manifestFile, repository }
+}
+
+async function verifyReleaseDraft(tag, directory, metadataFile) {
+  const { checksums, manifestFile, repository } = await verifyReleaseTag(tag, directory)
+  const draft = JSON.parse(await readFile(metadataFile, 'utf8'))
+  const prerelease = tag.split('+', 1)[0].includes('-')
+  if (draft?.draft !== true || draft.tag_name !== tag || draft.prerelease !== prerelease ||
+      !Number.isSafeInteger(draft.id) || draft.id < 1 ||
+      typeof draft.url !== 'string' || draft.url.toLowerCase() !== `https://api.github.com/repos/${repository.toLowerCase()}/releases/${draft.id}`) {
+    throw new Error('GitHub Release draft does not match the repository, tag, and release channel')
+  }
+  if (!Array.isArray(draft.assets)) throw new Error('Missing GitHub Release draft assets')
+
+  checksums.set(manifest, manifestFile.digest)
+  const seen = new Set()
+  for (const asset of draft.assets) {
+    const name = asset?.name
+    if (!checksums.has(name) || seen.has(name)) {
+      throw new Error(`Unexpected or duplicate draft asset: ${JSON.stringify(name)}`)
+    }
+    seen.add(name)
+    const { size } = name === manifest ? manifestFile : await stat(join(directory, name))
+    if (!Number.isSafeInteger(asset.id) || asset.id < 1 || asset.state !== 'uploaded' ||
+        size !== asset.size || asset.digest !== 'sha256:' + checksums.get(name)) {
+      throw new Error(`Draft asset ID, upload state, size or SHA-256 mismatch: ${name}`)
+    }
+  }
+  for (const name of checksums.keys()) {
+    if (!seen.has(name)) throw new Error(`Missing draft asset: ${name}`)
+  }
+  console.log(`GitHub Release draft ${draft.id} matches all ${seen.size} handoff files`)
 }
 
 function isMainModule(entry) {
@@ -154,9 +192,11 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verifyHostedPackage(directory, platform)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
+  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 1) {
+    await verifyReleaseDraft(platform, directory, extra[0])
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json>')
   }
 }

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -67,7 +68,7 @@ function git(cwd, ...args) {
   return result.stdout.trim()
 }
 
-test('verifies the handoff against the explicitly named local release tag', async (t) => {
+test('verifies the handoff against the local tag and uploaded draft assets', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'jindi-release-tag-'))
   t.after(() => rm(cwd, { recursive: true, force: true }))
   git(cwd, 'init', '--quiet', '--object-format=sha1')
@@ -99,6 +100,45 @@ test('verifies the handoff against the explicitly named local release tag', asyn
   const annotated = check()
   assert.equal(annotated.status, 0, annotated.stderr)
   assert.match(annotated.stdout, new RegExp(sha))
+
+  const assets = await Promise.all((await readdir(output)).map(async (name, index) => {
+    const bytes = await readFile(join(output, name))
+    return { id: index + 101, name, state: 'uploaded', size: bytes.length, digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex') }
+  }))
+  const draft = {
+    id: 123, url: `https://api.github.com/repos/${repository}/releases/123`,
+    tag_name: version, draft: true, prerelease: true, assets,
+  }
+  const draftFile = join(cwd, 'draft.json')
+  async function checkDraft(data) {
+    await writeFile(draftFile, JSON.stringify(data))
+    return run(checksums, ['--verify-release-draft', version, output, draftFile], { cwd })
+  }
+  const validDraft = await checkDraft(draft)
+  assert.equal(validDraft.status, 0, validDraft.stderr)
+  assert.match(validDraft.stdout, /matches all 11 handoff files/)
+  for (const wrong of [{ draft: false }, { prerelease: false }, { tag_name: 'v0.2.0' },
+    { url: 'https://api.github.com/repos/example/Other/releases/123' }]) {
+    const result = await checkDraft({ ...draft, ...wrong })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /does not match the repository, tag, and release channel/)
+  }
+  const withoutManifest = await checkDraft({ ...draft, assets: assets.filter(({ name }) => name !== 'SHA256SUMS.txt') })
+  assert.match(withoutManifest.stderr, /Missing draft asset: SHA256SUMS.txt/)
+  const duplicate = await checkDraft({ ...draft, assets: [...assets, assets[0]] })
+  assert.match(duplicate.stderr, /Unexpected or duplicate draft asset/)
+  for (const wrong of [{ id: 0 }, { state: 'starter' }, { size: 0 }, { digest: null }, { digest: 'sha256:' + '0'.repeat(64) }]) {
+    const result = await checkDraft({ ...draft, assets: assets.map((asset) =>
+      asset.name === 'JindiDrama-amd64-installer.exe' ? { ...asset, ...wrong } : asset) })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /mismatch: JindiDrama-amd64-installer.exe/)
+  }
+  for (const name of ['JindiDrama-macos-universal.zip', 'SHA256SUMS.txt']) {
+    const result = await checkDraft({ ...draft, assets: assets.map((asset) =>
+      asset.name === name ? { ...asset, digest: 'sha256:' + '0'.repeat(64) } : asset) })
+    assert.equal(result.status, 1)
+    assert.ok(result.stderr.includes('mismatch: ' + name), result.stderr)
+  }
   await writeFile(join(output, 'JindiDrama.exe'), 'changed')
   assert.match(check().stderr, /SHA-256 mismatch: JindiDrama.exe/)
 })
