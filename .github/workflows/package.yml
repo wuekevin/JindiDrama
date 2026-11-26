@@ -31,7 +31,7 @@ jobs:
       LDFLAGS: -X jindi-drama/internal/app.Version=${{ inputs.version }}
       GOFLAGS: -mod=readonly
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           fetch-depth: ${{ inputs.mode == 'release' && '0' || '1' }}
@@ -39,10 +39,10 @@ jobs:
         if: inputs.mode == 'release'
         shell: bash
         run: bash scripts/verify-distribution-source.sh
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           cache: npm
@@ -162,7 +162,7 @@ jobs:
           python3 scripts/smoke-macos-desktop.py "$@"
       - name: upload macOS startup diagnostics
         if: failure() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-arm64-${{ inputs.mode }}-startup-diagnostics-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/jindi-arm64-smoke/smoke.log
@@ -397,7 +397,7 @@ jobs:
       - name: list output
         shell: bash
         run: ls -la "$PACKAGE_DIR"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.mode == 'release' && format('release-{0}-attempt-{1}', matrix.os, github.run_attempt) || format('package-{0}-attempt-{1}', matrix.os, github.run_attempt) }}
           if-no-files-found: error
@@ -418,13 +418,13 @@ jobs:
       PACKAGE_MODE: ${{ inputs.mode }}
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ inputs.mode == 'release' && format('release-windows-latest-attempt-{0}', github.run_attempt) || format('package-windows-latest-attempt-{0}', github.run_attempt) }}
           path: build/bin
@@ -439,16 +439,16 @@ jobs:
       PACKAGE_MODE: ${{ inputs.mode }}
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: ${{ inputs.mode == 'release' && format('release-macos-latest-attempt-{0}', github.run_attempt) || format('package-macos-latest-attempt-{0}', github.run_attempt) }}
           path: build/bin
@@ -461,7 +461,7 @@ jobs:
           python3 scripts/smoke-macos-desktop.py "$@"
       - name: upload Intel startup diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: macos-intel-${{ inputs.mode }}-startup-diagnostics-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/jindi-intel-smoke/smoke.log
@@ -475,23 +475,23 @@ jobs:
       PACKAGE_MODE: ${{ inputs.mode }}
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-windows-latest-attempt-${{ github.run_attempt }}
           path: release-input/windows
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-macos-latest-attempt-${{ github.run_attempt }}
           path: release-input/macos
       - name: assemble and verify the release handoff
         run: node scripts/assemble-release.mjs release-input/windows release-input/macos release-handoff
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-handoff-${{ inputs.version }}-attempt-${{ github.run_attempt }}
           path: release-handoff/
