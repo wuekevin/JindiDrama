@@ -347,6 +347,39 @@ test('CMS home and search open the same title and play its explicitly numbered e
   expect(requests.every((url) => url.startsWith(mediaURL + '/catalog-media/'))).toBe(true)
 })
 
+test('CMS detail and playback use the combined bridge and retry without falling back to mixed data', async ({ page }) => {
+  await fixture(page, 'apple-cms')
+  await page.goto('/#/home')
+  await expect(page.getByRole('region', { name: '片源目录' }).getByTestId('drama-card')).toContainText(cmsTitle)
+  await page.evaluate(({ id, title }) => {
+    const app = (window as unknown as { go: { app: { App: Record<string, unknown> } } }).go.app.App
+    const detail = { calls: [] as string[], legacyCalls: [] as string[] }
+    Object.assign(window, { combinedCMSDetail: detail })
+    app.CatalogDrama = async () => { detail.legacyCalls.push('title'); throw new Error('legacy title') }
+    app.CatalogEpisodes = async () => { detail.legacyCalls.push('episodes'); throw new Error('legacy episodes') }
+    app.CatalogDetail = async (requested: string) => {
+      detail.calls.push(requested)
+      if (detail.calls.length === 1) throw new Error('片源暂不可用')
+      return {
+        drama: { id, title, tags: [], summary: '一致的剧目快照', episodeCount: 3, updatedTo: 3 },
+        episodes: [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: index === 3 })),
+      }
+    }
+  }, { id: cmsId, title: cmsTitle })
+  await page.getByRole('region', { name: '片源目录' }).getByTestId('drama-card').click()
+  await expect(page.getByTestId('error')).toBeVisible()
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(cmsTitle)
+  await expect(page.getByRole('button', { name: '第2集' })).toBeDisabled()
+  await page.getByRole('button', { name: '第3集' }).click()
+  await expect.poll(() => durationMs(historyVideo(page, 3))).toBeGreaterThan(10_000)
+  const detail = await page.evaluate(() => (window as unknown as {
+    combinedCMSDetail: { calls: string[]; legacyCalls: string[] }
+  }).combinedCMSDetail)
+  expect(detail).toEqual({ calls: [cmsId, cmsId, cmsId], legacyCalls: [] })
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':3'])
+})
+
 test('empty CMS home keeps the catalog heading and a catalog-specific empty state', async ({ page }) => {
   await fixture(page, 'apple-cms-empty')
   await page.goto('/#/home')

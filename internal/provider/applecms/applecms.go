@@ -58,6 +58,11 @@ type CatalogPage struct {
 	HasMore bool             `json:"hasMore"`
 }
 
+type CatalogDetail struct {
+	Drama    provider.Drama     `json:"drama"`
+	Episodes []provider.Episode `json:"episodes"`
+}
+
 type CatalogGenre struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -235,9 +240,15 @@ func (p *Provider) Drama(ctx context.Context, id string) (provider.Drama, error)
 }
 
 func (p *Provider) Episodes(ctx context.Context, id string) ([]provider.Episode, error) {
+	result, err := p.CatalogDetail(ctx, id)
+	return result.Episodes, err
+}
+
+// CatalogDetail projects the title and episode availability from the same record.
+func (p *Provider) CatalogDetail(ctx context.Context, id string) (CatalogDetail, error) {
 	drama, sources, err := p.detail(ctx, id)
 	if err != nil {
-		return nil, err
+		return CatalogDetail{}, err
 	}
 	episodes := make([]provider.Episode, 0, drama.EpisodeCount)
 	for index := 1; index <= drama.EpisodeCount; index++ {
@@ -245,7 +256,7 @@ func (p *Provider) Episodes(ctx context.Context, id string) ([]provider.Episode,
 			ID: episodeID(id, index), DramaID: id, Index: index, Available: len(sources[index]) > 0,
 		})
 	}
-	return episodes, nil
+	return CatalogDetail{Drama: drama, Episodes: episodes}, nil
 }
 
 func (p *Provider) ResolvePlayback(ctx context.Context, id string, index int) (provider.PlaybackTicket, error) {

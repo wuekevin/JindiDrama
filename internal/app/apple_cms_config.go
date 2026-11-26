@@ -258,6 +258,20 @@ func (a *App) CatalogPage(query string, page int) (applecms.CatalogPage, error) 
 	return result, err
 }
 
+// CatalogDetail uses one Apple CMS response for the title and its episodes.
+func (a *App) CatalogDetail(id string) (applecms.CatalogDetail, error) {
+	ctx := a.context()
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok || cms.Capabilities(ctx)["catalog"] != provider.Ready {
+		return applecms.CatalogDetail{}, provider.ErrNotAuthorized
+	}
+	result, err := cms.CatalogDetail(ctx, id)
+	if err == nil {
+		a.projectCatalogCover(&result.Drama)
+	}
+	return result, err
+}
+
 func (a *App) CatalogGenres() ([]applecms.CatalogGenre, error) {
 	ctx := a.context()
 	cms, ok := a.p.(*applecms.Provider)

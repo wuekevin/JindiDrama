@@ -16,6 +16,9 @@ import (
 
 func TestAppleCMSStartupConfiguration(t *testing.T) {
 	a := New()
+	if _, err := a.CatalogDetail("d1"); !errors.Is(err, provider.ErrNotAuthorized) {
+		t.Fatalf("combined detail without CMS: %v", err)
+	}
 	if err := ConfigureAppleCMS(a, ""); err != nil || a.ProviderName() != "mock" {
 		t.Fatalf("missing configuration: provider=%s, err=%v", a.ProviderName(), err)
 	}
@@ -55,6 +58,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
+	var thirdEpisodeRemoved atomic.Bool
 	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Scheme != "https" {
 			t.Errorf("invalid scheme: %s", req.URL.Scheme)
@@ -72,11 +76,16 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 				(q.Get("wd") != "" && q.Get("wd") != "海岛") {
 				t.Errorf("unexpected CMS request: %s", req.URL)
 			}
-			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{
+			third := "3$https://media.example.test/three.webm?signature=synthetic-media-token#"
+			if thirdEpisodeRemoved.Load() {
+				third = ""
+			}
+			body := `{
 				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4",
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
-				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#3$https://media.example.test/three.webm?signature=synthetic-media-token#4$https://media.example.test/four.m3u8"}]
-			}`))}, nil
+				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]
+			}`
+			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 		case mediaHost:
 			mediaCalls.Add(1)
 			if req.URL.Path == "/four.m3u8" {
@@ -120,6 +129,29 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	if err != nil || len(episodes) != 4 || episodes[0].Available || episodes[1].Available || !episodes[2].Available || !episodes[3].Available {
 		t.Fatalf("episodes: %+v, %v", episodes, err)
 	}
+	beforeDetail := detailCalls.Load()
+	detail, err := a.CatalogDetail(id)
+	if err != nil || detailCalls.Load()-beforeDetail != 1 ||
+		detail.Drama.ID != id || detail.Drama.EpisodeCount != len(detail.Episodes) ||
+		detail.Drama.CoverURL != "" || !strings.HasPrefix(detail.Drama.Cover, "http://127.0.0.1:") {
+		t.Fatalf("combined detail: %+v, %v, %d GETs", detail, err, detailCalls.Load()-beforeDetail)
+	}
+	for index, episode := range detail.Episodes {
+		if episode != episodes[index] {
+			t.Fatalf("combined episode %d differs: %+v", index+1, episode)
+		}
+	}
+	if _, err := a.CatalogDetail("foreign:42"); !errors.Is(err, provider.ErrNotFound) || detailCalls.Load()-beforeDetail != 1 {
+		t.Fatalf("foreign detail: %v, %d GETs", err, detailCalls.Load()-beforeDetail)
+	}
+	thirdEpisodeRemoved.Store(true)
+	removed, err := a.CatalogPlayback(id, 3)
+	if !errors.Is(err, provider.ErrEpisodeUnavailable) || removed.Kind != "" ||
+		removed.LeaseID != "" || len(removed.Sources) != 0 || detailCalls.Load()-beforeDetail != 2 {
+		t.Fatalf("removed episode playback: %+v, %v, %d GETs", removed, err, detailCalls.Load()-beforeDetail)
+	}
+	thirdEpisodeRemoved.Store(false)
+
 	for _, attempt := range []struct {
 		id    string
 		index int
@@ -158,7 +190,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		expiryErr != nil || !expires.After(time.Now()) || time.Until(expires) > 15*time.Minute {
 		t.Fatalf("invalid loopback lease: %+v", ticket)
 	}
-	payload, err := json.Marshal([]any{home, search, drama, episodes, ticket})
+	payload, err := json.Marshal([]any{home, search, drama, episodes, detail, ticket})
 	if err != nil || strings.Contains(string(payload), upstream) || strings.Contains(string(payload), mediaHost) ||
 		strings.Contains(string(payload), "signature") || strings.Contains(string(payload), "synthetic-") {
 		t.Fatalf("binding exposed upstream fields: %s, %v", payload, err)

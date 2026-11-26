@@ -104,6 +104,7 @@ interface GoApp {
   CatalogPage?(query: string, page: number): Promise<CatalogPage>
   CatalogGenres?(): Promise<CatalogGenre[]>
   CatalogGenrePage?(genre: string, page: number): Promise<CatalogPage>
+  CatalogDetail?(id: string): Promise<{ drama: CatalogDrama; episodes: Episode[] }>
   CatalogDrama?(id: string): Promise<CatalogDrama>
   CatalogEpisodes?(id: string): Promise<Episode[]>
   CatalogPlayback?(id: string, episode: number): Promise<PlaybackTicket>
@@ -394,9 +395,13 @@ export function loadProviderDetail(id: string, activeCatalog = false) {
   const app = api()
   if (!app) return
   if (activeCatalog) {
+    const appleCMS = isAppleCMSDramaId(id)
+    if (appleCMS && app.CatalogDetail) {
+      return app.CatalogDetail(id).then(({ drama, episodes }) => [drama, episodes] as const)
+    }
     if (!app.CatalogDrama || !app.CatalogEpisodes) return
     const requests = [app.CatalogDrama(id), app.CatalogEpisodes(id)] as const
-    if (!isAppleCMSDramaId(id)) return Promise.all(requests)
+    if (!appleCMS) return Promise.all(requests)
     // 库页的分批核验需要等到两项请求都结束，才可核验下一部短剧。
     return Promise.allSettled(requests).then(([drama, episodes]) => {
       if (drama.status === 'rejected') throw drama.reason
