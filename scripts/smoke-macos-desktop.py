@@ -114,6 +114,7 @@ def verify_database(profile, probe, output):
 def run_app(executable, helper, database_probe, profile, output, timeout, version, arch):
     env = dict(os.environ, JINDIDRAMA_DATA_DIR=str(profile))
     env.pop("JINDIDRAMA_LICENSED_MEDIA_DIR", None)
+    env.pop("JINDIDRAMA_CMS_URL", None)
     with output.open("ab") as stream:
         process = subprocess.Popen([str(executable)], env=env, stdout=stream, stderr=subprocess.STDOUT)
         try:

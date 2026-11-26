@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 import runpy
 import subprocess
@@ -65,3 +66,27 @@ class DatabaseProbeTests(unittest.TestCase):
                         smoke["verify_database"](profile, probe, output)
                     run.assert_called_once_with(command, check=True, timeout=30,
                                                 stdout=output, stderr=subprocess.STDOUT)
+
+
+class LaunchEnvironmentTests(unittest.TestCase):
+    def test_ignores_operator_sources_without_changing_parent_environment(self):
+        inherited = {
+            "JINDIDRAMA_CMS_URL": "https://cms.example.test/?key=fixture",
+            "JINDIDRAMA_LICENSED_MEDIA_DIR": "/fixture/media",
+            "JINDIDRAMA_DATA_DIR": "/fixture/profile",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            with patch.dict(os.environ, inherited), patch(
+                "subprocess.Popen", side_effect=RuntimeError("stop before startup")
+            ) as launch:
+                with self.assertRaisesRegex(RuntimeError, "stop before startup"):
+                    smoke["run_app"](
+                        profile / "JindiDrama", "window-probe", "db-probe", profile,
+                        profile / "output.log", 5, "v1.2.3", "arm64",
+                    )
+                child = launch.call_args.kwargs["env"]
+                self.assertNotIn("JINDIDRAMA_CMS_URL", child)
+                self.assertNotIn("JINDIDRAMA_LICENSED_MEDIA_DIR", child)
+                self.assertEqual(child["JINDIDRAMA_DATA_DIR"], str(profile))
+                self.assertEqual({key: os.environ[key] for key in inherited}, inherited)

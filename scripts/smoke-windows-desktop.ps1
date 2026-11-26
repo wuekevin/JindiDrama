@@ -130,6 +130,7 @@ try {
     $start.Environment['LOCALAPPDATA'] = $localData
     [void]$start.Environment.Remove('WEBVIEW2_USER_DATA_FOLDER')
     [void]$start.Environment.Remove('JINDIDRAMA_LICENSED_MEDIA_DIR')
+    [void]$start.Environment.Remove('JINDIDRAMA_CMS_URL')
     $app = [Diagnostics.Process]::Start($start)
     $stdout = $app.StandardOutput.ReadToEndAsync()
     $stderr = $app.StandardError.ReadToEndAsync()
