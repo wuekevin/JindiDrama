@@ -597,7 +597,7 @@ test('CMS expiry and a shorter replacement preserve a saved bookmark until the u
   expect(desktop.writes).toEqual([])
 })
 
-async function failWithMediaError(video: ReturnType<typeof historyVideo>, options?: { resetPosition?: boolean; pauseFirst?: boolean }) {
+async function failWithMediaError(video: ReturnType<typeof historyVideo>, options?: { resetPosition?: boolean; pauseFirst?: boolean; volume?: number }) {
   return video.evaluate(async (media: HTMLVideoElement, options) => {
     const probe = document.createElement('video')
     const error = await new Promise<MediaError | null>((resolve) => {
@@ -612,6 +612,7 @@ async function failWithMediaError(video: ReturnType<typeof historyVideo>, option
       media.pause()
       media.dispatchEvent(new Event('pause'))
     }
+    if (options?.volume !== undefined) media.volume = options.volume
     media.dispatchEvent(new Event('error'))
     return checkpoint
   }, options)
@@ -651,6 +652,24 @@ test('CMS media fallback captures the final played position and ignores events f
   await page.getByRole('link', { name: '返回详情' }).click()
   await expect.poll(() => desktop.rows()[0]?.episode).toBe(2)
   expect(desktop.rows()[0].positionMs).toBeGreaterThanOrEqual(9000)
+})
+
+test('CMS native volume carries across a fallback and a manual episode change', async ({ page }) => {
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  // A decoder can fail before the queued volumechange event is delivered.
+  await failWithMediaError(first, { volume: 0.23 })
+  await expect(first).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await expect(first).toHaveJSProperty('volume', 0.23)
+
+  await first.evaluate((media: HTMLVideoElement) => { media.volume = 0 })
+  await page.getByRole('button', { name: '第2集' }).click()
+  const second = historyVideo(page, 2)
+  await expect.poll(() => durationMs(second)).toBeGreaterThan(1000)
+  await expect(second).toHaveJSProperty('volume', 0)
 })
 
 test('CMS media fallback keeps the sampled bookmark when a failed decoder resets time', async ({ page }) => {
@@ -727,12 +746,18 @@ test('CMS continuous play saves completion and decodes the adjacent episode thro
   expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
   desktop.catalog.format = 'webm'
   const completedDuration = await durationMs(first)
+  await first.evaluate((media: HTMLVideoElement) => {
+    media.volume = 0.41
+    media.muted = true
+  })
   await playHistoryVideo(first)
 
   await expect(page).toHaveURL(/\/play\/2$/)
   const second = historyVideo(page, 2)
   await expect(second).toHaveAttribute('src', secondPrefix + '1')
   await expect.poll(() => second.evaluate((media: HTMLVideoElement) => media.videoWidth)).toBeGreaterThan(0)
+  await expect(second).toHaveJSProperty('volume', 0.41)
+  await expect(second).toHaveJSProperty('muted', true)
   await expect.poll(() => position(second)).toBeGreaterThan(0.1)
   await expect.poll(() => desktop.rows()[0]).toMatchObject({
     dramaId: cmsId, episode: 1, percent: 100, positionMs: completedDuration,

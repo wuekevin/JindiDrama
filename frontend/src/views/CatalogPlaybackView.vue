@@ -10,7 +10,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
-import { playbackEndAction } from '@/player/preferences'
+import { normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
@@ -68,6 +68,7 @@ type MediaHistory = {
 type Advance = { fromGeneration: number; path: string; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
+let volumeMedia: HTMLVideoElement | undefined
 let nextEpisode: Advance | undefined
 const autoStart = shallowRef<Advance>()
 let manualNavigation: ReturnType<typeof router.push> | undefined
@@ -229,7 +230,10 @@ function onEnded(event: Event) {
   }
 }
 
-function saveOnExit() { saveProgress(true) }
+function saveOnExit() {
+  syncVolume()
+  saveProgress(true)
+}
 
 function onWindowClose() {
   if (closing) return
@@ -254,6 +258,8 @@ function selectEpisode(index: number) {
 }
 
 function stopMedia(failed = false) {
+  syncVolume()
+  volumeMedia = undefined
   saveProgress(true, failed)
   mediaHistory = undefined
   const player = hls
@@ -402,10 +408,12 @@ function mediaError(event: Event) {
 
 watch([video, source], async ([media, choice]) => {
   if (!media || !choice || state.value !== 'ready') return
+  media.volume = settings.volume / 100
   const current = generation
   const path = route.path
   if (watchTarget) {
     const target = watchTarget
+    volumeMedia = media
     const checkpoint = library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
     mediaHistory = {
       generation: current, path, target, media, source: choice, checkpoint,
@@ -445,9 +453,18 @@ watch([video, source], async ([media, choice]) => {
 
 function applyPreferences(event: Event) {
   if (event.currentTarget !== video.value || !video.value) return
-  video.value.volume = settings.volume / 100
   video.value.playbackRate = settings.speed
   onPlayable(event)
+}
+
+function syncVolume() {
+  if (!volumeMedia || Date.now() >= expiresAt) return
+  const volume = normalizePlaybackVolume(volumeMedia.volume * 100)
+  if (volume !== settings.volume) settings.volume = volume
+}
+
+function onVolumeChange(event: Event) {
+  if (event.currentTarget === volumeMedia) syncVolume()
 }
 
 watch(() => route.path, load, { immediate: true })
@@ -479,7 +496,7 @@ onBeforeUnmount(() => {
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences"
         @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
-        @playing="onPlaying" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
+        @playing="onPlaying" @volumechange="onVolumeChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
     </div>
     <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
