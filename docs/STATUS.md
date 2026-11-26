@@ -577,3 +577,9 @@
 - Chromium 验证分类请求、筛选、卡片跳转、失效响应以及分类故障。对照详情设计稿复核选集下方的推荐布局。1448×1086 默认窗口和 1280×860、220% 缩放均核对卡片显示。[默认截图](../build/bin/qa-cms-related-dramas/cms-related-default.png) · [220% 截图](../build/bin/qa-cms-related-dramas/cms-related-220.png)
 - Apple Silicon 使用应用内 WKWebView 与本机合成接口实际查询分类、筛掉不可播条目并打开同类剧目。正常退出后 SQLite 完整性为 `ok`，观看历史仍为空。
 - 前端类型检查、生产构建、122 项 Vitest、81 项详情及播放 Playwright、Go vet、Go 全量、App 和 Provider 竞态测试与 Windows x64 生产交叉编译通过。真实授权公网片源和新批次 Windows 原生仍待验收。[BMad 记录](../_bmad-output/plan-e03-cms-related-dramas.md)
+
+## E13 Windows 更新包保存目录身份校验（2026-11-27）
+
+- Windows 从创建私有暂存目录到发布及清理均通过打开的目录句柄执行。发布前后核对用户选择的路径是否仍指向原目录。写入前发现变化时取消并清理。如果写入后才发现变化，会提示在原目录查找。独占重命名保留同名文件，下载来源标记随已验证的安装包保存。[Microsoft 文件重命名接口](https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_rename_information)
+- 本机通过 Go vet、Go 全量、App 和更新模块竞态测试及 macOS 保存、取消、目录变化和来源标记专项。磁盘空间不足曾中断并行构建，清理临时副本后逐个复验通过。
+- Windows App 代码静态检查、原生测试程序及 x64 生产程序交叉编译通过。下一次 Windows CI 将执行目录改向、下载过程中同名文件出现以及来源标记用例。[BMad 记录](../_bmad-output/plan-e13-windows-update-destination.md)

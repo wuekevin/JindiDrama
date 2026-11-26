@@ -55,3 +55,14 @@ func TestSaveUpdateOnlyPublishesVerifiedFile(t *testing.T) {
 		t.Fatalf("existing file was modified: %q %v", b, err)
 	}
 }
+
+func TestUpdateReportsDestinationChangedDuringPublication(t *testing.T) {
+	matches := true
+	err := publishInUpdateDestination(func() bool { return matches }, func() error {
+		matches = false
+		return nil
+	})
+	if !errors.Is(err, errUpdateDestinationMovedAfterPublish) {
+		t.Fatalf("published to original directory after selected path changed: %v", err)
+	}
+}

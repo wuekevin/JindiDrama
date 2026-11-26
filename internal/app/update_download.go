@@ -131,3 +131,18 @@ func saveUpdate(ctx context.Context, path string, download func(context.Context,
 	}
 	return true, nil
 }
+
+func publishInUpdateDestination(matches func() bool, publish func() error) error {
+	if !matches() {
+		return errUpdateDestinationMoved
+	}
+	if err := publish(); err != nil {
+		return err
+	}
+	// The descriptor pins publication to the original directory. If its
+	// path changed during the rename, tell the caller where the file went.
+	if !matches() {
+		return errUpdateDestinationMovedAfterPublish
+	}
+	return nil
+}
