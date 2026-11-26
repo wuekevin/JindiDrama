@@ -21,6 +21,7 @@ import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-co
 
 const hlsType = 'application/vnd.apple.mpegurl'
 const cmsRateLimitError = '苹果 CMS 请求过于频繁，请稍后重试'
+const playbackStallTimeout = 20_000
 
 const route = useRoute()
 const router = useRouter()
@@ -45,6 +46,7 @@ let generation = 0
 let playbackPath = ''
 let expiresAt = 0
 let expiryTimer: number | undefined
+let stallTimer: number | undefined
 let activeLease: string | undefined
 let hls: Hls | undefined
 
@@ -64,6 +66,7 @@ type MediaHistory = {
   terminalSeek?: boolean
   startedAt?: number
   lastPosition: number
+  observedPosition?: number
   progress?: Progress
   saved?: Progress
 }
@@ -146,6 +149,7 @@ function onPlaying(event: Event) {
   }
   autoStart.value = undefined
   playbackNotice.value = ''
+  watchPlaybackProgress(current)
   current.endHandled = false
   if (current.startedAt === undefined) {
     current.startedAt = current.media.currentTime
@@ -158,6 +162,7 @@ function onSeeking(event: Event) {
   if (!current) return
   const { currentTime, duration } = current.media
   current.terminalSeek = Number.isFinite(duration) && duration > 0 && currentTime >= duration
+  watchPlaybackProgress(current)
 }
 
 function onSeeked(event: Event) {
@@ -207,7 +212,36 @@ function saveProgress(force: boolean, failed = false) {
 }
 
 function onProgress(event: Event) {
-  if (!closing && currentHistory(event)) saveProgress(event.type !== 'timeupdate')
+  const current = currentHistory(event)
+  if (!closing && current) {
+    watchPlaybackProgress(current)
+    saveProgress(event.type !== 'timeupdate')
+  }
+}
+
+function onPlay(event: Event) {
+  const current = currentHistory(event)
+  if (current) watchPlaybackProgress(current)
+}
+
+function watchPlaybackProgress(current: MediaHistory) {
+  const { media } = current
+  if (closing || media.paused || media.ended) {
+    clearTimeout(stallTimer)
+    stallTimer = undefined
+    return
+  }
+  const position = media.currentTime
+  if (stallTimer !== undefined && current.observedPosition === position) return
+  clearTimeout(stallTimer)
+  current.observedPosition = position
+  // Some native decoders keep requesting a failed range without reporting a media error.
+  stallTimer = window.setTimeout(() => {
+    stallTimer = undefined
+    if (!isCurrentHistory(current) || closing || media.paused || media.ended) return
+    if (media.currentTime !== position) watchPlaybackProgress(current)
+    else failMedia(media, current.source)
+  }, playbackStallTimeout)
 }
 
 function onEnded(event: Event) {
@@ -262,6 +296,8 @@ function selectEpisode(index: number) {
 }
 
 function stopMedia(failed = false) {
+  clearTimeout(stallTimer)
+  stallTimer = undefined
   syncMediaPreferences()
   preferenceMedia = undefined
   saveProgress(true, failed)
@@ -519,7 +555,7 @@ onBeforeUnmount(() => {
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
         :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="onLoadedMetadata"
         @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeking="onSeeking" @seeked="onSeeked"
-        @playing="onPlaying" @volumechange="onMediaPreferenceChange" @ratechange="onMediaPreferenceChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
+        @play="onPlay" @playing="onPlaying" @volumechange="onMediaPreferenceChange" @ratechange="onMediaPreferenceChange" @timeupdate="onProgress" @pause="onProgress" @ended="onEnded" />
     </div>
     <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">

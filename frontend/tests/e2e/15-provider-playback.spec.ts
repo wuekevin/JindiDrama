@@ -856,6 +856,38 @@ test('CMS native volume carries across a fallback and a manual episode change', 
   await expect(second).toHaveJSProperty('volume', 0)
 })
 
+test('CMS stalled playback switches sources even when the media element emits no error', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.setTimeout = new Proxy(window.setTimeout, {
+      apply(schedule, browser, args) {
+        if (args[1] === 20000) args[1] = 950
+        return Reflect.apply(schedule, browser, args)
+      },
+    })
+  })
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  await playHistoryVideo(video)
+  await video.evaluate((media: HTMLVideoElement) => {
+    media.pause()
+    media.currentTime = 4
+  })
+  await expect.poll(() => position(video)).toBeCloseTo(4, 2)
+  await page.waitForTimeout(1050)
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await playHistoryVideo(video)
+  const checkpoint = await video.evaluate((media: HTMLVideoElement) => {
+    const frozen = media.currentTime
+    Object.defineProperty(media, 'currentTime', { get: () => frozen })
+    return frozen
+  })
+  await expect(video).toHaveAttribute('src', /\/1$/)
+  await expect(video).toHaveJSProperty('paused', false)
+  await expect.poll(() => position(video)).toBeGreaterThan(checkpoint + 0.15)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+})
+
 test('CMS shares supported native rates across a fallback and a manual episode change', async ({ page }) => {
   await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
