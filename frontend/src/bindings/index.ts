@@ -1,3 +1,4 @@
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { localId } from '@/localId'
 import { loadRecoverableComments, restoreLegacyCommentBackup, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
@@ -353,7 +354,17 @@ export const loadProviderEpisodes = (id: string) => api()?.Episodes(id)
 export function loadProviderDetail(id: string, activeCatalog = false) {
   const app = api()
   if (!app) return
-  if (activeCatalog) return app.CatalogDrama && app.CatalogEpisodes ? Promise.all([app.CatalogDrama(id), app.CatalogEpisodes(id)]) : undefined
+  if (activeCatalog) {
+    if (!app.CatalogDrama || !app.CatalogEpisodes) return
+    const requests = [app.CatalogDrama(id), app.CatalogEpisodes(id)] as const
+    if (!isAppleCMSDramaId(id)) return Promise.all(requests)
+    // 库页的分批核验需要等到两项请求都结束，才可核验下一部短剧。
+    return Promise.allSettled(requests).then(([drama, episodes]) => {
+      if (drama.status === 'rejected') throw drama.reason
+      if (episodes.status === 'rejected') throw episodes.reason
+      return [drama.value, episodes.value] as const
+    })
+  }
   return Promise.all([app.Drama(id), app.Episodes(id)])
 }
 export const resolvePlayback = (dramaId: string, episode: number) => api()?.ResolvePlayback(dramaId, episode)

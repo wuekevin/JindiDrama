@@ -11,9 +11,17 @@ type HistoryRow = {
   dramaId: string; episode: number; percent: number; watchedAt: number
   positionMs: number; durationMs: number; episodeCountAtWatch: number
 }
+type LibraryChanges = {
+  favorites?: string[]
+  addedFavorites?: string[]
+  removedFavorites?: string[]
+  favoriteOrder?: string[]
+  history: HistoryRow[]
+  removed: string[]
+}
 type CatalogState = {
   id: string; provider: string; available: number[]
-  format: 'webm' | 'hls'; expired?: boolean; offline?: boolean
+  format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
 const mediaURL = 'http://127.0.0.1:45671'
 const hlsType = 'application/vnd.apple.mpegurl'
@@ -23,16 +31,17 @@ const samples = {
   mp4: fs.readFileSync(new URL('../../public/demo/demo-1.mp4', import.meta.url)),
 }
 
-async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry' | 'expires-live' | 'protected' | 'direct-url' | 'apple-cms' | 'apple-cms-empty' | 'apple-cms-hls' | 'apple-cms-hls-fallback' | 'apple-cms-hls-expires' | 'apple-cms-history') {
+async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry' | 'expires-live' | 'protected' | 'direct-url' | 'apple-cms' | 'apple-cms-empty' | 'apple-cms-hls' | 'apple-cms-hls-fallback' | 'apple-cms-hls-expires' | 'apple-cms-library') {
   await page.addInitScript(({ id, mediaURL, mode, cmsTitle, hlsType }) => {
     const cms = mode.startsWith('apple-cms')
     const hls = mode.startsWith('apple-cms-hls')
-    const historyFixture = mode === 'apple-cms-history'
+    const libraryFixture = mode === 'apple-cms-library'
     const desktop = window as unknown as {
-      readDesktopCatalog(): Promise<CatalogState & { history: HistoryRow[] }>
-      saveDesktopCatalog(changes: { history: HistoryRow[]; removed: string[] }): Promise<{ favorites: string[]; history: HistoryRow[] }>
+      readDesktopCatalog(): Promise<CatalogState & { history: HistoryRow[]; favorites: string[] }>
+      saveDesktopCatalog(changes: LibraryChanges): Promise<{ favorites: string[]; history: HistoryRow[] }>
+      waitForCMSDetails(): Promise<void>
     }
-    if (hls || historyFixture) {
+    if (hls || libraryFixture) {
       // Chromium on macOS can use the system HLS decoder. Exercise MSE here.
       const canPlayType = HTMLMediaElement.prototype.canPlayType
       HTMLMediaElement.prototype.canPlayType = function (type) {
@@ -53,26 +62,32 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     }
     const events = new Map<string, (attempt: string) => void>()
     const lookups: string[] = []
+    let activeLookups = 0
     const closeReplies: { id: string; unconfirmed: boolean }[] = []
     const testState = {
-      calls, released, revoked, lookups, closeReplies, release: () => {},
+      calls, released, revoked, lookups, closeReplies, peakLookups: 0, providerReads: 0, release: () => {},
       close: () => events.get('jindi-before-window-close')?.('close-1'),
       hide: () => events.get('jindi-before-window-hide')?.(''),
       cancelClose: () => events.get('jindi-window-close-canceled')?.('close-1'),
     }
-    if (historyFixture) {
+    if (libraryFixture) {
       Object.assign(window, { runtime: {
         EventsOn: (name: string, handler: (attempt: string) => void) => events.set(name, handler),
         EventsEmit: (_: string, id: string, unconfirmed: boolean) => closeReplies.push({ id, unconfirmed }),
       } })
     }
     Object.assign(window, { catalogTest: testState, go: { app: { App: {
-      StorageReady: async () => historyFixture,
-      Favorites: async () => [],
+      StorageReady: async () => libraryFixture,
+      Favorites: async () => libraryFixture ? (await desktop.readDesktopCatalog()).favorites : [],
       History: async () => (await desktop.readDesktopCatalog()).history,
       SearchHistory: async () => [],
       GetSetting: async (key: string) => key === 'app' ? '{"startPage":"上次观看"}' : '',
-      ProviderName: async () => historyFixture ? (await desktop.readDesktopCatalog()).provider : cms ? 'apple-cms' : 'authorized-fixture',
+      ProviderName: async () => {
+        if (!libraryFixture) return cms ? 'apple-cms' : 'authorized-fixture'
+        const { provider } = await desktop.readDesktopCatalog()
+        testState.providerReads++
+        return provider
+      },
       Home: async () => mode === 'apple-cms-empty' ? [] : [drama],
       HomeFeed: async () => ({ catalogLabel: cms ? '片源目录' : undefined, todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
       CatalogSearch: async (query: string) => query === '海岛' ? [drama] : [],
@@ -83,15 +98,23 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       }),
       Capabilities: async () => ({ catalog: 'ready', search: 'ready', playback: mode === 'blocked' ? 'not_authorized' : 'ready' }),
       CatalogDrama: async (requestedId: string) => {
-        if (!historyFixture) return drama
+        if (!libraryFixture) return drama
         lookups.push(requestedId)
-        const catalog = await desktop.readDesktopCatalog()
-        if (catalog.offline) throw new Error('unavailable')
-        if (catalog.id !== requestedId) throw 'provider: 未找到'
-        return { ...drama, id: requestedId, updatedTo: Math.max(0, ...catalog.available) }
+        activeLookups++
+        testState.peakLookups = Math.max(testState.peakLookups, activeLookups)
+        try {
+          const catalog = await desktop.readDesktopCatalog()
+          if (catalog.holdDetail) await desktop.waitForCMSDetails()
+          if (catalog.detailDelayMs) await new Promise((resolve) => setTimeout(resolve, catalog.detailDelayMs))
+          if (catalog.offline) throw new Error('unavailable')
+          if (catalog.id !== requestedId) throw 'provider: 未找到'
+          return { ...drama, id: requestedId, cover: catalog.cover, updatedTo: Math.max(0, ...catalog.available) }
+        } finally {
+          activeLookups--
+        }
       },
       CatalogEpisodes: async (requestedId: string) => {
-        if (!historyFixture) return [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms && !hls ? index === 3 : index < 3 }))
+        if (!libraryFixture) return [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms && !hls ? index === 3 : index < 3 }))
         const catalog = await desktop.readDesktopCatalog()
         if (catalog.id !== requestedId) throw 'provider: 未找到'
         return [1, 2, 3].map((index) => ({
@@ -103,10 +126,10 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
         const sequence = ++attempt
         const leaseId = String.fromCharCode(64 + index) + String.fromCharCode(64 + sequence).repeat(25)
         if (mode === 'stale' && index === 1) await new Promise<void>((resolve) => { testState.release = resolve })
-        const catalog = historyFixture ? await desktop.readDesktopCatalog() : undefined
+        const catalog = libraryFixture ? await desktop.readDesktopCatalog() : undefined
         const expiresAt = (mode === 'retry' && sequence === 1) || catalog?.expired ? '2001-01-01T00:00:00Z'
           : new Date(Date.now() + (mode === 'apple-cms-hls-expires' ? 4_000 : mode === 'expires-live' ? 3_000 : 120_000)).toISOString()
-        const format = !historyFixture && index === 2 ? 'mp4' : 'webm'
+        const format = !libraryFixture && index === 2 ? 'mp4' : 'webm'
         const path = mediaURL + '/catalog-media/' + leaseId
         const src = mode === 'direct-url' ? 'https://media.example.test/one.webm?upstream-secret=opaque-test' : path + '/0'
         const sources = [{ src, type: 'video/' + format }]
@@ -115,14 +138,14 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
           if (mode !== 'apple-cms-hls') sources.push({ src: path + '/1', type: 'video/webm' })
         }
         if (catalog?.format === 'hls') sources[0] = { src: path + '/0.m3u8', type: hlsType }
-        if (mode === 'expires-live' || historyFixture && catalog?.format === 'webm') sources.push({ src: path + '/1', type: 'video/webm' })
+        if (mode === 'expires-live' || libraryFixture && catalog?.format === 'webm') sources.push({ src: path + '/1', type: 'video/webm' })
         return { kind: 'authorized', episodeId: 'episode-' + index, expiresAt, leaseId, sources,
           restrictions: mode === 'protected' ? ['no-download'] : [] }
       },
       ReleaseCatalogPlayback: async (leaseId: string) => { released.push(leaseId) },
       ResolvePlayback: async () => { calls.push('legacy') },
-      SaveLibraryChanges: async (changes: { history: HistoryRow[]; removed: string[] }) => {
-        if (historyFixture) return desktop.saveDesktopCatalog(changes)
+      SaveLibraryChanges: async (changes: LibraryChanges) => {
+        if (libraryFixture) return desktop.saveDesktopCatalog(changes)
         calls.push('library')
       },
     } } } })
@@ -133,7 +156,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     const requestURL = interception.request().url()
     requests.push(requestURL)
     const path = new URL(requestURL).pathname
-    if ((mode.startsWith('apple-cms-hls') || mode === 'apple-cms-history') && (path.endsWith('.m3u8') || path.includes('/hls/'))) {
+    if ((mode.startsWith('apple-cms-hls') || mode === 'apple-cms-library') && (path.endsWith('.m3u8') || path.includes('/hls/'))) {
       const origin = interception.request().headers()['origin']
       const headers: Record<string, string> = origin ? { 'access-control-allow-origin': origin } : {}
       if (mode === 'apple-cms-hls-fallback') {
@@ -149,7 +172,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       }
       return
     }
-    const format = mode !== 'apple-cms-history' && path.startsWith('/catalog-media/B') ? 'mp4' : 'webm'
+    const format = mode !== 'apple-cms-library' && path.startsWith('/catalog-media/B') ? 'mp4' : 'webm'
     const sample = samples[format]
     const range = /^bytes=(\d+)-(\d*)$/.exec(interception.request().headers()['range'] ?? '')
     const headers = { 'content-type': 'video/' + format, 'accept-ranges': 'bytes' }
@@ -171,6 +194,8 @@ const revoked = (page: Page) => page.evaluate(() => (window as Window & { catalo
 test('authorized Provider detail opens actual playback, with pause and seek', async ({ page }, testInfo) => {
   const requests = await fixture(page, 'ready')
   await page.goto(route)
+  await expect(page.getByRole('heading', { name: '远海来信' })).toBeVisible()
+  await expect(page.getByTestId('fav')).toHaveCount(0)
   await expect(page.getByTestId('ep').last()).toBeDisabled()
   await page.getByTestId('catalog-watch-now').click()
   await expect(page).toHaveURL(/\/play\/1$/)
@@ -392,19 +417,28 @@ test('switching episodes while hls.js loads discards the earlier stream', async 
   }
 })
 
-async function cmsHistoryFixture(page: Page, initial: HistoryRow[] = []) {
+async function cmsLibraryFixture(page: Page, initial: HistoryRow[] = [], initialFavorites: string[] = []) {
   const catalog: CatalogState = { id: cmsId, provider: 'apple-cms', available: [1, 2, 3], format: 'webm' }
   let history = initial
+  let favorites = initialFavorites
   const writes: HistoryRow[][] = []
-  await page.exposeFunction('readDesktopCatalog', () => ({ ...catalog, history }))
-  await page.exposeFunction('saveDesktopCatalog', (changes: { history: HistoryRow[]; removed: string[] }) => {
+  await page.exposeFunction('readDesktopCatalog', () => ({ ...catalog, history, favorites }))
+  await page.exposeFunction('saveDesktopCatalog', (changes: LibraryChanges) => {
     const ids = new Set([...changes.removed, ...changes.history.map(({ dramaId }) => dramaId)])
     history = [...changes.history, ...history.filter(({ dramaId }) => !ids.has(dramaId))]
     writes.push(changes.history)
-    return { favorites: [], history }
+    const removed = new Set(changes.removedFavorites)
+    favorites = changes.favorites ?? [
+      ...(changes.addedFavorites ?? []), ...favorites.filter((id) => !removed.has(id)),
+    ]
+    if (changes.favoriteOrder) {
+      const positions = new Map(changes.favoriteOrder.map((id, index) => [id, index]))
+      favorites.sort((a, b) => (positions.get(a) ?? Infinity) - (positions.get(b) ?? Infinity))
+    }
+    return { favorites, history }
   })
-  const requests = await fixture(page, 'apple-cms-history')
-  return { catalog, writes, requests, rows: () => history }
+  const requests = await fixture(page, 'apple-cms-library')
+  return { catalog, writes, requests, rows: () => history, favorites: () => favorites }
 }
 
 const historyVideo = (page: Page, episode: number) => page.getByLabel('第' + episode + '集视频')
@@ -423,7 +457,7 @@ async function playHistoryVideo(video: ReturnType<typeof historyVideo>) {
 }
 
 test('CMS bookmark persists through detail, history, refresh and the normal window-close handshake', async ({ page }, testInfo) => {
-  const desktop = await cmsHistoryFixture(page)
+  const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/2')
   const video = historyVideo(page, 2)
   await playHistoryVideo(video)
@@ -486,7 +520,7 @@ test('CMS bookmark persists through detail, history, refresh and the normal wind
 })
 
 test('CMS before-hide runtime event checkpoints sub-five-second playback without pausing', async ({ page }) => {
-  const desktop = await cmsHistoryFixture(page)
+  const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
   const video = historyVideo(page, 1)
   await playHistoryVideo(video)
@@ -511,7 +545,7 @@ test('CMS expiry and a shorter replacement preserve a saved bookmark until the u
   const bookmark: HistoryRow = {
     dramaId: cmsId, episode: 1, positionMs: 5000, percent: 20, durationMs: 24000, episodeCountAtWatch: 3, watchedAt: Date.now(),
   }
-  const desktop = await cmsHistoryFixture(page, [bookmark])
+  const desktop = await cmsLibraryFixture(page, [bookmark])
   desktop.catalog.expired = true
   await page.goto(cmsRoute + '/play/1')
   await expect(page.getByTestId('error')).toContainText('无法取得可用的播放源')
@@ -546,7 +580,7 @@ async function failWithMediaError(video: ReturnType<typeof historyVideo>, resetP
 }
 
 test('CMS media fallback captures the final played position and ignores events from old media', async ({ page }) => {
-  const desktop = await cmsHistoryFixture(page)
+  const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
   const first = historyVideo(page, 1)
   // The error handler must capture a real played position even without an earlier timeupdate sample.
@@ -582,7 +616,7 @@ test('CMS media fallback captures the final played position and ignores events f
 })
 
 test('CMS media fallback keeps the sampled bookmark when a failed decoder resets time', async ({ page }) => {
-  const desktop = await cmsHistoryFixture(page)
+  const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
   const video = historyVideo(page, 1)
   await playHistoryVideo(video)
@@ -598,7 +632,7 @@ test('CMS media fallback keeps the sampled bookmark when a failed decoder resets
 })
 
 test('CMS completion survives a paused scrub and only offers an available next episode', async ({ page }) => {
-  const desktop = await cmsHistoryFixture(page)
+  const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
   const video = historyVideo(page, 1)
   await playHistoryVideo(video)
@@ -645,7 +679,7 @@ test('CMS history remains manageable offline and after a source or episode chang
   const row = (dramaId: string, episode: number): HistoryRow => ({
     dramaId, episode, positionMs: 5000, percent: 20, durationMs: 24000, episodeCountAtWatch: 3, watchedAt: Date.now(),
   })
-  const desktop = await cmsHistoryFixture(page, [row(cmsId, 2), row(obsolete, 1)])
+  const desktop = await cmsLibraryFixture(page, [row(cmsId, 2), row(obsolete, 1)])
   desktop.catalog.provider = 'authorized-fixture'
   await page.goto('/#/history')
   const rows = page.getByTestId('history-item')
@@ -693,7 +727,7 @@ test('CMS history checks a bounded batch before offering to check older records'
     episode: 1, positionMs: 5000, percent: 20, durationMs: 24000, episodeCountAtWatch: 3,
     watchedAt: now - index,
   }))
-  await cmsHistoryFixture(page, records)
+  await cmsLibraryFixture(page, records)
   await page.goto('/#/history')
   const loadMore = page.getByRole('button', { name: '核验更多片源记录' })
   const lookups = () => page.evaluate(() => (window as unknown as { catalogTest: { lookups: string[] } }).catalogTest.lookups)
@@ -703,4 +737,239 @@ test('CMS history checks a bounded batch before offering to check older records'
   await loadMore.click()
   await expect(loadMore).toBeEnabled()
   expect(await lookups()).toEqual(records.slice(0, 24).map(({ dramaId }) => dramaId))
+})
+
+test('CMS favorites persist through refresh and use the earliest available episode and then the saved episode', async ({ page }, testInfo) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.available = [3]
+  const cover = mediaURL + '/catalog-cover/' + '1'.repeat(32)
+  desktop.catalog.cover = cover
+  await page.route(cover, (route) => route.fulfill({ status: 410 }))
+
+  await page.goto(cmsRoute)
+  const favorite = page.getByTestId('fav')
+  await expect(favorite).toHaveAttribute('aria-pressed', 'false')
+  await favorite.click()
+  await expect(favorite).toHaveText('已收藏')
+  await expect(favorite).toHaveAttribute('aria-pressed', 'true')
+  await expect.poll(desktop.favorites).toEqual([cmsId])
+
+  await page.getByTestId('nav-favorites').click()
+  await expect(page).toHaveURL(/\/favorites$/)
+  const card = page.getByTestId('fav-card')
+  await expect(card).toContainText(cmsTitle)
+  await page.reload()
+  await expect(card).toContainText(cmsTitle)
+  const image = card.getByRole('img', { name: cmsTitle })
+  await expect(image).toHaveAttribute('crossorigin', 'anonymous')
+  await expect(image).toHaveAttribute('src', /^data:image\/svg\+xml/)
+  await page.screenshot({ path: testInfo.outputPath('apple-cms-favorites.png') })
+  await card.getByTestId('fav-play').click()
+  await expect(page).toHaveURL(/\/play\/3$/)
+  const video = historyVideo(page, 3)
+  await playHistoryVideo(video)
+  await video.evaluate((media: HTMLVideoElement) => {
+    media.pause()
+    media.currentTime = 5
+  })
+  await expect.poll(() => desktop.rows()[0]).toMatchObject({ episode: 3, positionMs: 5000 })
+  desktop.catalog.available = [2, 3]
+
+  await page.getByTestId('nav-favorites').click()
+  await expect(card.getByTestId('fav-play')).toHaveText('继续观看')
+  await card.getByTestId('fav-play').click()
+  await expect(page).toHaveURL(/\/play\/3$/)
+  await expect.poll(() => position(video)).toBeCloseTo(5, 2)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':3', 'catalog:' + cmsId + ':3'])
+
+  desktop.catalog.available = [2]
+  await page.getByTestId('nav-favorites').click()
+  await expect(card).toContainText('上次观看的分集不可用')
+  await card.getByRole('button', { name: '选集' }).click()
+  await expect(page).toHaveURL(/\/catalog\/[^/]+$/)
+  await expect(page.getByRole('heading', { name: cmsTitle })).toBeVisible()
+  await expect(page.getByTestId('catalog-continue')).toHaveCount(0)
+  expect(await calls(page)).toHaveLength(2)
+})
+
+test('CMS detail can toggle favorites while playback is unavailable', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.available = []
+  await page.goto(cmsRoute)
+  const favorite = page.getByTestId('fav')
+  await expect(page.getByText('当前剧目播放暂不可用。')).toBeVisible()
+  await expect(page.getByTestId('catalog-watch-now')).toHaveCount(0)
+  await favorite.click()
+  await expect.poll(desktop.favorites).toEqual([cmsId])
+  await page.getByTestId('nav-favorites').click()
+  const card = page.getByTestId('fav-card')
+  await expect(card).toContainText('当前剧目播放暂不可用')
+  await card.getByRole('button', { name: '查看详情' }).click()
+  await expect(favorite).toHaveText('已收藏')
+  await favorite.click()
+  await expect.poll(desktop.favorites).toEqual([])
+  await expect(favorite).toHaveText('收藏')
+  expect(await calls(page)).toEqual([])
+})
+
+const cmsFavoriteReference = (id: string) => id.split(':').slice(1).join(':')
+const cmsFavoriteLabel = (id: string) => '苹果 CMS 短剧 · ' + cmsFavoriteReference(id)
+
+async function holdCMSDetails(page: Page, catalog: CatalogState) {
+  let release!: () => void
+  const pending = new Promise<void>((resolve) => { release = resolve })
+  await page.exposeFunction('waitForCMSDetails', () => pending)
+  catalog.holdDetail = true
+  return release
+}
+
+test('CMS favorites stay removable when the source is disabled, switched, or the title disappears', async ({ page }) => {
+  const obsolete = 'apple-cms:ffffffffffffffffffffffffffffffff:90071992547409931234'
+  const other = 'apple-cms:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee:90071992547409931234'
+  const desktop = await cmsLibraryFixture(page, [], [cmsId, obsolete, other])
+  desktop.catalog.provider = 'authorized-fixture'
+  await page.goto('/#/favorites')
+  const cards = page.getByTestId('fav-card')
+  const unavailable = cards.filter({ hasText: '当前片源不可用' })
+  await expect(unavailable).toHaveCount(3)
+  const reads = () => page.evaluate(() => (window as unknown as { catalogTest: { lookups: string[] } }).catalogTest.lookups)
+  expect(await reads()).toEqual([])
+  await expect(page.getByTestId('fav-play')).toHaveCount(0)
+  const chosen = unavailable.filter({ hasText: cmsFavoriteReference(other) })
+  const retained = unavailable.filter({ hasText: cmsFavoriteReference(obsolete) })
+  const choose = chosen.getByRole('button', { name: cmsFavoriteLabel(other), exact: true })
+  await expect(choose).toBeDisabled()
+  await chosen.getByTestId('fav-more').click()
+  await expect(chosen.getByRole('button', { name: '查看详情' })).toHaveCount(0)
+  await page.getByTestId('batch-toggle').click()
+  await choose.click()
+  await expect(choose).toHaveAttribute('aria-pressed', 'true')
+  await expect(retained.getByRole('button', { name: cmsFavoriteLabel(obsolete), exact: true })).toHaveAttribute('aria-pressed', 'false')
+  await page.getByTestId('batch-unfav').click()
+  await page.getByRole('button', { name: '确认取消' }).click()
+  await expect.poll(desktop.favorites).toEqual([cmsId, obsolete])
+
+  desktop.catalog.provider = 'apple-cms'
+  desktop.catalog.id = obsolete
+  await page.reload()
+  await expect(cards.filter({ hasText: cmsTitle })).toBeVisible()
+  await expect(unavailable).toHaveCount(1)
+  await expect(unavailable.getByTestId('fav-play')).toHaveCount(0)
+  await unavailable.getByTestId('fav-unfav').click()
+  await expect.poll(desktop.favorites).toEqual([obsolete])
+
+  desktop.catalog.id = cmsId
+  await page.reload()
+  await expect(unavailable).toHaveCount(1)
+  await expect(page.getByTestId('fav-play')).toHaveCount(0)
+  await page.getByTestId('batch-toggle').click()
+  await unavailable.getByRole('button', { name: cmsFavoriteLabel(obsolete), exact: true }).click()
+  await page.getByTestId('batch-unfav').click()
+  await page.getByRole('button', { name: '确认取消' }).click()
+  await expect.poll(desktop.favorites).toEqual([])
+  await page.reload()
+  await expect(cards).toHaveCount(0)
+  expect(await calls(page)).toEqual([])
+})
+
+test('CMS favorites check the latest twelve and leave unchecked cards selectable', async ({ page }) => {
+  const favorites = Array.from({ length: 25 }, (_, index) =>
+    'apple-cms:0123456789abcdef0123456789abcdef:' + (index + 1),
+  )
+  const desktop = await cmsLibraryFixture(page, [], favorites)
+  desktop.catalog.detailDelayMs = 250
+  await page.goto('/#/favorites')
+  const cards = page.getByTestId('fav-card')
+  const loadMore = page.getByRole('button', { name: '核验更多片源收藏' })
+  const reads = () => page.evaluate(() => (window as unknown as { catalogTest: { lookups: string[] } }).catalogTest.lookups)
+  await expect(cards).toHaveCount(25)
+  await expect(loadMore).toBeEnabled()
+  expect(await reads()).toEqual(favorites.slice(0, 12))
+  await expect(cards.nth(12)).toContainText('尚未核验片源')
+  await expect(cards.nth(12).getByTestId('fav-play')).toHaveCount(0)
+
+  await loadMore.click()
+  await expect(loadMore).toBeEnabled()
+  expect(await reads()).toEqual(favorites.slice(0, 24))
+  await expect(cards.nth(23)).toContainText('当前片源不可用')
+  const last = cards.last()
+  await expect(last).toContainText('尚未核验片源')
+  await page.getByTestId('edit-manage').click()
+  await last.getByRole('button', { name: cmsFavoriteLabel(favorites[24]), exact: true }).click()
+  await page.getByTestId('batch-unfav').click()
+  await page.getByRole('button', { name: '确认取消' }).click()
+  await expect.poll(desktop.favorites).toEqual(favorites.slice(0, 24))
+  await expect(loadMore).toHaveCount(0)
+  expect(await reads()).toEqual(favorites.slice(0, 24))
+  expect(await page.evaluate(() => (window as unknown as {
+    catalogTest: { peakLookups: number }
+  }).catalogTest.peakLookups)).toBe(3)
+})
+
+test('CMS favorites drop a hidden selection and dismiss its confirmation when verification changes the watch status', async ({ page }) => {
+  const bookmark: HistoryRow = {
+    dramaId: cmsId, episode: 1, percent: 100, watchedAt: Date.now(),
+    positionMs: 24000, durationMs: 24000, episodeCountAtWatch: 1,
+  }
+  const desktop = await cmsLibraryFixture(page, [bookmark], [cmsId])
+  const release = await holdCMSDetails(page, desktop.catalog)
+  try {
+    await page.goto('/#/favorites')
+    await page.getByTestId('ftab-done').click()
+    const card = page.getByTestId('fav-card')
+    await expect(card).toContainText('已看过')
+    await page.getByTestId('edit-manage').click()
+    await card.getByRole('button', { name: cmsFavoriteLabel(cmsId), exact: true }).click()
+    await page.getByTestId('batch-unfav').click()
+    const dialog = page.getByRole('dialog', { name: '取消收藏' })
+    await expect(dialog).toBeVisible()
+
+    release()
+    await expect(card).toHaveCount(0)
+    await expect(dialog).toHaveCount(0)
+    await expect(page.getByTestId('batchbar')).toContainText('已选 0 部')
+    await expect(page.getByTestId('batch-unfav')).toBeDisabled()
+    await expect(page.getByRole('button', { name: '完成', exact: true })).toBeFocused()
+    await page.getByTestId('ftab-watching').click()
+    await expect(card).toContainText(cmsTitle)
+    await expect(card.getByRole('button', { name: cmsTitle, exact: true })).toHaveAttribute('aria-pressed', 'false')
+    expect(desktop.favorites()).toEqual([cmsId])
+    expect(desktop.writes).toHaveLength(0)
+  } finally {
+    release()
+  }
+})
+
+test('CMS library views share three lookup slots and skip requests queued by an unmounted page', async ({ page }) => {
+  const saved = Array.from({ length: 5 }, (_, i) => 'apple-cms:0123456789abcdef0123456789abcdef:' + (i + 1))
+  const desktop = await cmsLibraryFixture(page, [{
+    dramaId: cmsId, episode: 1, percent: 20, watchedAt: Date.now(),
+    positionMs: 5000, durationMs: 24000, episodeCountAtWatch: 3,
+  }], saved)
+  const release = await holdCMSDetails(page, desktop.catalog)
+  const readState = () => page.evaluate(() => (window as unknown as {
+    catalogTest: { lookups: string[]; peakLookups: number; providerReads: number }
+  }).catalogTest)
+  try {
+    await page.goto('/#/favorites')
+    await expect.poll(async () => (await readState()).lookups).toEqual(saved.slice(0, 3))
+    const first = await readState()
+
+    await page.getByTestId('nav-history').click()
+    await expect(page.getByTestId('page-history')).toBeVisible()
+    await expect.poll(async () => (await readState()).providerReads).toBeGreaterThan(first.providerReads)
+    const history = await readState()
+
+    await page.getByTestId('nav-favorites').click()
+    await expect(page.getByTestId('page-favorites')).toBeVisible()
+    await expect.poll(async () => (await readState()).providerReads).toBeGreaterThan(history.providerReads)
+    expect((await readState()).lookups).toEqual(saved.slice(0, 3))
+    release()
+    await expect(page.getByTestId('fav-card').filter({ hasText: '当前片源不可用' })).toHaveCount(5)
+    const final = await readState()
+    expect(final.lookups).toEqual([...saved.slice(0, 3), ...saved])
+    expect(final.peakLookups).toBe(3)
+  } finally {
+    release()
+  }
 })

@@ -142,11 +142,12 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
           </div>
           <p class="status"><b>更新状态</b><template v-if="detail.schedule"> {{ detail.schedule }} <u>|</u></template> 已更新至 第{{ detail.drama.updatedTo }}集（共{{ detail.drama.episodeCount }}集）</p>
           <div v-if="detail.drama.providerOnly">
-            <div v-if="detail.catalogPlayback && firstAvailableEpisode" class="cta">
-              <BaseButton size="lg" data-testid="catalog-watch-now" @click="watchEp(firstAvailableEpisode)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
-              <button v-if="continuation" class="cont" data-testid="catalog-continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
+            <p v-if="!detail.catalogPlayback || !firstAvailableEpisode" class="status">当前剧目播放暂不可用。</p>
+            <div v-if="detail.appleCMS || (detail.catalogPlayback && firstAvailableEpisode)" class="cta">
+              <BaseButton v-if="detail.catalogPlayback && firstAvailableEpisode" size="lg" data-testid="catalog-watch-now" @click="watchEp(firstAvailableEpisode)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
+              <button v-if="detail.catalogPlayback && continuation" class="cont" data-testid="catalog-continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
+              <BaseButton v-if="detail.appleCMS" size="lg" variant="ghost" data-testid="fav" :aria-pressed="lib.isFav(id)" @click="fav"><component :is="lib.isFav(id) ? Check : Plus" :size="18" />{{ lib.isFav(id) ? '已收藏' : '收藏' }}</BaseButton>
             </div>
-            <p v-else class="status">当前剧目播放暂不可用。</p>
           </div>
           <div v-else class="cta">
             <BaseButton size="lg" data-testid="watch-now" @click="watchEp(1)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>

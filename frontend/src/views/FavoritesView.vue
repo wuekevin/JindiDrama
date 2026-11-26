@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Heart, Play, CircleCheck, Clapperboard, Video, SquarePen, LayoutGrid, List, ListChecks, Ellipsis, ChevronDown } from 'lucide-vue-next'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, firstAvailableCatalogEpisode, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { useCMSLibraryDetails } from '@/composables/useCMSLibraryDetails'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
+import { catalogPlaceholderCover, fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus } from '@/composables'
 import { observeContentWidth } from '@/layoutWidth'
@@ -29,15 +32,59 @@ const finishBatchLabel = ref<HTMLSpanElement>()
 let batchTrigger: HTMLElement | null = null
 const { savedCard } = useLicensedCatalog()
 const watchLabels = { done: '已看过', watching: '在追', unwatched: '未看', unknown: '完成状态未知' }
-const rows = computed(() => lib.favorites.map((id) => savedCard(id)).filter((d): d is Drama => !!d).map((d) => {
-  const h = lib.history.find((x) => x.dramaId === d.id)
+type Row = {
+  d: Drama
+  issue: ReturnType<typeof savedMediaIssue> | 'catalog' | 'unchecked' | 'playback'
+  status: ReturnType<typeof watchStatus>
+  pct: number
+  last?: number
+  episode?: number
+  action?: string
+  cms?: boolean
+  detailAvailable: boolean
+  localReference?: string
+}
+const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSLibraryDetails(
+  () => lib.favorites.filter(isAppleCMSDramaId),
+)
+const rows = computed(() => lib.favorites.flatMap((id): Row[] => {
+  const h = lib.history.find((x) => x.dramaId === id)
+  const progress = { pct: h?.percent ?? 0, last: h?.episode }
+  if (isAppleCMSDramaId(id)) {
+    const detail = cmsDetails.get(id)
+    const d = detail?.drama ?? {
+      id, title: '苹果 CMS 短剧', cover: catalogPlaceholderCover,
+      summary: '', tags: [], episodeCount: h?.episodeCountAtWatch ?? 0, updatedTo: 0, finished: false, heat: 0,
+    }
+    const first = detail?.catalogPlayback ? firstAvailableCatalogEpisode(detail) : undefined
+    const episode = detail && h ? catalogBookmarkEpisode(detail, h) : first
+    const issue = detail === undefined ? 'unchecked' : !detail ? 'catalog'
+      : first === undefined ? 'playback'
+      : episode === undefined ? 'episode' : undefined
+    const action = !detail ? undefined : issue === 'playback' ? '查看详情' : issue === 'episode' ? '选集'
+      : h && episode !== h.episode ? '看下一集' : h?.percent === 100 ? '重播本集' : h ? '继续观看' : '播放'
+    return [{
+      d, issue, episode, action, ...progress, cms: true, detailAvailable: !!detail,
+      localReference: detail ? undefined : id.slice('apple-cms:'.length),
+      status: !d.episodeCount && h?.percent === 100 ? 'unknown' : watchStatus(h, d),
+    }]
+  }
+  const d = savedCard(id)
+  if (!d) return []
   const status = watchStatus(h, d)
   const issue = savedMediaIssue(d, h?.episode ?? 1)
   const episode = h ? continuationEpisode(d, h) ?? h.episode : 1
   const action = issue === 'library' ? '查看片库' : issue === 'episode' ? '选集'
     : h && episode !== h.episode ? '看下一集' : h?.percent === 100 ? '重播本集' : '播放'
-  return { d, issue, status, pct: h?.percent ?? 0, last: h?.episode, episode, action }
+  return [{ d, issue, status, ...progress, episode, action, detailAvailable: true }]
 }))
+const issueLabels = {
+  library: '本地媒体不可用',
+  episode: '上次观看的分集不可用',
+  catalog: '当前片源不可用',
+  unchecked: '尚未核验片源',
+  playback: '当前剧目播放暂不可用',
+}
 const counts = computed(() => ({ all: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, manju: rows.value.filter((r) => r.d.kind === '漫剧').length, real: rows.value.filter((r) => r.d.kind === '真人剧').length }))
 const genres = computed(() => [...new Set(rows.value.flatMap((r) => r.d.tags))])
 const list = computed(() => {
@@ -45,6 +92,17 @@ const list = computed(() => {
   if (genre.value) l = l.filter((r) => r.d.tags.includes(genre.value))
   if (sort.value === 'update') l = [...l].sort((a, b) => b.d.updatedTo - a.d.updatedTo); if (sort.value === 'heat') l = [...l].sort((a, b) => b.d.heat - a.d.heat)
   return l
+})
+watch(list, (current, previous) => {
+  if (!picked.value.size) return
+  const visible = new Set(current.map(({ d }) => d.id))
+  const selection = new Set(picked.value)
+  for (const { d, cms, detailAvailable } of previous) {
+    if (cms && !detailAvailable && cmsDetails.get(d.id) && !visible.has(d.id)) selection.delete(d.id)
+  }
+  if (selection.size === picked.value.size) return
+  picked.value = selection
+  if (confirm.value) void cancelBatchConfirmation()
 })
 const tabs = computed(() => [{ k: 'all', l: '全部收藏', n: counts.value.all, i: Heart }, { k: 'watching', l: '在追', n: counts.value.watching, i: Play }, { k: 'done', l: '已看过', n: counts.value.done, i: CircleCheck }, { k: 'manju', l: '漫剧', n: counts.value.manju, i: Clapperboard }, { k: 'real', l: '真人剧', n: counts.value.real, i: Video }] as const)
 function unfav(id: string) { const idx = lib.favorites.indexOf(id); lib.removeFavs([id]); picked.value.delete(id); menu.value = ''; void lib.notifySaved('已取消收藏', 3500); lastRemoved = { id, idx } }
@@ -72,8 +130,11 @@ async function openBatchConfirmation(event: MouseEvent) {
 async function cancelBatchConfirmation() {
   confirm.value = false
   await nextTick()
-  batchTrigger?.focus()
+  const trigger = batchTrigger
   batchTrigger = null
+  const control = picked.value.size ? trigger
+    : list.value.length ? selectAllButton.value : finishBatchLabel.value?.closest('button')
+  control?.focus()
 }
 async function doBatch() {
   const ids = [...picked.value]
@@ -86,12 +147,14 @@ async function doBatch() {
   const control = list.value.length ? selectAllButton.value : finishBatchLabel.value?.closest('button')
   control?.focus()
 }
-type Row = (typeof rows.value)[number]
-const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
-function play(r: Row) {
-  return router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.episode))
+function openDetails(r: Row) {
+  if (r.detailAvailable) void router.push(r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id, r.cms))
 }
-const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(r)))
+function play(r: Row) {
+  if (r.issue || r.episode === undefined) return openDetails(r)
+  void router.push(r.cms ? catalogPlaybackRoute(r.d.id, r.episode) : playbackRoute(r.d.id, r.episode))
+}
+const open = (r: Row) => (batch.value ? pick(r.d.id) : openDetails(r))
 </script>
 <template>
   <div ref="root" class="fav" :class="layout" data-testid="page-favorites">
@@ -106,16 +169,20 @@ const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(
     <EmptyState v-if="!list.length" :title="counts.all ? '该分类下暂无收藏' : '还没有收藏任何短剧'" :hint="counts.all ? '换个分类或筛选条件试试' : '去推荐页发现喜欢的剧吧'"><BaseButton variant="outline" @click="router.push('/home')">去逛逛</BaseButton></EmptyState>
     <ul v-else class="grid" :class="view" data-testid="fav-grid">
       <li v-for="r in list" :key="r.d.id" class="card" :class="{ sel: picked.has(r.d.id) }" data-testid="fav-card">
-        <button class="cover" :aria-label="r.d.title" :aria-pressed="batch ? picked.has(r.d.id) : undefined" @click="open(r)"><img :src="r.d.cover" :alt="r.d.title" /><span class="st on-dark"><Play v-if="r.status === 'watching'" :size="11" /><CircleCheck v-else-if="r.status === 'done'" :size="11" />{{ r.d.kind === '真人剧' && r.status === 'unwatched' ? '真人剧' : watchLabels[r.status] }}</span>
+        <button class="cover" :disabled="!batch && !r.detailAvailable" :aria-label="r.localReference ? `${r.d.title} · ${r.localReference}` : r.d.title" :aria-pressed="batch ? picked.has(r.d.id) : undefined" @click="open(r)"><img :key="r.d.cover" v-cancel-catalog-cover :crossorigin="r.cms ? 'anonymous' : undefined" :src="r.d.cover" :alt="r.d.title" @error="fallbackCatalogCover" /><span class="st on-dark"><Play v-if="r.status === 'watching'" :size="11" /><CircleCheck v-else-if="r.status === 'done'" :size="11" />{{ r.d.kind === '真人剧' && r.status === 'unwatched' ? '真人剧' : watchLabels[r.status] }}</span>
           <i v-if="batch" class="ck" :class="{ on: picked.has(r.d.id) }" aria-hidden="true" /></button>
-        <div class="info"><div class="tt"><h3 class="clamp-2">{{ r.d.title }}</h3><div class="mw" @keydown.esc.stop="closeMenu"><button aria-label="更多" :aria-expanded="menu === r.d.id" data-testid="fav-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn on-dark"><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li><li><button data-testid="menu-unfav" @click="unfav(r.d.id)">取消收藏</button></li></ul></div></div>
-          <p v-if="r.issue !== 'library'" class="mt">{{ r.d.tags.slice(0, 2).join(' · ') }} · {{ r.d.episodeCount }}集</p>
+        <div class="info"><div class="tt"><h3 class="clamp-2">{{ r.d.title }}</h3><div class="mw" @keydown.esc.stop="closeMenu"><button aria-label="更多" :aria-expanded="menu === r.d.id" data-testid="fav-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn on-dark"><li v-if="r.detailAvailable"><button @click="openDetails(r)">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li><li><button data-testid="menu-unfav" @click="unfav(r.d.id)">取消收藏</button></li></ul></div></div>
+          <p v-if="r.localReference" class="mt">{{ r.localReference }}</p>
+          <p v-else-if="r.detailAvailable && r.issue !== 'library'" class="mt">{{ r.cms && !r.d.tags.length ? '' : r.d.tags.slice(0, 2).join(' · ') + ' · ' }}{{ r.d.episodeCount }}集</p>
           <p v-if="!r.issue" class="up">{{ r.d.finished ? `已完结（共${r.d.episodeCount}集）` : `更新至 第${r.d.updatedTo}集` }}<em v-if="!r.d.finished && r.d.updatedTo > (r.last ?? 0) + 3" class="new">NEW</em></p>
-          <p v-else class="up">{{ r.issue === 'library' ? '本地媒体不可用' : '上次观看的分集不可用' }}</p>
+          <p v-else class="up">{{ issueLabels[r.issue] }}</p>
           <p class="lw">{{ r.last ? `上次看到：第${r.last}集` : '尚未观看' }}</p>
           <div class="pg"><ProgressBar :value="r.pct" /><i>{{ r.pct }}%</i></div></div>
-        <div class="ops"><button class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.action }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
+        <div class="ops"><button v-if="r.action" class="p" data-testid="fav-play" @click="play(r)"><Play v-if="!r.issue" :size="13" fill="currentColor" />{{ r.action }}</button><button class="u" data-testid="fav-unfav" @click="unfav(r.d.id)"><Heart :size="14" fill="currentColor" />取消收藏</button></div>
       </li></ul>
+    <BaseButton v-if="hasMoreCMS" class="cms-more" variant="ghost" :disabled="loadingCMS" @click="loadMoreCMS">
+      {{ loadingCMS ? '正在核验片源收藏…' : '核验更多片源收藏' }}
+    </BaseButton>
     <div v-if="batch" class="batchbar on-dark" data-testid="batchbar"><button ref="selectAllButton" class="all" data-testid="select-all" :disabled="!list.length" :aria-pressed="allPicked" @click="selectAll"><i class="ck" :class="{ on: allPicked }" />全选</button><span aria-live="polite">已选 {{ picked.size }} 部</span><BaseButton :disabled="!picked.size" aria-label="取消收藏所选短剧" data-testid="batch-unfav" @click="openBatchConfirmation">取消收藏</BaseButton><BaseButton variant="ghost" @click="toggleBatch"><span ref="finishBatchLabel">完成</span></BaseButton></div>
     <Modal :open="confirm" title="取消收藏" confirm-text="确认取消" @cancel="cancelBatchConfirmation" @confirm="doBatch"><span ref="confirmPrompt">确定取消收藏已选的 {{ picked.size }} 部短剧吗？</span></Modal>
     <button v-if="false" @click="undo" />
@@ -134,6 +201,7 @@ const open = (r: Row) => (batch.value ? pick(r.d.id) : router.push(detailTarget(
 .info { min-width: 0; display: flex; flex-direction: column; gap: 4px; .tt { display: flex; gap: 6px; h3 { font-size: 17px; line-height: 1.25; flex: 1; min-width: 0; overflow-wrap: anywhere; } } p { font-size: 12.5px; color: var(--c-text-2); } .mt { overflow-wrap: anywhere; } .up { display: flex; align-items: center; gap: 6px; } .new { font-style: normal; padding: 0 6px; border-radius: 6px; background: var(--g-accent); color: #fff; font-size: 11px; font-weight: 700; } .pg { display: flex; align-items: center; gap: 8px; margin-top: auto; :deep(.bar) { flex: 1; } i { font-style: normal; font-size: 12px; color: var(--c-text-2); } } }
 .mw { position: relative; } .mn { position: absolute; right: 0; top: 24px; z-index: 8; min-width: 110px; padding: 6px; border-radius: 10px; background: #2a1719; border: 1px solid var(--c-border-strong); button { width: 100%; height: 32px; border-radius: 6px; &:hover { background: var(--c-surface-hover); } } }
 .ops { grid-column: 1 / -1; display: flex; gap: 10px; margin-top: 8px; padding-left: 6px; button { flex: 1; height: 34px; border-radius: 17px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; } .p { background: var(--g-accent); font-weight: 600; } .u { background: rgba(255,255,255,.08); border: 1px solid var(--c-border-strong); svg { color: var(--c-accent-2); } } }
+.cms-more { margin-top: 16px; }
 .batchbar { position: sticky; bottom: 8px; z-index: 7; display: flex; align-items: center; gap: 16px; margin-top: 16px; padding: 10px 20px; border-radius: 16px; background: rgba(40,22,24,.96); border: 1px solid var(--c-border-strong); box-shadow: 0 10px 30px rgba(0,0,0,.5); .all { display: inline-flex; align-items: center; gap: 10px; &:disabled { opacity: .45; cursor: not-allowed; } } > span { margin-right: auto; color: var(--c-text-2); } }
 
 .fav:is(.stacked, .compact) {

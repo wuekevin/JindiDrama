@@ -3,8 +3,23 @@ import { catalogProviderName, getDetail, type DramaDetail } from '@/mocks/provid
 
 const batchSize = 12
 const concurrentLookups = 3
+const waitingLookups: Array<() => void> = []
+let activeLookups = 0
 
-export function useCMSHistoryDetails(ids: () => string[]) {
+async function lookupDetail(id: string, wanted: () => boolean) {
+  if (activeLookups < concurrentLookups) activeLookups++
+  else await new Promise<void>((resolve) => waitingLookups.push(resolve))
+  try {
+    return wanted() ? await getDetail(id, 'normal', true).catch(() => null) : null
+  } finally {
+    // Transfer the slot to the next waiter before allowing a new lookup to start.
+    const next = waitingLookups.shift()
+    if (next) next()
+    else activeLookups--
+  }
+}
+
+export function useCMSLibraryDetails(ids: () => string[]) {
   const details = reactive(new Map<string, DramaDetail | null>())
   const remaining = computed(() => ids().filter((id) => !details.has(id)))
   const loading = ref(false)
@@ -24,7 +39,7 @@ export function useCMSHistoryDetails(ids: () => string[]) {
         while (active && index < batch.length) {
           const id = batch[index++]
           if (!ids().includes(id)) continue
-          const detail = await getDetail(id, 'normal', true).catch(() => null)
+          const detail = await lookupDetail(id, () => active && ids().includes(id))
           if (active && ids().includes(id)) details.set(id, detail?.appleCMS ? detail : null)
         }
       }

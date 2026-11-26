@@ -22,6 +22,14 @@ export function availableCatalogEpisode(detail: DramaDetail | undefined | null, 
   return detail?.episodes.find((item) => item.index === episode && item.available && item.id)
 }
 
+export function firstAvailableCatalogEpisode(detail: DramaDetail) {
+  let first: number | undefined
+  for (const episode of detail.episodes) {
+    if (episode.available && episode.id && (first === undefined || episode.index < first)) first = episode.index
+  }
+  return first
+}
+
 export function catalogBookmarkEpisode(detail: DramaDetail, history: HistoryEntry) {
   if (!detail.appleCMS || !detail.catalogPlayback || !availableCatalogEpisode(detail, history.episode)) return
   const next = continuationEpisode(detail.drama, history)

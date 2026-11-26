@@ -6,7 +6,7 @@ import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus, historyDay, agoText, watchHours } from '@/composables'
-import { useCMSHistoryDetails } from '@/composables/useCMSHistoryDetails'
+import { useCMSLibraryDetails } from '@/composables/useCMSLibraryDetails'
 import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { catalogPlaceholderCover, fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
 import { observeContentWidth } from '@/layoutWidth'
@@ -56,7 +56,7 @@ type Row = ReturnType<typeof historyDay> & {
   detailAvailable?: boolean
 }
 const recentHistory = computed(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt))
-const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSHistoryDetails(
+const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSLibraryDetails(
   () => recentHistory.value.map(({ dramaId }) => dramaId).filter(isAppleCMSDramaId),
 )
 const rows = computed<Row[]>(() => recentHistory.value.flatMap((h): Row[] => {
