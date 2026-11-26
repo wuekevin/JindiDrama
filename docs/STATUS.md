@@ -514,3 +514,9 @@
 - `--verify-release-draft` 先核验本地标签和交付包，再核对 GitHub 草稿的仓库、标签、发布渠道，以及每个上传资产的名称、状态、字节数和 SHA-256。校验范围包含 Windows 安装包、便携版、macOS Universal ZIP、随包文档与 SHA-256 清单自身。发行指南记录了只读查询和核验命令。
 - Node 22 和 Node 26 的 13 项发行工具测试均通过，覆盖错误渠道、缺失或重复资产、无效 ID、上传状态、大小和两平台摘要。现有 .42 测试包重新校验 13 项原始 SHA-256。用同一批二进制构建本机稳定版与候选版草稿夹具，两轮各核对 11 项文件。修改清单摘要时正确失败。
 - GitHub 当前没有 JindiDrama Release，实际草稿和正式签名资产仍待验收。本轮未推送、未创建草稿或触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e13-release-draft-verification.md) · [GitHub Release 查询接口](https://docs.github.com/en/rest/releases/releases#get-a-release)
+
+## E13 桌面程序内置回滚命令（2026-11-27）
+
+- 当前桌面程序可通过 `--prepare-rollback` 生成独立的旧版 SQLite 副本。命令在启动 WebView 和应用配置前执行，原源码工具共用同一入口。回滚指南给出 macOS 和 Windows 调用方式。
+- Apple Silicon 用当前原生程序将隔离 v10 实例转为 v2。旧版提交 `f97bd81afd803e530d91dbc7bc28fe4b88d99e39` 的真实数据层读回收藏顺序、第 3 集的 7345 毫秒进度、搜索与设置。原库 SHA-256 不变，原评论和弹幕仍存在。副本首次打开前无 SQLite 辅助文件，完整性通过。缺少参数和已有目标分别返回失败，且未启动桌面配置。
+- 从本地 ad-hoc 测试应用复验回滚命令、普通窗口启动、正常退出和隔离 SQLite。Go vet、Go 全量、回滚模块竞态检查和 Windows amd64 GUI 版交叉编译通过。Windows 原生回滚仍待执行。本轮未触发 GitHub 打包。[回滚指南](RELEASE-ROLLBACK.md) · [BMad 记录](../_bmad-output/plan-e13-desktop-rollback-command.md)

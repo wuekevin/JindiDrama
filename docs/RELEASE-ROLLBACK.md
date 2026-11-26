@@ -3,7 +3,29 @@
 当旧版应用支持的数据库版本低于当前版本时，先为旧版生成兼容副本，再启动旧版。历史提交 `f97bd81afd803e530d91dbc7bc28fe4b88d99e39` 使用 SQLite v2，当前源码使用 v10。其他发行版的目标版本以对应源码或发行记录为准。
 
 1. 确认新版已补写待保存的离线记录，再退出应用。回滚工具转换 SQLite 中已提交的数据。从用户配置目录备份现有数据库和同名 `-wal`、`-shm`、`-journal` 文件（若存在）。保留这一组作为恢复新版的资料。
-2. 在对应发行版本的源码目录运行回滚工具，输出到新的文件名。此命令需要 Go。工具读取已提交的 SQLite 内容，在独立副本执行降级并检查完整性。输出目录使用支持硬链接的本地文件系统，例如 APFS 或 NTFS。
+2. 使用已支持回滚命令的**当前**桌面程序生成新的副本，再安装旧版。工具读取已提交的 SQLite 内容，在独立副本上降级并检查完整性。输出目录使用支持硬链接的本地文件系统，例如 APFS 或 NTFS。以下示例生成 v2 副本，其他发行版按实际目标版本修改。
+
+macOS 在终端运行。安装到其他位置时，替换程序路径。
+
+```sh
+"/Applications/JindiDrama.app/Contents/MacOS/JindiDrama" --prepare-rollback \
+  -source "$HOME/Library/Application Support/JindiDrama/jindi.db" \
+  -output "$HOME/jindi-v2.db" -target 2
+```
+
+Windows 在 PowerShell 运行。按用户安装时，默认程序路径为 `$env:LOCALAPPDATA\Programs\JindiDrama\JindiDrama.exe`。使用便携版或自选安装目录时，将 `$application` 改为实际程序路径。[PowerShell 启动进程参数](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process#-argumentlist)
+
+```powershell
+$application = "$env:ProgramFiles\JindiDrama\JindiDrama.exe"
+$source = "$env:APPDATA\JindiDrama\jindi.db"
+$output = "$env:USERPROFILE\jindi-v2.db"
+$rollbackArgs = '--prepare-rollback -source "{0}" -output "{1}" -target 2' -f $source, $output
+$process = Start-Process -FilePath $application -ArgumentList $rollbackArgs -Wait -PassThru
+if ($process.ExitCode -ne 0) { throw "生成回滚副本失败，退出码 $($process.ExitCode)" }
+Get-Item -LiteralPath $output
+```
+
+如果当前程序尚无此命令，可在当前版本的源码目录中使用 Go 工具。
 
 ```sh
 go run ./cmd/prepare-rollback -source "/path/to/JindiDrama/jindi.db" -output "/path/to/jindi-v2.db" -target 2

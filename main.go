@@ -17,12 +17,16 @@ import (
 
 	"jindi-drama/internal/app"
 	"jindi-drama/internal/observability"
+	"jindi-drama/internal/rollbackcli"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
 func main() {
+	if args := os.Args[1:]; len(args) > 0 && args[0] == rollbackcli.DesktopFlag {
+		os.Exit(rollbackcli.Run(args[1:], os.Stdout, os.Stderr))
+	}
 	var session atomic.Pointer[observability.Session]
 	var documentReady atomic.Bool
 	if goruntime.GOOS != "windows" {
