@@ -2,6 +2,7 @@ import { nextTick } from 'vue'
 import { hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
 
 export const BEFORE_WINDOW_CLOSE = 'jindi-before-window-close'
+export const WINDOW_CLOSE_CANCELED = 'jindi-window-close-canceled'
 
 let repliedAttempt: string | undefined
 export const windowCloseReplyPending = () => repliedAttempt !== undefined
@@ -15,8 +16,10 @@ export function registerWindowClose() {
   const emit = runtime.EventsEmit.bind(runtime)
   let active: { id: string; reply: () => void } | undefined
 
-  runtime.EventsOn('jindi-window-close-canceled', (id) => {
-    if (repliedAttempt === id) repliedAttempt = undefined
+  runtime.EventsOn(WINDOW_CLOSE_CANCELED, (id) => {
+    if (active || repliedAttempt !== id) return
+    repliedAttempt = undefined
+    window.dispatchEvent(new Event(WINDOW_CLOSE_CANCELED))
   })
   runtime.EventsOn('jindi-window-close-deadline', async (id) => {
     await nextTick()

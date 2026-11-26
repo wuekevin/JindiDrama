@@ -571,8 +571,9 @@ test('startup skips a licensed episode whose media cannot be opened', async ({ p
   await expect(page.locator('video')).toHaveJSProperty('videoWidth', 360)
 })
 
-async function setupPlaybackPreferences(page: Page, mode: string, { locked = false, blockedAutoplay = false, delayedEpisodes = false, blockedLoop = false } = {}) {
-  await page.addInitScript(({ entry, playMode, locked, blockedAutoplay, delayedEpisodes, blockedLoop }) => {
+async function setupPlaybackPreferences(page: Page, mode: string, { locked = false, blockedAutoplay = false, delayedEpisodes = false, blockedLoop = false, failFirstList = false } = {}) {
+  await page.addInitScript(({ entry, playMode, locked, blockedAutoplay, delayedEpisodes, blockedLoop, failFirstList }) => {
+    let rejectEpisodeList = failFirstList
     if (!localStorage.getItem('jindi.settings.v1')) {
       localStorage.setItem('jindi.settings.v1', JSON.stringify({ playMode, defaultSpeed: 1.75 }))
     }
@@ -584,8 +585,19 @@ async function setupPlaybackPreferences(page: Page, mode: string, { locked = fal
       SaveSetting: async () => {},
       LicensedCatalog: async () => [entry],
       Episodes: async () => {
+        if (rejectEpisodeList) {
+          rejectEpisodeList = false
+          throw new Error('temporary episode list failure')
+        }
         if (delayedEpisodes) {
-          await new Promise<void>((resolve) => { Object.assign(window, { releaseTestEpisodes: resolve }) })
+          await new Promise<void>((resolve, reject) => {
+            Object.assign(window, {
+              releaseTestEpisodes(fail = false) {
+                if (fail) reject(new Error('episode list retry failed'))
+                else resolve()
+              },
+            })
+          })
         }
         return [1, 2].map((index) => ({
           id: entry.id + '-' + index, dramaId: entry.id, index, available: !(locked && index === 2),
@@ -606,8 +618,35 @@ async function setupPlaybackPreferences(page: Page, mode: string, { locked = fal
         return play.call(this)
       }
     }
-  }, { entry: drama, playMode: mode, locked, blockedAutoplay, delayedEpisodes, blockedLoop })
+  }, { entry: drama, playMode: mode, locked, blockedAutoplay, delayedEpisodes, blockedLoop, failFirstList })
   await serveLicensedClip(page)
+}
+
+async function setupLicensedClose(page: Page) {
+  await page.addInitScript(() => {
+    const events = new Map<string, (id: string) => void>()
+    Object.assign(window, {
+      runtime: {
+        EventsOn: (name: string, handler: (id: string) => void) => { events.set(name, handler) },
+        EventsEmit(name: string, id: string) {
+          if (name === 'jindi-window-close-ready') sessionStorage.setItem('test-close-reply', id)
+        },
+      },
+      emitLicensedCloseEvent: (name: string, id: string) => events.get(name)?.(id),
+    })
+  })
+}
+
+function emitLicensedClose(page: Page, ...events: [name: string, id: string][]) {
+  return page.evaluate((events) => {
+    for (const [name, id] of events) {
+      (window as typeof window & { emitLicensedCloseEvent(name: string, id: string): void }).emitLicensedCloseEvent(name, id)
+    }
+  }, events)
+}
+
+function expectLicensedCloseReply(page: Page, id: string) {
+  return expect.poll(() => page.evaluate(() => sessionStorage.getItem('test-close-reply'))).toBe(id)
 }
 
 async function finishLicensedEpisode(video: Locator) {
@@ -694,17 +733,41 @@ test('licensed continuous playback returns to the completed episode if the next 
   expect(entry).toMatchObject({ episode: 1, percent: 100 })
 })
 
-test('licensed continuous playback waits for the episode list before advancing', async ({ page }) => {
-  await setupPlaybackPreferences(page, '连续播放（自动下一集）', { delayedEpisodes: true })
-  await page.goto('/#/licensed?id=local-landscape&ep=1')
-  const video = page.locator('video')
-  await finishLicensedEpisode(video)
-  await expect(video).toHaveJSProperty('ended', true)
-  await expect(page).toHaveURL(/ep=1$/)
-  await page.evaluate(() => (window as unknown as { releaseTestEpisodes(): void }).releaseTestEpisodes())
-  await expect(page).toHaveURL(/ep=2$/)
-  await expect(video).toHaveJSProperty('paused', false)
-})
+for (const scenario of ['request', 'retry', 'repeated retry', 'retry while closing']) {
+  test(`licensed continuous playback waits for the episode list ${scenario} before advancing`, async ({ page }) => {
+    await setupPlaybackPreferences(page, '连续播放（自动下一集）', { delayedEpisodes: true, failFirstList: scenario !== 'request' })
+    if (scenario === 'retry while closing') await setupLicensedClose(page)
+    await page.goto('/#/licensed?id=local-landscape&ep=1')
+    const retry = page.getByRole('button', { name: '重试读取分集' })
+    if (scenario !== 'request') await retry.click()
+    const video = page.locator('video')
+    await finishLicensedEpisode(video)
+    await expect(video).toHaveJSProperty('ended', true)
+    await expect(page).toHaveURL(/ep=1$/)
+    const finishList = (fail: boolean) => page.evaluate((fail) => {
+      (window as typeof window & { releaseTestEpisodes(fail: boolean): void }).releaseTestEpisodes(fail)
+    }, fail)
+    if (scenario === 'repeated retry') {
+      await finishList(true)
+      await expect(retry).toHaveAttribute('aria-disabled', 'false')
+      await expect(page).toHaveURL(/ep=1$/)
+      await retry.click()
+      await expect(retry).toHaveAttribute('aria-disabled', 'true')
+    }
+    if (scenario === 'retry while closing') {
+      await emitLicensedClose(page, ['jindi-before-window-close', 'current'])
+      await expectLicensedCloseReply(page, 'current')
+    }
+    await finishList(false)
+    if (scenario === 'retry while closing') {
+      await expect(page.getByRole('button', { name: '第 2 集' })).toBeVisible()
+      await expect(page).toHaveURL(/ep=1$/)
+      await emitLicensedClose(page, ['jindi-window-close-canceled', 'current'])
+    }
+    await expect(page).toHaveURL(/ep=2$/)
+    await expect(video).toHaveJSProperty('paused', false)
+  })
+}
 
 test('denied single-episode replay keeps history completed when the user leaves', async ({ page }) => {
   await setupPlaybackPreferences(page, '单集循环', { blockedLoop: true })
@@ -788,4 +851,140 @@ test('licensed manual continuation uses the recorded catalog and starts the avai
   await page.goto('/#/history')
   await page.getByTestId('continue-latest').click()
   await expect(page).toHaveURL(/licensed\?id=local-landscape&ep=2$/)
+})
+
+test('retries a failed licensed episode list without replacing the playing video', async ({ page }, testInfo) => {
+  await page.addInitScript((entry) => {
+    let listCalls = 0
+    let playbackCalls = 0
+    let finishRetry: (() => void) | undefined
+    const episodes = [1, 2].map(index => ({ id: entry.id + '-' + index, dramaId: entry.id, index, available: true }))
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      LicensedCatalog: async () => [entry],
+      Episodes: async () => {
+        listCalls++
+        if (listCalls === 1) throw new Error('temporary episode list failure')
+        return new Promise<typeof episodes>((resolve) => { finishRetry = () => resolve(episodes) })
+      },
+      ResolvePlayback: async () => {
+        playbackCalls++
+        return { kind: 'licensed', episodeId: entry.id + '-1', sources: [{ src: '/_licensed/media/clip.mp4', type: 'video/mp4' }] }
+      },
+    } } }, licensedRetry: {
+      finish: () => finishRetry?.(),
+      counts: () => [listCalls, playbackCalls],
+    } })
+  }, drama)
+  await serveLicensedClip(page)
+  await page.goto(`/#/licensed?id=${drama.id}&ep=1`)
+  const video = page.locator('video')
+  await expect(video).toHaveJSProperty('videoWidth', 360)
+  await video.evaluate((media: HTMLVideoElement) => {
+    media.muted = true
+    return media.play()
+  })
+  await expect.poll(() => video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThan(1)
+  const before = await video.evaluate((media: HTMLVideoElement) => {
+    media.dataset.retained = 'true'
+    return media.currentTime
+  })
+  await expect(page.getByRole('alert')).toHaveText('无法读取分集')
+  const retry = page.getByRole('button', { name: '重试读取分集' })
+  await expect(retry).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('licensed-episodes-retry.png') })
+  await retry.press('Enter')
+  await expect(retry).toHaveAttribute('aria-disabled', 'true')
+  await expect(retry).toBeFocused()
+  await retry.press('Enter')
+  type RetryFixture = typeof window & { licensedRetry: { finish(): void; counts(): number[] } }
+  expect(await page.evaluate(() => (window as RetryFixture).licensedRetry.counts())).toEqual([2, 1])
+  await page.evaluate(() => (window as RetryFixture).licensedRetry.finish())
+  await expect(page.getByRole('button', { name: '第 2 集' })).toBeVisible()
+  await expect(page.getByRole('group', { name: '分集', exact: true })).toBeFocused()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(video).toHaveAttribute('data-retained', 'true')
+  await expect(video).toHaveJSProperty('paused', false)
+  expect(await video.evaluate((media: HTMLVideoElement) => media.currentTime)).toBeGreaterThanOrEqual(before)
+  expect(await page.evaluate(() => (window as RetryFixture).licensedRetry.counts())).toEqual([2, 1])
+})
+
+test('re-enables licensed episode retry after the desktop cancels closing', async ({ page }) => {
+  await setupLicensedClose(page)
+  await page.addInitScript((entry) => {
+    let listCalls = 0
+    Object.assign(window, {
+      go: { app: { App: {
+        StorageReady: async () => false,
+        LicensedCatalog: async () => [entry],
+        Episodes: async () => {
+          if (++listCalls === 1) throw new Error('temporary episode list failure')
+          return [{ id: entry.id + '-1', dramaId: entry.id, index: 1, available: true }]
+        },
+      } } },
+    })
+  }, drama)
+  await page.goto(`/#/licensed?id=${drama.id}`)
+  const retry = page.getByRole('button', { name: '重试读取分集' })
+  await expect(retry).toBeEnabled()
+  await emitLicensedClose(page, ['jindi-before-window-close', 'first'])
+  await expectLicensedCloseReply(page, 'first')
+  await emitLicensedClose(page, ['jindi-before-window-close', 'second'], ['jindi-window-close-canceled', 'first'])
+  await expectLicensedCloseReply(page, 'second')
+  await expect(retry).toBeDisabled()
+  await emitLicensedClose(page, ['jindi-window-close-canceled', 'second'])
+  await expect(retry).toBeEnabled()
+  await retry.click()
+  await expect(page.getByRole('button', { name: '第 1 集' })).toBeVisible()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+test('ignores a failed episode retry after switching licensed dramas', async ({ page }) => {
+  const other = { ...drama, id: 'local-other-licensed', title: '独立片库短剧' }
+  await page.addInitScript(({ first, other }) => {
+    let previousCalls = 0
+    let otherCalls = 0
+    let failRetry: (() => void) | undefined
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      LicensedCatalog: async () => [first, other],
+      Episodes: async (id: string) => {
+        if (id === other.id) {
+          if (++otherCalls === 1) throw new Error('new list failed')
+          return [{ id: other.id + '-2', dramaId: id, index: 2, available: true }]
+        }
+        previousCalls++
+        if (previousCalls === 1) throw new Error('first list failed')
+        return new Promise((_, reject) => { failRetry = () => reject(new Error('old list retry failed')) })
+      },
+    } } }, failLicensedRetry: () => failRetry?.() })
+  }, { first: drama, other })
+  await page.goto(`/#/licensed?id=${drama.id}`)
+  const retry = page.getByRole('button', { name: '重试读取分集' })
+  await retry.click()
+  await expect(retry).toHaveAttribute('aria-disabled', 'true')
+  let releaseSettings!: () => void
+  const holdSettings = new Promise<void>((resolve) => { releaseSettings = resolve })
+  let settingsRequested!: () => void
+  const requestStarted = new Promise<void>((resolve) => { settingsRequested = resolve })
+  await page.route('**/assets/SettingsView-*.js', async (route) => {
+    settingsRequested()
+    await holdSettings
+    await route.continue()
+  })
+  const target = page.getByRole('button', { name: '独立片库短剧' })
+  try {
+    await page.getByTestId('nav-settings').click()
+    await requestStarted
+    await target.click()
+    await expect(page).toHaveURL(/id=local-other-licensed$/)
+    await retry.click()
+    await expect(page.getByRole('button', { name: '第 2 集' })).toBeVisible()
+  } finally {
+    releaseSettings()
+  }
+  await page.evaluate(() => (window as typeof window & { failLicensedRetry(): void }).failLicensedRetry())
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await expect(retry).toHaveCount(0)
+  await expect(page.getByRole('group', { name: '分集', exact: true })).toBeFocused()
 })

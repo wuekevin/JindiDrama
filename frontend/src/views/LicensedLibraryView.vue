@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { BookOpen, Download, Film, Heart, PictureInPicture2, Search } from 'lucide-vue-next'
 import { usePictureInPicture } from '@/player/pictureInPicture'
 import { exportLicensedEpisode, hasLicensedExport, loadProviderEpisodes, resolvePlayback } from '@/bindings'
-import { BEFORE_WINDOW_CLOSE } from '@/bindings/windowClose'
+import { BEFORE_WINDOW_CLOSE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { isPlaybackSpeed, playbackEndAction } from '@/player/preferences'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
@@ -38,6 +38,10 @@ const sources = ref<MediaSource[]>([])
 const playbackError = ref('')
 const playbackNotice = ref('')
 const loadingEpisodes = ref(false)
+const episodeListError = ref(false)
+const episodeListAttempt = ref(0)
+const episodeList = ref<HTMLDivElement | null>(null)
+const episodeRetryButton = ref<HTMLButtonElement | null>(null)
 const loadingPlayback = ref(false)
 const playbackAttempt = ref(0)
 const exporting = ref(false)
@@ -68,10 +72,11 @@ type ActivePlayback = EpisodeRef & {
 let playback: ActivePlayback | undefined
 let nextToStart: AutoNext | undefined
 let returnToEnded: EpisodeRef | undefined
-let episodeRequest: ReturnType<typeof loadProviderEpisodes>
-let closing = false
+let waitingForEpisodeList: ActivePlayback | undefined
+const closing = ref(false)
 let leaving = false
 onBeforeRouteLeave(() => { leaving = true })
+onBeforeRouteUpdate(() => { leaving = false })
 
 const canExport = computed(() => !!selected.value?.allowExport && hasLicensedExport() &&
   sources.value.length > 0 && playback?.id === selected.value.id && playback.index === episode.value)
@@ -103,6 +108,11 @@ function openEpisode(index: number) {
   if (!selected.value) return
   if (index !== episode.value) void router.replace(playbackRoute(selected.value.id, index))
   else if (playbackError.value) playbackAttempt.value++
+}
+
+function retryEpisodeList() {
+  if (loadingEpisodes.value || !episodeListError.value || closing.value || leaving) return
+  episodeListAttempt.value++
 }
 
 function saveProgress(force = false) {
@@ -187,10 +197,10 @@ function onPlayable(event: Event) {
 
 function startMedia(fallback: string) {
   const media = video.value
-  if (!media || closing || leaving) return
+  if (!media || closing.value || leaving) return
   const target = playback
   void media.play().catch(() => {
-    if (!closing && !leaving && target === playback && media === video.value && media.paused) playbackNotice.value = fallback
+    if (!closing.value && !leaving && target === playback && media === video.value && media.paused) playbackNotice.value = fallback
   })
 }
 
@@ -209,7 +219,7 @@ function onRateChange(event: Event) {
 
 function reportPlaybackFailure(message: string, automatic = playback?.autoStart) {
   playbackError.value = message
-  if (!selected.value || closing || leaving) return
+  if (!selected.value || closing.value || leaving) return
   if (automatic?.id === selected.value.id && automatic.index === episode.value) {
     if (playback) playback.autoStart = undefined
     returnToEnded = { id: automatic.id, index: automatic.previous }
@@ -252,18 +262,18 @@ function onSeeked(event: Event) {
 function onPause(event: Event) {
   if (currentMedia(event)) saveProgress(true)
 }
-async function onEnded(event: Event) {
+function onEnded(event: Event) {
   const media = video.value
   const current = playback
   const drama = selected.value
   if (!media || !currentMedia(event) || !current || drama?.id !== current.id || episode.value !== current.index) return
   saveProgress(true)
-  if (closing || leaving || current.atEnd || !media.ended) return
+  if (closing.value || leaving || current.atEnd || !media.ended) return
 
   const next = current.index + 1
   if (next <= drama.updatedTo && loadingEpisodes.value && preferences.s.playMode === '连续播放（自动下一集）') {
-    await episodeRequest?.catch(() => undefined)
-    if (closing || leaving || current !== playback || !media.ended) return
+    waitingForEpisodeList = current
+    return
   }
   const available = next <= drama.updatedTo && episodes.value.some((item) => item.index === next && item.available)
   const action = playbackEndAction(preferences.s.playMode, available)
@@ -273,11 +283,28 @@ async function onEnded(event: Event) {
     media.currentTime = 0
     startMedia('请点击播放重新开始本集。')
   } else if (action === 'next') {
-    const automatic = { id: current.id, index: next, previous: current.index, muted: media.muted, volume: media.volume }
-    nextToStart = automatic
-    void router.replace(playbackRoute(current.id, next)).then(() => {
-      if (nextToStart === automatic) nextToStart = undefined
-    })
+    advanceEpisode(current, media)
+  }
+}
+
+function advanceEpisode(current: ActivePlayback, media: HTMLVideoElement) {
+  const next = current.index + 1
+  const automatic = { id: current.id, index: next, previous: current.index, muted: media.muted, volume: media.volume }
+  nextToStart = automatic
+  void router.replace(playbackRoute(current.id, next)).then(() => {
+    if (nextToStart === automatic) nextToStart = undefined
+  })
+}
+
+function continueAfterEpisodeList() {
+  if (closing.value || leaving || loadingEpisodes.value || episodeListError.value) return
+  const waiting = waitingForEpisodeList
+  waitingForEpisodeList = undefined
+  const media = video.value
+  if (waiting && waiting === playback && selected.value?.id === waiting.id && media?.ended &&
+      preferences.s.playMode === '连续播放（自动下一集）' &&
+      episodes.value.some(item => item.index === waiting.index + 1 && item.available)) {
+    advanceEpisode(waiting, media)
   }
 }
 
@@ -286,44 +313,56 @@ function onTimeUpdate(event: Event) {
 }
 function saveOnExit() { saveProgress(true) }
 function onWindowClose() {
-  closing = true
+  closing.value = true
   video.value?.pause()
   saveOnExit()
 }
+function onWindowCloseCanceled() {
+  closing.value = false
+  continueAfterEpisodeList()
+}
 onMounted(() => {
+  window.addEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
   window.addEventListener('pagehide', saveOnExit)
   window.addEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
 })
 onBeforeUnmount(() => {
-  closing = true
+  closing.value = true
   saveOnExit()
   clearStartupPlayback()
+  window.removeEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
   window.removeEventListener('pagehide', saveOnExit)
   window.removeEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
 })
 
-watch(selected, async (drama, _, onCleanup) => {
+watch([selected, episodeListAttempt], async ([drama], previous, onCleanup) => {
+  if (drama !== previous?.[0]) episodeListError.value = false
   episodes.value = []
-  episodeRequest = undefined
   loadingEpisodes.value = false
   if (!drama) return
   let active = true
   onCleanup(() => { active = false })
   loadingEpisodes.value = true
   try {
-    episodeRequest = loadProviderEpisodes(drama.id)
-    const list = await episodeRequest
-    if (active && list) episodes.value = list
+    const list = await loadProviderEpisodes(drama.id)
+    if (!active) return
+    episodes.value = list ?? []
+    if (!closing.value && !leaving && episodeRetryButton.value === document.activeElement) episodeList.value?.focus()
+    episodeListError.value = false
   } catch {
-    if (active) playbackError.value = '无法读取分集'
+    if (active) episodeListError.value = true
   } finally {
-    if (active) loadingEpisodes.value = false
+    if (active) {
+      loadingEpisodes.value = false
+      continueAfterEpisodeList()
+    }
   }
 }, { immediate: true })
 
 watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttempt], async ([drama, requestedEpisode, autoplay], _, onCleanup) => {
   saveProgress(true)
   playback = undefined
+  waitingForEpisodeList = undefined
   sources.value = []
   playbackError.value = ''
   playbackNotice.value = ''
@@ -397,7 +436,12 @@ watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttem
         <p v-if="selected.summary">{{ selected.summary }}</p>
         <p class="license">许可说明 · {{ selected.license }}</p>
         <p v-if="loadingEpisodes" role="status">正在读取分集…</p>
-        <div class="episodes" aria-label="分集">
+        <div v-if="episodeListError" class="episode-recovery">
+          <p role="alert">无法读取分集</p>
+          <button ref="episodeRetryButton" type="button" class="episode-retry"
+            :aria-disabled="loadingEpisodes || closing" @click="retryEpisodeList">重试读取分集</button>
+        </div>
+        <div ref="episodeList" class="episodes" role="group" aria-label="分集" tabindex="-1">
           <BaseButton
             v-for="item in episodes" :key="item.id" :disabled="!item.available" :aria-pressed="episode === item.index"
             :variant="episode === item.index ? 'primary' : 'outline'" @click="openEpisode(item.index)"
@@ -446,6 +490,9 @@ watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttem
 .title small, .license { color: var(--c-text-2); }
 .detail-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .detail h2, .detail p { margin-bottom: 12px; overflow-wrap: anywhere; }
+.episode-recovery { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 12px; }
+.episode-retry { color: var(--c-accent-2); text-decoration: underline; }
+.episode-retry[aria-disabled='true'] { color: var(--c-text-2); cursor: default; }
 .episodes { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 video { display: block; width: 100%; max-height: 530px; background: #000; border-radius: 8px; }
 @media (max-width: 680px) { .layout { grid-template-columns: 1fr; } }
