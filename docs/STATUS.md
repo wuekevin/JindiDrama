@@ -333,3 +333,10 @@
 - Go 校验 DNS 返回的公网 IP 并使用核对后的地址建立 HTTPS 连接，保留原域名证书校验，拒绝跳转、私网和特殊地址。只接收 GET、HEAD 与单一 Range，验证响应 MIME、区间、长度并流式返回内容。浏览器 Cookie、Authorization、Referer 和 CDN Set-Cookie 都不会跨层转发。
 - Apple Silicon 原生 WebKit 用 Go 夹具读取本机 Range、播放到至少 1 秒、暂停、返回和正常退出，SQLite 完整性通过。Chromium 通过七项播放专项和 289 项全量回归，117 项 Vitest、Go 全量、vet、App 竞态、源码漏洞扫描及 Windows amd64 交叉编译通过。[原生播放截图](../design/rendered/16-provider-relay-native.png)
 - 正式红果接口、授权范围及 CDN 仍待联调。发布前需确认 CDN 支持有效 HTTPS 证书、直接媒体响应和 Range，并确认授权允许本机转发。现有 .29 双平台包早于此改动。
+
+
+## E12-S03 系统凭据库（2026-11-26）
+
+- 新增 Go 系统凭据库，按数据配置目录和 Provider 隔离。macOS 使用系统 Keychain；Windows 使用当前用户 DPAPI 加密后原子替换密文文件。Linux 和关闭 CGO 的 macOS 返回存储不可用。凭据不写入 SQLite 或前端。本阶段没有接通正式红果账号，授权书、登录协议和测试环境仍待提供。
+- Apple Silicon 以合成凭据完成 Keychain 写入、重新打开、替换、删除、大小校验、Provider 隔离及配置目录别名验证。测试清理了临时 Keychain 项。Go 全量测试、vet、凭据库竞态检查及 Go 源码漏洞扫描通过。
+- Windows amd64、arm64 和 Linux amd64 凭据测试交叉编译通过。Windows 测试已纳入仓库现有 `go test ./...` 入口。Windows 原生 DPAPI 运行和正式签名的 macOS 应用跨版本访问 Keychain 待验收。现有 .30 双平台测试包早于此次源代码提交。
