@@ -1,5 +1,148 @@
 import { test, expect, deferPanelResize } from './fixtures'
 
+test('desktop Apple CMS settings test, preserve failed edits, and defer activation until restart', async ({ page }, testInfo) => {
+  const source = 'https://catalog.example.test/api.php/provide/vod/'
+  await page.addInitScript(({ source }) => {
+    const key = 'test.apple-cms'
+    const startup = sessionStorage.getItem(key) ?? ''
+    const read = () => {
+      const savedURL = sessionStorage.getItem(key) ?? ''
+      return { active: Boolean(startup), savedURL, managed: false, canConfigure: true, restartRequired: savedURL !== startup }
+    }
+    const check = async (url: string) => {
+      if (url.startsWith('http:')) throw new Error('请输入无需凭据或查询参数的公网 HTTPS 地址')
+      if (url !== source) throw new Error('fixture connection response-private')
+    }
+    Object.assign(window, { go: { app: { App: {
+      StorageReady: async () => false,
+      AppVersion: async () => 'v0.1.0',
+      AutostartEnabled: async () => false,
+      CacheStats: async () => null,
+      AppleCMSConfiguration: async () => read(),
+      TestAppleCMSConnection: check,
+      SaveAppleCMSURL: async (url: string) => {
+        await check(url)
+        sessionStorage.setItem(key, url)
+        return read()
+      },
+      ClearAppleCMSURL: async () => {
+        sessionStorage.removeItem(key)
+        return read()
+      },
+    } } } })
+  }, { source })
+  await page.goto('/#/settings')
+  const section = page.getByRole('region', { name: '苹果 CMS 片源' })
+  const address = section.getByRole('textbox', { name: '片源地址' })
+  const testConnection = section.getByRole('button', { name: '测试连接' })
+  const save = section.getByRole('button', { name: '保存片源' })
+  const clear = section.getByRole('button', { name: '清除片源' })
+  const demo = section.getByText('当前使用演示目录。')
+  const active = section.getByText('当前已启用苹果 CMS 片源。')
+  const saved = section.getByText('片源已保存，完全退出并重新打开应用后启用。')
+  const cleared = section.getByText('片源已清除，完全退出并重新打开应用后恢复演示目录。')
+
+  await expect(demo).toBeVisible()
+  await expect(clear).toBeDisabled()
+  await address.fill(source)
+  await page.keyboard.press('Tab')
+  await expect(testConnection).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(section.getByRole('status')).toHaveText('连接成功，已读取片源目录。')
+  expect(await page.evaluate(() => sessionStorage.getItem('test.apple-cms'))).toBeNull()
+  await page.keyboard.press('Tab')
+  await expect(save).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect(saved).toBeVisible()
+  await expect(demo).toBeVisible()
+  await expect(active).toHaveCount(0)
+  await section.screenshot({ path: testInfo.outputPath('apple-cms-restart-pending.png') })
+
+  await address.fill('http://catalog.example.test')
+  await save.click()
+  await expect(section.getByRole('alert')).toHaveText('请输入无需凭据或查询参数的公网 HTTPS 地址。')
+  await expect(address).toHaveAttribute('aria-invalid', 'true')
+  await address.fill('https://unavailable.example.test/private')
+  await address.press('Enter')
+  await expect(section.getByRole('alert')).toHaveText('无法测试片源连接。')
+  await expect(section).not.toContainText('response-private')
+  await save.click()
+  await expect(section.getByRole('alert')).toHaveText('无法保存苹果 CMS 片源设置。')
+  await expect(section.getByText(source, { exact: true })).toBeVisible()
+
+  await page.reload()
+  await expect(address).toHaveValue(source)
+  await expect(active).toBeVisible()
+  await expect(saved).toHaveCount(0)
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 })))
+  await page.reload()
+  await expect(page.getByTestId('page-settings')).toHaveClass(/\bcompact\b/)
+  await expect(active).toBeVisible()
+  expect(await section.evaluate((panel) => {
+    const panelBox = panel.getBoundingClientRect()
+    return Array.from(panel.querySelectorAll('input, button')).every((control) => {
+      const controlBox = control.getBoundingClientRect()
+      return controlBox.left >= panelBox.left - 1 && controlBox.right <= panelBox.right + 1
+    })
+  })).toBe(true)
+  await section.screenshot({ path: testInfo.outputPath('apple-cms-compact.png') })
+  await clear.click()
+  await expect(active).toBeVisible()
+  await expect(cleared).toBeVisible()
+  await expect(address).toHaveValue('')
+  await page.reload()
+  await expect(demo).toBeVisible()
+  await expect(cleared).toHaveCount(0)
+})
+
+for (const mode of ['preview', 'legacy bridge', 'managed'] as const) {
+  test(`Apple CMS settings show only supported controls in ${mode}`, async ({ page }, testInfo) => {
+    const network: string[] = []
+    page.on('request', (request) => {
+      if (new URL(request.url()).hostname === 'catalog.example.test') network.push(request.url())
+    })
+    if (mode !== 'preview') {
+      await page.addInitScript((managed) => {
+        const config = async () => {
+          document.body.dataset.cmsSettingsRead = 'yes'
+          return { active: true, savedURL: '', managed: true, canConfigure: false, restartRequired: false }
+        }
+        const call = async () => {
+          document.body.dataset.cmsSettingsMutated = 'yes'
+          throw new Error('managed settings are read-only')
+        }
+        Object.assign(window, { go: { app: { App: {
+          StorageReady: async () => false,
+          AppVersion: async () => 'v0.1.0',
+          AutostartEnabled: async () => false,
+          CacheStats: async () => null,
+          AppleCMSConfiguration: config,
+          SaveAppleCMSURL: call,
+          ClearAppleCMSURL: call,
+          ...(managed ? { TestAppleCMSConnection: call } : {}),
+        } } } })
+      }, mode === 'managed')
+    }
+    await page.goto('/#/settings')
+    await page.getByTestId('snav-playback').click()
+    await expect(page.getByTestId('media-source')).toBeVisible()
+    const section = page.getByRole('region', { name: '苹果 CMS 片源' })
+    if (mode === 'managed') {
+      await expect(section).toContainText('当前已启用苹果 CMS 片源。')
+      await expect(section).toContainText('片源由运营方配置。')
+      await expect(section.getByRole('textbox')).toHaveCount(0)
+      await expect(section.getByRole('button')).toHaveCount(0)
+      await section.screenshot({ path: testInfo.outputPath('apple-cms-managed.png') })
+    } else {
+      await expect(section).toHaveCount(0)
+      expect(await page.locator('body').getAttribute('data-cms-settings-read')).toBeNull()
+    }
+    expect(await page.locator('body').getAttribute('data-cms-settings-mutated')).toBeNull()
+    expect(network).toEqual([])
+  })
+}
+
 test('desktop cache directory changes only after a confirmed choice and can be reset', async ({ page }, testInfo) => {
   await page.addInitScript(() => {
     let picks = 0

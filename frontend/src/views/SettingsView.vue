@@ -11,10 +11,11 @@ import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { observeContentWidth } from '@/layoutWidth'
-import { cacheStats, cacheClear, cacheSetLimit, hasCacheDirectoryPicker, chooseCacheDirectory, resetCacheDirectory, diagnostics, backupNow, LibraryBackupPendingError, canRestoreLibraryBackup, hasBridge, autostartEnabled, setAutostart, appVersion, type CacheStats } from '@/bindings'
+import { cacheStats, cacheClear, cacheSetLimit, hasCacheDirectoryPicker, chooseCacheDirectory, resetCacheDirectory, diagnostics, backupNow, LibraryBackupPendingError, canRestoreLibraryBackup, hasBridge, hasAppleCMSSettings, autostartEnabled, setAutostart, appVersion, type CacheStats } from '@/bindings'
 import { BaseButton, Modal } from '@/components/ui'
 import BrandLogo from '@/components/BrandLogo.vue'
 import PrivacyNoticeDialog from '@/components/PrivacyNoticeDialog.vue'
+import AppleCMSSettings from '@/components/AppleCMSSettings.vue'
 
 const a = useAppSettings(); const st = a.s; const pl = useSettingsStore(); const toast = useToastStore()
 const sections = [{ k: 'general', l: '通用', i: Settings }, { k: 'playback', l: '播放', i: CirclePlay }, { k: 'danmaku', l: '弹幕', i: MessageSquareText }, { k: 'cache', l: '下载缓存', i: Download }, { k: 'keys', l: '快捷键', i: Keyboard }, { k: 'look', l: '外观', i: Palette }, { k: 'about', l: '关于与更新', i: Info }]
@@ -40,6 +41,7 @@ function go(k: string) {
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 const desktop = hasBridge()
+const canShowAppleCMSSettings = hasAppleCMSSettings()
 const closeAction = computed(() => st.closeAction === CLOSE_TO_TRAY && !a.canCloseToTray ? '最小化到任务栏' : st.closeAction)
 const closeActionPending = ref(false)
 async function changeCloseAction(event: Event) {
@@ -325,7 +327,9 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
           <label class="r">播放源<span class="sel"><select v-model="st.mediaSource" data-testid="media-source"><option value="demo">演示媒体（自制片段）</option><option value="sim">模拟画面</option></select><ChevronDown :size="14" /></span></label>
           <label class="r">播放方式<span class="sel wide"><select v-model="st.playMode"><option v-for="mode in PLAY_MODES" :key="mode">{{ mode }}</option></select><ChevronDown :size="14" /></span></label>
           <div class="r">解码模式<div class="radios"><label><input v-model="st.decode" type="radio" value="hw" data-testid="decode-hw" />硬件解码（推荐）</label><label><input v-model="st.decode" type="radio" value="sw" data-testid="decode-sw" />软件解码</label></div></div>
-          <label class="r">播放倍速默认值<input v-model.number="st.defaultSpeed" @change="pl.speed = st.defaultSpeed" class="rg" type="range" min="0.5" max="2" step="0.25" aria-label="播放倍速默认值" data-testid="default-speed" :style="{ '--p': pct(st.defaultSpeed, 0.5, 2) }" /><em>{{ formatSpeed(st.defaultSpeed) }}x</em></label></section>
+          <label class="r">播放倍速默认值<input v-model.number="st.defaultSpeed" @change="pl.speed = st.defaultSpeed" class="rg" type="range" min="0.5" max="2" step="0.25" aria-label="播放倍速默认值" data-testid="default-speed" :style="{ '--p': pct(st.defaultSpeed, 0.5, 2) }" /><em>{{ formatSpeed(st.defaultSpeed) }}x</em></label>
+          <AppleCMSSettings v-if="canShowAppleCMSSettings" />
+        </section>
         <section id="sec-danmaku" class="pn"><h2><MessageSquareText :size="22" />弹幕</h2>
           <div class="r">开启弹幕<button class="tg" :class="{ on: pl.danmaku.enabled }" role="switch" :aria-checked="pl.danmaku.enabled" aria-label="开启弹幕" data-testid="s-dm-enabled" @click="pl.danmaku.enabled = !pl.danmaku.enabled"><i /></button></div>
           <label class="r">弹幕透明度<input v-model.number="pl.danmaku.opacity" class="rg" type="range" min="20" max="100" aria-label="弹幕透明度" data-testid="s-dm-opacity" :style="{ '--p': pct(pl.danmaku.opacity, 20, 100) }" /><em>{{ pl.danmaku.opacity }}%</em></label>

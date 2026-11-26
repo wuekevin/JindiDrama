@@ -28,6 +28,12 @@ type App struct {
 	catalogMediaClosed bool
 	catalogCovers      *catalogCoverService
 
+	appleCMSConfigMu        sync.Mutex
+	appleCMSManaged         bool
+	appleCMSStartupURL      string
+	appleCMSStartupErr      error
+	appleCMSSettingsChanged atomic.Bool
+
 	p                 provider.VideoProvider
 	licensed          *licensed.DemoProvider
 	licensedErr       error

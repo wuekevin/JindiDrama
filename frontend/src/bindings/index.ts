@@ -66,7 +66,20 @@ export interface LicensedConfiguration {
   readError?: string
 }
 
+export interface AppleCMSConfiguration {
+  active: boolean
+  savedURL: string
+  managed: boolean
+  canConfigure: boolean
+  restartRequired: boolean
+  readError?: string
+}
+
 interface GoApp {
+  AppleCMSConfiguration?(): Promise<AppleCMSConfiguration>
+  TestAppleCMSConnection?(url: string): Promise<void>
+  SaveAppleCMSURL?(url: string): Promise<AppleCMSConfiguration>
+  ClearAppleCMSURL?(): Promise<AppleCMSConfiguration>
   LicensedConfiguration?(): Promise<LicensedConfiguration>
   ChooseLicensedDirectory?(): Promise<LicensedConfiguration>
   ClearLicensedDirectory?(): Promise<LicensedConfiguration>
@@ -130,6 +143,30 @@ const api = (): GoApp | null => ((window as any).go?.app?.App as GoApp | undefin
 export const markFrontendReady = () => api()?.MarkFrontendReady?.()
 
 export const hasBridge = () => api() !== null
+export function hasAppleCMSSettings() {
+  const a = api()
+  return typeof a?.AppleCMSConfiguration === 'function' && typeof a.TestAppleCMSConnection === 'function' &&
+    typeof a.SaveAppleCMSURL === 'function' && typeof a.ClearAppleCMSURL === 'function'
+}
+
+let appleCMSWrite = Promise.resolve()
+let appleCMSWritesPending = 0
+export const hasPendingAppleCMSWrite = () => appleCMSWritesPending > 0
+export async function readAppleCMSConfiguration() {
+  await appleCMSWrite
+  return api()?.AppleCMSConfiguration?.()
+}
+export const testAppleCMSConnection = (url: string) => api()?.TestAppleCMSConnection?.(url)
+export const saveAppleCMSURL = (url: string) => queueAppleCMSWrite(() => api()?.SaveAppleCMSURL?.(url))
+export const clearAppleCMSURL = () => queueAppleCMSWrite(() => api()?.ClearAppleCMSURL?.())
+
+function queueAppleCMSWrite(operation: () => Promise<AppleCMSConfiguration> | undefined) {
+  appleCMSWritesPending++
+  const write = appleCMSWrite.then(operation)
+  appleCMSWrite = write.then(() => {}, () => {}).finally(() => { appleCMSWritesPending-- })
+  return write
+}
+
 export const closeDesktopWindow = () => api()?.CloseWindow?.()
 let windowCloseSettingWrite = Promise.resolve()
 export function setWindowCloseSetting(action: string) {
@@ -394,7 +431,7 @@ function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
   return queued
 }
 function queuedWindowWrites() {
-  return [windowCloseSettingWrite, libraryWrites, searchWrites, localCommentWrites, ...danmakuWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
+  return [windowCloseSettingWrite, appleCMSWrite, libraryWrites, searchWrites, localCommentWrites, ...danmakuWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
 }
 
 export async function waitForWindowWrites() {

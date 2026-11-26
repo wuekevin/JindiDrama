@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { hasPendingDanmakuWrite, hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
+import { hasPendingAppleCMSWrite, hasPendingDanmakuWrite, hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
 
 export const BEFORE_WINDOW_HIDE = 'jindi-before-window-hide'
 export const BEFORE_WINDOW_CLOSE = 'jindi-before-window-close'
@@ -11,7 +11,7 @@ export const windowCloseReplyPending = () => repliedAttempt !== undefined
 export function registerWindowClose() {
   const runtime = (window as Window & { runtime?: {
     EventsOn(name: string, callback: (attempt: string) => void): void
-    EventsEmit(name: string, attempt: string, unconfirmedLibrary: boolean, pendingDanmaku?: boolean): void
+    EventsEmit(name: string, attempt: string, unconfirmedLibrary: boolean, pendingDanmaku?: boolean, pendingAppleCMS?: boolean): void
   } }).runtime
   if (!runtime?.EventsOn || !runtime.EventsEmit) return
   const emit = runtime.EventsEmit.bind(runtime)
@@ -35,7 +35,9 @@ export function registerWindowClose() {
         active = undefined
         repliedAttempt = id
         const library = hasUnconfirmedLibrarySave()
-        if (hasPendingDanmakuWrite()) emit('jindi-window-close-ready', id, library, true)
+        const danmaku = hasPendingDanmakuWrite()
+        if (hasPendingAppleCMSWrite()) emit('jindi-window-close-ready', id, library, danmaku, true)
+        else if (danmaku) emit('jindi-window-close-ready', id, library, true)
         else emit('jindi-window-close-ready', id, library)
       },
     }

@@ -157,12 +157,13 @@ const (
 )
 
 type pendingWindowWrites struct {
-	library bool
-	danmaku bool
+	library  bool
+	danmaku  bool
+	appleCMS bool
 }
 
 func parseWindowCloseResponse(id string, data []any) (pendingWindowWrites, bool) {
-	if (len(data) != 2 && len(data) != 3) || data[0] != id {
+	if len(data) < 2 || len(data) > 4 || data[0] != id {
 		return pendingWindowWrites{}, false
 	}
 	library, ok := data[1].(bool)
@@ -176,7 +177,15 @@ func parseWindowCloseResponse(id string, data []any) (pendingWindowWrites, bool)
 	if !ok {
 		return pendingWindowWrites{}, false
 	}
-	return pendingWindowWrites{library: library, danmaku: danmaku}, true
+	pending := pendingWindowWrites{library: library, danmaku: danmaku}
+	if len(data) == 4 {
+		appleCMS, ok := data[3].(bool)
+		if !ok {
+			return pendingWindowWrites{}, false
+		}
+		pending.appleCMS = appleCMS
+	}
+	return pending, true
 }
 
 // PrepareWindowClose gives the WebView a bounded opportunity to finish local writes.
@@ -228,7 +237,7 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 				if !ok {
 					return
 				}
-				if !pending.library && !pending.danmaku {
+				if !pending.library && !pending.danmaku && !pending.appleCMS {
 					finish(waiting)
 					return
 				}
@@ -285,6 +294,17 @@ func confirmUnsavedQuit(ctx context.Context, pending pendingWindowWrites) bool {
 		if pending.library {
 			title = "仍有本地内容尚未确认保存"
 			message = "收藏或观看历史的改动及弹幕尚未确认保存，退出后可能丢失。仍然退出吗？"
+		}
+	}
+	if pending.appleCMS {
+		if goruntime.GOOS == "darwin" {
+			keepEditing = "继续等待"
+		}
+		title = "正在保存苹果 CMS 片源"
+		message = "片源设置仍在保存，退出后可能丢失。仍然退出吗？"
+		if pending.library || pending.danmaku {
+			title = "仍有本地内容尚未确认保存"
+			message = "片源设置及其他本地改动尚未确认保存，退出后可能丢失。仍然退出吗？"
 		}
 	}
 	selected, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{

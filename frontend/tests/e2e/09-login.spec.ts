@@ -9,6 +9,8 @@ test.describe('09 账号登录', () => {
     await trigger.click({ timeout: 3000 })
     const dialog = page.getByRole('dialog', { name: '金帝短剧隐私说明' })
     await expect(dialog).toContainText('演示登录不会发送短信')
+    await expect(dialog).toContainText('「测试连接」和「保存片源」会向输入的苹果 CMS 地址请求目录第一页')
+    await expect(dialog).toContainText('环境地址和查询参数不会传到应用界面或写入数据库')
     await expect(dialog).toContainText('并发送为该片源输入的搜索词以获取结果')
     await expect(dialog).toContainText('浏览剧目时会从片源提供的地址加载封面')
     await expect(dialog).toContainText('查看该片源的收藏或观看历史时，应用会分批向当前配置的片源请求对应剧目的详情和分集')

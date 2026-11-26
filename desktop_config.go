@@ -15,6 +15,9 @@ import (
 )
 
 func prepareDesktopMedia(a *app.App, options *assetserver.Options) func() {
+	if err := app.PrepareAppleCMS(a, os.Getenv("JINDIDRAMA_CMS_URL")); err != nil {
+		println(err.Error())
+	}
 	directory, err := app.PrepareLicensedDirectory(a, os.Getenv("JINDIDRAMA_LICENSED_MEDIA_DIR"))
 	if err != nil || directory == "" {
 		app.ConfigureLicensedMedia(a, nil, err)
