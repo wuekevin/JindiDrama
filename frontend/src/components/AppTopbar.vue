@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray } from '@/bindings'
+import { notifyBeforeWindowHide } from '@/bindings/windowClose'
 import { CLOSE_TO_TRAY, TRAY_UNAVAILABLE_MESSAGE, useAppSettings } from '@/stores/appSettings'
 import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
@@ -108,7 +109,11 @@ let closingWindow = false
 async function win(op: 'min' | 'max' | 'close') {
   const rt = (window as any).runtime
   if (!rt) return
-  if (op === 'min') return rt.WindowMinimise()
+  const minimise = () => {
+    notifyBeforeWindowHide()
+    return rt.WindowMinimise()
+  }
+  if (op === 'min') return minimise()
   if (op === 'max') return rt.WindowToggleMaximise()
   if (closingWindow) return
   const action = appSettings.s.closeAction
@@ -119,9 +124,10 @@ async function win(op: 'min' | 'max' | 'close') {
       if (!(await desktopClose)) toast.push(TRAY_UNAVAILABLE_MESSAGE, 'error')
       return
     }
-    if (action === '最小化到任务栏') return rt.WindowMinimise()
+    if (action === '最小化到任务栏') return minimise()
     if (action !== CLOSE_TO_TRAY) return rt.Quit()
-    if (!appSettings.canCloseToTray) return rt.WindowMinimise()
+    if (!appSettings.canCloseToTray) return minimise()
+    notifyBeforeWindowHide()
     if (await hideWindowToTray()) return
   } catch {
     if (action !== CLOSE_TO_TRAY) {
@@ -132,7 +138,7 @@ async function win(op: 'min' | 'max' | 'close') {
     closingWindow = false
   }
   toast.push(TRAY_UNAVAILABLE_MESSAGE, 'error')
-  rt.WindowMinimise()
+  minimise()
 }
 </script>
 <template>

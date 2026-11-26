@@ -1,7 +1,32 @@
 import { readFile } from 'node:fs/promises'
 import { test, expect } from '@playwright/test'
+import { checkpointEarlyPlayback } from './fixtures'
 
 const t = (page: import('@playwright/test').Page) => page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).currentTime)
+
+for (const eventName of ['jindi-before-window-hide', 'pagehide', 'minimize']) {
+  test(`demo saves an early playback checkpoint on ${eventName}`, async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('jindi.library.v1', '{"favorites":[],"history":[]}')
+      Object.assign(window, { runtime: {
+        WindowMinimise: () => sessionStorage.setItem('test-window-minimized', '1'),
+      } })
+    })
+    await page.goto('/#/watch/d1/1?paused')
+    await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'paused')
+
+    const result = await checkpointEarlyPlayback(page.getByTestId('video'), eventName)
+    expect(result.before).toEqual([])
+    expect(result.positionSec).toBeGreaterThan(0)
+    expect(result.positionSec).toBeLessThan(2)
+    expect(result.saved).toEqual([expect.objectContaining({ dramaId: 'd1', episode: 1 })])
+    expect(result.saved[0].positionSec).toBeCloseTo(result.positionSec, 2)
+    expect(result.paused).toBe(false)
+    if (eventName === 'minimize') {
+      expect(await page.evaluate(() => sessionStorage.getItem('test-window-minimized'))).toBe('1')
+    }
+  })
+}
 
 test('quick switches and unavailable episodes preserve the real playback bookmark', async ({ page }) => {
   const bookmark = { dramaId: 'd2', episode: 80, percent: 99, positionSec: 23.8, durationSec: 24, watchedAt: Date.now() - 8 * 86_400_000 }

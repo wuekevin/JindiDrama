@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { checkpointEarlyPlayback } from './fixtures'
 
 const drama = {
   id: 'local-landscape', title: '南风纪事', summary: '自有版权的风景片段', tags: ['风景'],
@@ -569,6 +570,19 @@ test('startup skips a licensed episode whose media cannot be opened', async ({ p
   await page.goto('/#/')
   await expect(page).toHaveURL(/licensed\?id=local-older&ep=1/)
   await expect(page.locator('video')).toHaveJSProperty('videoWidth', 360)
+})
+
+test('licensed saves an early playback checkpoint on desktop hide', async ({ page }) => {
+  await setupPlaybackPreferences(page, '单集播放')
+  await page.goto('/#/licensed?id=local-landscape&ep=1')
+
+  const result = await checkpointEarlyPlayback(page.locator('video'), 'jindi-before-window-hide')
+  expect(result.before).toEqual([])
+  expect(result.positionSec).toBeGreaterThan(0)
+  expect(result.positionSec).toBeLessThan(5)
+  expect(result.saved).toEqual([expect.objectContaining({ dramaId: 'local-landscape', episode: 1 })])
+  expect(result.saved[0].positionSec).toBeCloseTo(result.positionSec, 2)
+  expect(result.paused).toBe(false)
 })
 
 async function setupPlaybackPreferences(page: Page, mode: string, { locked = false, blockedAutoplay = false, delayedEpisodes = false, blockedLoop = false, failFirstList = false } = {}) {

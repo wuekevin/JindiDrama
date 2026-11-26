@@ -5,7 +5,7 @@ import { BookOpen, Download, Film, Heart, PictureInPicture2, Search } from 'luci
 import { usePictureInPicture } from '@/player/pictureInPicture'
 import { exportLicensedEpisode, hasLicensedExport, loadProviderEpisodes, resolvePlayback } from '@/bindings'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
-import { BEFORE_WINDOW_CLOSE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
+import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
@@ -306,6 +306,7 @@ function onWindowCloseCanceled() {
 onMounted(() => {
   window.addEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
   window.addEventListener('pagehide', saveOnExit)
+  window.addEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
   window.addEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
 })
 onBeforeUnmount(() => {
@@ -314,6 +315,7 @@ onBeforeUnmount(() => {
   clearStartupPlayback()
   window.removeEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
   window.removeEventListener('pagehide', saveOnExit)
+  window.removeEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
   window.removeEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
 })
 

@@ -656,3 +656,8 @@
 
 - 设置页读取已验证的 LaunchAgent 后再查询当前 GUI 会话的 launchd 状态。系统显式禁用金帝启动项时显示关闭，尝试开启会提示检查系统登录项。查询失败使用现有错误状态。应用保留系统禁用设置及原登记。[Apple launchd 说明](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac)
 - Apple Silicon 只读核对本机 `launchctl` 实际响应。夹具覆盖显式禁用、查询失败、无登记和已有登记保留。Go vet、全量 Go、开机启动竞态和 Windows amd64 开机启动测试程序交叉编译通过。系统设置实际审批和注销重登仍待验收。[BMad 记录](../_bmad-output/plan-e11-macos-autostart-system-policy.md)
+
+## E11 收起窗口时保存本地播放进度（2026-11-27）
+
+- 演示视频和本地授权片库收到桌面隐藏事件时会保存当前播放位置。演示视频离开页面也会保存。顶栏最小化及旧窗口桥的隐藏路径在执行窗口操作前发出保存事件。播放器不会因这次保存而暂停。
+- 用真实演示视频和本地片库视频复现四个入口的旧问题。修复后均在定期保存前记录准确进度，并保持播放。最终 164 项 Playwright、122 项 Vitest、前端类型检查和构建、Go vet 与 Go 全量通过。原生窗口操作留待集中验收。[回归日志](../build/bin/qa-local-playback-hide/e2e-final.log) · [BMad 记录](../_bmad-output/plan-e11-local-playback-hide-checkpoint.md)

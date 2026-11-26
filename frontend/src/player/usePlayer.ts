@@ -2,7 +2,7 @@ import { onBeforeUnmount, nextTick, ref, computed, watch, type Ref } from 'vue'
 import { transition, episodeDuration, type PEvent, type PState } from './machine'
 import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
-import { BEFORE_WINDOW_CLOSE } from '@/bindings/windowClose'
+import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE } from '@/bindings/windowClose'
 import { hasBridge, logEvent, resolvePlayback } from '@/bindings'
 import { demoQualityId, demoSources } from './demoMedia'
 export { demoSources } from './demoMedia'
@@ -237,7 +237,18 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     pause()
     save()
   }
+  window.addEventListener('pagehide', save)
+  window.addEventListener(BEFORE_WINDOW_HIDE, save)
   window.addEventListener(BEFORE_WINDOW_CLOSE, saveBeforeClose)
-  onBeforeUnmount(() => { window.removeEventListener(BEFORE_WINDOW_CLOSE, saveBeforeClose); clearInterval(timer); clearTimeout(resolveTimer); clearTimeout(retryTimer); loadToken++; if (state.value === 'playing' || state.value === 'paused') save() })
+  onBeforeUnmount(() => {
+    window.removeEventListener('pagehide', save)
+    window.removeEventListener(BEFORE_WINDOW_HIDE, save)
+    window.removeEventListener(BEFORE_WINDOW_CLOSE, saveBeforeClose)
+    clearInterval(timer)
+    clearTimeout(resolveTimer)
+    clearTimeout(retryTimer)
+    loadToken++
+    if (state.value === 'playing' || state.value === 'paused') save()
+  })
   return { state, time, duration, error, muted, buffering, retries, video, sources, mode: opts.mode, load, loadCurrent, retry, play, pause, toggle, seek, seekBy, onMeta, onTime, onSeeked, onEnded, onError, onWaiting, onMediaControl, percent: computed(() => (duration.value ? (time.value / duration.value) * 100 : 0)) }
 }
