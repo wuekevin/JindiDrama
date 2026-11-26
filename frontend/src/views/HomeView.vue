@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity as InfinityIcon, Building2, Medal, Clock, Play } from 'lucide-vue-next'
+import { catalogResumeIDs } from '@/bindings'
 import { useCatalogStore } from '@/stores/catalog'
 import { useLibraryStore } from '@/stores/library'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { useSearchStore } from '@/stores/search'
-import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
+import { useCMSLibraryDetails } from '@/composables/useCMSLibraryDetails'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import NewDramaCard from '@/components/NewDramaCard.vue'
 import { fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
@@ -32,13 +35,38 @@ const home = computed(() => catalog.home)
 const catalogTitle = computed(() => home.value?.catalogLabel ?? '今日上新')
 const { card } = useLicensedCatalog()
 const ranking = computed(() => home.value?.rankings[tab.value].slice(0, 5) ?? [])
+const cmsHistoryIds = computed(() => mode() === 'normal'
+  ? lib.history.filter((history) => isAppleCMSDramaId(history.dramaId))
+    .sort((a, b) => b.watchedAt - a.watchedAt).map((history) => history.dramaId)
+  : [])
+const currentCMSIds = ref<string[]>([])
+watch(cmsHistoryIds, async (ids, _, onCleanup) => {
+  let active = true
+  onCleanup(() => { active = false })
+  if (!ids.length) {
+    currentCMSIds.value = []
+    return
+  }
+  const candidates = await catalogResumeIDs(ids)?.catch(() => [])
+  if (active) currentCMSIds.value = candidates ?? []
+}, { immediate: true })
+const { details: cmsDetails, loading: loadingCMS, retryFailed } = useCMSLibraryDetails(() => currentCMSIds.value)
+function retryHome() {
+  void load()
+  void retryFailed()
+}
 const resume = computed(() => lib.history.flatMap((history) => {
-  const drama = card(history.dramaId)
-  const episode = drama && continuationEpisode(drama, history)
-  if (!drama || episode === undefined) return []
+  const cms = isAppleCMSDramaId(history.dramaId)
+  const detail = cms && currentCMSIds.value.includes(history.dramaId) ? cmsDetails.get(history.dramaId) : undefined
+  const drama = cms ? detail?.drama : card(history.dramaId)
+  if (!drama || (catalog.status !== 'ready' && !cms)) return []
+  const episode = detail ? catalogBookmarkEpisode(detail, history) : continuationEpisode(drama, history)
+  if (episode === undefined || (history.percent === 100 && episode === history.episode)) return []
   const next = episode !== history.episode
   return [{ d: drama, episode, next, percent: next ? 0 : history.percent, watchedAt: history.watchedAt }]
 }).sort((a, b) => Number(a.next) - Number(b.next) || b.watchedAt - a.watchedAt).slice(0, 3))
+const showResume = computed(() => catalog.status === 'ready' ||
+  ((catalog.status === 'empty' || catalog.status === 'error') && resume.value.some((item) => item.d.providerOnly)))
 const openDrama = (id: string, fromProvider?: boolean) => router.push(detailRoute(id, fromProvider))
 function watchNow(id: string) {
   const history = lib.history.find((entry) => entry.dramaId === id)
@@ -57,7 +85,7 @@ const autoplay = computed(() => route.query.static === undefined)
       <Skeleton style="height: 294px; border-radius: 24px; margin-top: 11px" />
       <div class="sk-row"><Skeleton v-for="i in 6" :key="i" style="height: 230px" /></div>
     </template>
-    <ErrorState v-else-if="catalog.status === 'error'" :message="catalog.error" @retry="load" />
+    <ErrorState v-else-if="catalog.status === 'error'" :message="catalog.error" @retry="retryHome" />
     <template v-else-if="catalog.status === 'empty'">
       <section v-if="home?.catalogLabel" class="block" :aria-label="catalogTitle">
         <div class="sec-h"><h2>{{ catalogTitle }}</h2></div>
@@ -93,17 +121,17 @@ const autoplay = computed(() => route.query.static === undefined)
         </ol>
       </section>
 
-      <section class="block" aria-label="继续观看">
-        <div class="sec-h"><Clock :size="26" /><h2>继续观看</h2><button class="link" @click="router.push('/history')">查看更多<ChevronRight :size="15" /></button></div>
-        <EmptyState v-if="!resume.length" :title="lib.history.length ? '暂无可继续观看的短剧' : '还没有观看记录'" :hint="lib.history.length ? undefined : '去推荐页挑一部开始追剧吧'" />
-        <div v-else class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="router.push(playbackRoute(r.d.id, r.episode))">
-          <img :src="r.d.cover" :alt="r.d.title" />
-          <span class="rm"><strong>{{ r.d.title }}</strong><em><template v-if="r.next">下一集 · </template>第{{ r.episode }}集 / 共{{ r.d.episodeCount }}集</em>
-            <span class="pg"><ProgressBar :value="r.percent" /><i>{{ r.percent }}%</i></span></span>
-          <span class="pl" aria-hidden="true"><Play :size="16" fill="currentColor" /></span>
-        </button></div>
-      </section>
     </template>
+    <section v-if="showResume" class="block" aria-label="继续观看">
+      <div class="sec-h"><Clock :size="26" /><h2>继续观看</h2><button class="link" @click="router.push('/history')">查看更多<ChevronRight :size="15" /></button></div>
+      <EmptyState v-if="!resume.length" :title="loadingCMS ? '正在核对片源…' : lib.history.length ? '暂无可继续观看的短剧' : '还没有观看记录'" :hint="lib.history.length ? undefined : '去推荐页挑一部开始追剧吧'" />
+      <div v-else class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="router.push(r.d.providerOnly ? catalogPlaybackRoute(r.d.id, r.episode) : playbackRoute(r.d.id, r.episode))">
+        <img :key="r.d.cover" v-cancel-catalog-cover :crossorigin="r.d.providerOnly ? 'anonymous' : undefined" :src="r.d.cover" :alt="r.d.title" @error="fallbackCatalogCover" />
+        <span class="rm"><strong>{{ r.d.title }}</strong><em><template v-if="r.next">下一集 · </template>第{{ r.episode }}集 / 共{{ r.d.episodeCount }}集</em>
+          <span class="pg"><ProgressBar :value="r.percent" /><i>{{ r.percent }}%</i></span></span>
+        <span class="pl" aria-hidden="true"><Play :size="16" fill="currentColor" /></span>
+      </button></div>
+    </section>
   </div>
 </template>
 <style scoped lang="scss">

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -328,5 +329,38 @@ func TestAppleCMSSettingsRecoveredStoreReportsMissedStartup(t *testing.T) {
 				t.Fatalf("restarted after edit: %+v", got)
 			}
 		})
+	}
+}
+
+func TestAppleCMSResumeIDsFilterWrongSourcesBeforeLimit(t *testing.T) {
+	a := New()
+	t.Cleanup(a.close)
+	client := appleCMSSettingsFixture(t)
+	if err := configureAppleCMS(a, "https://catalog.example.test", client); err != nil {
+		t.Fatal(err)
+	}
+	page, err := a.CatalogPage("", 1)
+	if err != nil || len(page.Entries) != 1 {
+		t.Fatalf("catalog fixture: %+v, %v", page, err)
+	}
+	id := page.Entries[0].ID
+	prefix := id[:strings.LastIndexByte(id, ':')+1]
+	var ids, want []string
+	for i := 1; i <= 15; i++ {
+		ids = append(ids, "apple-cms:ffffffffffffffffffffffffffffffff:"+strconv.Itoa(i))
+	}
+	ids = append(ids, prefix+"invalid")
+	for i := 20; i <= 33; i++ {
+		current := prefix + strconv.Itoa(i)
+		ids = append(ids, current)
+		if len(want) < 12 {
+			want = append(want, current)
+		}
+	}
+	if got := a.CatalogResumeIDs(ids); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("candidate bookmark IDs = %v, want %v", got, want)
+	}
+	if got := New().CatalogResumeIDs(ids); len(got) != 0 {
+		t.Fatalf("non-CMS provider returned bookmarks: %v", got)
 	}
 }

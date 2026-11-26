@@ -21,7 +21,7 @@ type LibraryChanges = {
 }
 type CatalogState = {
   id: string; provider: string; available: number[]
-  format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
+  home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
 const mediaURL = 'http://127.0.0.1:45671'
 const hlsType = 'application/vnd.apple.mpegurl'
@@ -65,7 +65,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
     let activeLookups = 0
     const closeReplies: { id: string; unconfirmed: boolean }[] = []
     const testState = {
-      calls, released, revoked, lookups, closeReplies, peakLookups: 0, providerReads: 0, release: () => {},
+      calls, released, revoked, lookups, closeReplies, peakLookups: 0, failedLookups: 0, providerReads: 0, release: () => {},
       close: () => events.get('jindi-before-window-close')?.('close-1'),
       hide: () => events.get('jindi-before-window-hide')?.(''),
       cancelClose: () => events.get('jindi-window-close-canceled')?.('close-1'),
@@ -88,7 +88,22 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
         testState.providerReads++
         return provider
       },
-      Home: async () => mode === 'apple-cms-empty' ? [] : [drama],
+      CatalogResumeIDs: async (ids: string[]) => {
+        if (!libraryFixture) return []
+        const catalog = await desktop.readDesktopCatalog()
+        if (catalog.provider !== 'apple-cms') return []
+        const prefix = catalog.id.slice(0, catalog.id.lastIndexOf(':') + 1)
+        return ids.filter((candidate) => candidate.startsWith(prefix)).slice(0, 12)
+      },
+      LicensedCatalog: async () => libraryFixture && (await desktop.readDesktopCatalog()).localBookmarks
+        ? [1, 2, 3].map((index) => ({ id: 'local-' + index, title: '本地样片' + index,
+          tags: [], episodeCount: 3, updatedTo: 3, unavailableEpisodes: [] }))
+        : [],
+      Home: async () => {
+        const state = libraryFixture ? (await desktop.readDesktopCatalog()).home : undefined
+        if (state === 'error') throw new Error('目录暂不可用')
+        return state === 'empty' || mode === 'apple-cms-empty' ? [] : [drama]
+      },
       HomeFeed: async () => ({ catalogLabel: cms ? '片源目录' : undefined, todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
       CatalogSearch: async (query: string) => query === '海岛' ? [drama] : [],
       CatalogPage: async (query: string, page: number) => ({
@@ -106,7 +121,10 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
           const catalog = await desktop.readDesktopCatalog()
           if (catalog.holdDetail) await desktop.waitForCMSDetails()
           if (catalog.detailDelayMs) await new Promise((resolve) => setTimeout(resolve, catalog.detailDelayMs))
-          if (catalog.offline) throw new Error('unavailable')
+          if (catalog.offline) {
+            testState.failedLookups++
+            throw new Error('unavailable')
+          }
           if (catalog.id !== requestedId) throw 'provider: 未找到'
           return { ...drama, id: requestedId, cover: catalog.cover, updatedTo: Math.max(0, ...catalog.available) }
         } finally {
@@ -972,4 +990,95 @@ test('CMS library views share three lookup slots and skip requests queued by an 
   } finally {
     release()
   }
+})
+
+
+test('CMS home resumes a verified bookmark even if the main catalog request fails', async ({ page }, testInfo) => {
+  const row = (dramaId: string, watchedAt: number): HistoryRow => ({
+    dramaId, episode: 3, percent: 20, watchedAt, positionMs: 5000, durationMs: 24000, episodeCountAtWatch: 3,
+  })
+  const now = Date.now()
+  const obsolete = Array.from({ length: 13 }, (_, index) =>
+    row('apple-cms:ffffffffffffffffffffffffffffffff:' + (index + 1), now - index))
+  const desktop = await cmsLibraryFixture(page, [...obsolete, row(cmsId, now - 1000)])
+  desktop.catalog.home = 'error'
+  desktop.catalog.available = [3]
+  const cover = mediaURL + '/catalog-cover/' + '2'.repeat(32)
+  desktop.catalog.cover = cover
+  await page.route(cover, (route) => route.fulfill({ status: 410 }))
+
+  await page.goto('/#/home')
+  const resume = page.getByTestId('resume-card')
+  await expect(page.getByTestId('error')).toBeVisible()
+  await expect(resume).toHaveCount(1)
+  await expect(resume).toContainText(cmsTitle)
+  await expect(resume).toContainText('第3集')
+  await expect(resume.getByRole('img')).toHaveAttribute('src', /^data:image\/svg\+xml/)
+  await expect.poll(() => calls(page)).toEqual([])
+  await page.screenshot({ path: testInfo.outputPath('apple-cms-home-resume.png') })
+  await resume.click()
+  await expect(page).toHaveURL(/\/play\/3$/)
+  const video = historyVideo(page, 3)
+  await expect.poll(() => position(video)).toBeCloseTo(5, 2)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':3'])
+})
+
+test('CMS home only offers a completed bookmark when the next episode is available', async ({ page }) => {
+  const local = [1, 2, 3].map((index) => ({
+    dramaId: 'local-' + index, episode: 1, percent: 50, watchedAt: Date.now(),
+    positionMs: 12000, durationMs: 24000, episodeCountAtWatch: 3,
+  }))
+  const desktop = await cmsLibraryFixture(page, [{
+    dramaId: cmsId, episode: 1, percent: 100, watchedAt: Date.now(),
+    positionMs: 24000, durationMs: 24000, episodeCountAtWatch: 3,
+  }, ...local])
+  desktop.catalog.localBookmarks = true
+  desktop.catalog.home = 'empty'
+  desktop.catalog.available = [1, 2]
+  await page.goto('/#/home')
+  await expect(page.getByText('暂无片源')).toBeVisible()
+  const resume = page.getByTestId('resume-card')
+  await expect(resume).toContainText('下一集 · 第2集')
+  await resume.click()
+  await expect(page).toHaveURL(/\/play\/2$/)
+  await expect(historyVideo(page, 2)).toBeVisible()
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':2'])
+  await page.goBack()
+  await expect(page.getByTestId('page-home')).toBeVisible()
+
+  desktop.catalog.available = [1, 3]
+  desktop.catalog.localBookmarks = false
+  delete desktop.catalog.home
+  await page.reload()
+  await expect.poll(() => page.evaluate(() => (window as unknown as {
+    catalogTest: { lookups: string[] }
+  }).catalogTest.lookups)).toEqual([cmsId])
+  await expect(page.getByText('暂无可继续观看的短剧')).toBeVisible()
+  await expect(resume).toHaveCount(0)
+  expect(await calls(page)).toEqual([])
+})
+
+
+test('retrying a failed CMS home rechecks bookmarks once the connection recovers', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page, [{
+    dramaId: cmsId, episode: 3, percent: 25, watchedAt: Date.now(),
+    positionMs: 6000, durationMs: 24000, episodeCountAtWatch: 3,
+  }])
+  desktop.catalog.home = 'error'
+  desktop.catalog.offline = true
+  const lookups = () => page.evaluate(() => (window as unknown as {
+    catalogTest: { lookups: string[] }
+  }).catalogTest.lookups)
+  await page.goto('/#/home')
+  const error = page.getByTestId('error')
+  await expect(error).toBeVisible()
+  await expect.poll(() => page.evaluate(() => (window as unknown as {
+    catalogTest: { failedLookups: number }
+  }).catalogTest.failedLookups)).toBe(1)
+  desktop.catalog.offline = false
+  delete desktop.catalog.home
+  await error.getByRole('button', { name: '重试' }).click()
+  await expect(page.getByTestId('resume-card')).toContainText(cmsTitle)
+  await expect.poll(lookups).toEqual([cmsId, cmsId])
+  expect(await calls(page)).toEqual([])
 })

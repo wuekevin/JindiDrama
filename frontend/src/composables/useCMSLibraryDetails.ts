@@ -25,10 +25,23 @@ export function useCMSLibraryDetails(ids: () => string[]) {
   const loading = ref(false)
   let active = true
   let started = false
+  let loadingRun: Promise<void> | undefined
   onBeforeUnmount(() => { active = false })
 
-  async function loadMore() {
-    if (loading.value || !remaining.value.length) return
+  function loadMore() {
+    if (!active || !remaining.value.length) return loadingRun
+    loadingRun ??= loadBatch().finally(() => { loadingRun = undefined })
+    return loadingRun
+  }
+
+  async function retryFailed() {
+    await loadingRun
+    if (!active) return
+    for (const id of ids()) if (details.get(id) === null) details.delete(id)
+    return loadMore()
+  }
+
+  async function loadBatch() {
     const batch = remaining.value.slice(0, batchSize)
     loading.value = true
     const appleCMS = await catalogProviderName().then((name) => name === 'apple-cms', () => false)
@@ -56,5 +69,5 @@ export function useCMSLibraryDetails(ids: () => string[]) {
     void loadMore()
   }, { immediate: true })
 
-  return { details, loadMore, loading, hasMore: computed(() => remaining.value.length > 0) }
+  return { details, loadMore, retryFailed, loading, hasMore: computed(() => remaining.value.length > 0) }
 }

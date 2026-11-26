@@ -76,6 +76,7 @@ export interface AppleCMSConfiguration {
 }
 
 interface GoApp {
+  CatalogResumeIDs?(ids: string[]): Promise<string[]>
   AppleCMSConfiguration?(): Promise<AppleCMSConfiguration>
   TestAppleCMSConnection?(url: string): Promise<void>
   SaveAppleCMSURL?(url: string): Promise<AppleCMSConfiguration>
@@ -377,6 +378,7 @@ export const loadHomeFeed = () => api()?.HomeFeed()
 export const loadProviderCatalog = () => api()?.Home?.()
 export const loadProviderCapabilities = () => api()?.Capabilities?.()
 export const hasProviderCapabilities = () => typeof api()?.Capabilities === 'function'
+export const catalogResumeIDs = (ids: string[]) => api()?.CatalogResumeIDs?.(ids)
 export const activeProviderName = () => api()?.ProviderName?.()
 export const searchProvider = (query: string) => api()?.Search(query)
 export const searchActiveCatalog = (query: string) => api()?.CatalogSearch?.(query)

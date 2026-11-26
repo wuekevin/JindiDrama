@@ -267,9 +267,20 @@ func (p *Provider) ResolvePlayback(ctx context.Context, id string, index int) (p
 
 func episodeID(id string, index int) string { return id + ":" + strconv.Itoa(index) }
 
-func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, error) {
+func (p *Provider) dramaID(id string) (string, bool) {
 	vodID, ok := strings.CutPrefix(id, p.idPrefix)
-	if !ok || !decimalDigits(vodID, 30) {
+	return vodID, ok && decimalDigits(vodID, 30)
+}
+
+// OwnsDramaID matches an ID to the configured endpoint without contacting it.
+func (p *Provider) OwnsDramaID(id string) bool {
+	_, ok := p.dramaID(id)
+	return ok
+}
+
+func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[int][]provider.MediaSource, error) {
+	vodID, ok := p.dramaID(id)
+	if !ok {
 		return provider.Drama{}, nil, provider.ErrNotFound
 	}
 	data, err := p.request(ctx, url.Values{"ac": {"detail"}, "ids": {vodID}})

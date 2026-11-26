@@ -277,3 +277,21 @@ func (a *App) CatalogGenrePage(genre string, page int) (applecms.CatalogPage, er
 	a.projectCatalogCovers(result.Entries)
 	return result, err
 }
+
+// CatalogResumeIDs keeps the first twelve supplied bookmarks owned by the current CMS.
+func (a *App) CatalogResumeIDs(ids []string) []string {
+	result := make([]string, 0, 12)
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok {
+		return result
+	}
+	for _, id := range ids {
+		if cms.OwnsDramaID(id) {
+			result = append(result, id)
+			if len(result) == cap(result) {
+				break
+			}
+		}
+	}
+	return result
+}
