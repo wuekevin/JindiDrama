@@ -31,6 +31,11 @@ interface LibraryChanges {
   readBack?: boolean
 }
 
+interface SearchHistoryState {
+  terms: string[]
+  revision: number
+}
+
 export interface LicensedDrama extends CatalogDrama {
   license: string
   allowExport?: boolean
@@ -79,6 +84,8 @@ interface GoApp {
   RestoreLibraryBackup?(): Promise<{ state: { favorites: string[]; history: HistoryRow[] }; favoritesAdded: number; historyAdded: number } | null>
   SaveLibraryChanges(changes: LibraryChanges): Promise<{ favorites: string[]; history: HistoryRow[] } | null>
   SearchHistory(): Promise<string[]>; SaveSearchHistory(q: string[]): Promise<void>
+  SearchHistoryState?(): Promise<SearchHistoryState>
+  SaveSearchHistoryRevision?(state: SearchHistoryState): Promise<boolean>
   CacheStats(): Promise<CacheStats>; CacheClear(): Promise<void>; CacheSetLimitMB(mb: number): Promise<void>
   ChooseCacheDirectory?(): Promise<CacheStats | null>
   ResetCacheDirectory?(): Promise<CacheStats>
@@ -180,6 +187,7 @@ export const LS = { library: 'jindi.library.v1', search: 'jindi.search.v1', app:
 const SETTING_KEY: Record<string, string> = { [LS.app]: 'app', [LS.player]: 'player', [LS.auth]: 'auth_demo' }
 const PENDING_SETTING_FIELD = '__jindiPendingSetting'
 const LEGACY_PLAYER_PENDING = 'jindi.player.pending.v1'
+const SEARCH_REVISION_CACHE = 'jindi.search.revision.v1'
 
 interface LibrarySnapshot {
   favorites: string[]
@@ -188,6 +196,9 @@ interface LibrarySnapshot {
 
 let persistedLibrary: LibrarySnapshot | undefined
 let libraryWrites = Promise.resolve()
+let searchWrites = Promise.resolve(true)
+let desktopSearch: string[] | undefined
+let searchRevision = 0
 const settingWrites = new Map<string, Promise<void>>()
 
 function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
@@ -196,7 +207,7 @@ function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
   return queued
 }
 function queuedWindowWrites() {
-  return [windowCloseSettingWrite, libraryWrites, localCommentWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
+  return [windowCloseSettingWrite, libraryWrites, searchWrites, localCommentWrites, ...settingWrites.values(), ...episodeLikeWrites.values()]
 }
 
 export async function waitForWindowWrites() {
@@ -365,6 +376,7 @@ async function recoverLibrary(a: GoApp, database: LibraryState, pending: Library
 
 /** Hydrate desktop storage before stores are created. */
 export async function prime(): Promise<void> {
+  desktopSearch = undefined
   persistedLibrary = undefined
   desktopCache = undefined
   offlineDraft = undefined
@@ -415,8 +427,19 @@ async function primeDesktopStorage(a: GoApp): Promise<boolean> {
   }
 
   try {
-    const search = await a.SearchHistory()
-    localStorage.setItem(LS.search, JSON.stringify(search))
+    const queued = searchWrites
+    const state = a.SearchHistoryState ? await a.SearchHistoryState() : { terms: await a.SearchHistory(), revision: 0 }
+    if (searchWrites === queued) {
+      const cached = readSearchHistory()
+      searchRevision = Math.max(searchRevision, state.revision, cached?.revision ?? 0)
+      if (cached?.pending && cached.revision > state.revision) {
+        desktopSearch = cached.terms
+        void queueSearch(a, { terms: cached.terms, revision: cached.revision }, true)
+      } else {
+        desktopSearch = state.terms
+        writeSearchHistory(state, false)
+      }
+    }
   } catch (e) {
     warn(e)
   }
@@ -600,7 +623,90 @@ function queueLibraryWrite(
     }
   })
 }
-export function saveSearch(q: string[]) { try { localStorage.setItem(LS.search, JSON.stringify(q)) } catch { /* ignore */ } api()?.SaveSearchHistory(q).catch(warn) }
+function isSearchHistory(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((term) => typeof term === 'string')
+}
+
+function readCachedSearchRevision(): number {
+  try {
+    const revision = Number(localStorage.getItem(SEARCH_REVISION_CACHE))
+    if (Number.isSafeInteger(revision) && revision > 0) return revision
+  } catch { /* SQLite may still supply the version. */ }
+  return 0
+}
+
+function readSearchHistory(): (SearchHistoryState & { pending: boolean }) | undefined {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(LS.search) ?? 'null')
+    if (isSearchHistory(value)) return { terms: value, revision: readCachedSearchRevision(), pending: false }
+    if (value && typeof value === 'object' && 'terms' in value && isSearchHistory(value.terms)
+        && 'revision' in value && typeof value.revision === 'number'
+        && Number.isSafeInteger(value.revision) && value.revision >= 0) {
+      return { terms: value.terms, revision: value.revision, pending: 'pending' in value && value.pending === true }
+    }
+  } catch { /* Ignore unavailable or malformed cached history. */ }
+}
+
+export function loadCachedSearchHistory(): string[] | undefined {
+  return (api() ? desktopSearch : undefined) ?? readSearchHistory()?.terms
+}
+
+function writeSearchHistory(state: SearchHistoryState, pending: boolean): boolean {
+  try {
+    localStorage.setItem(LS.search, JSON.stringify(pending ? { ...state, pending } : state.terms))
+  } catch {
+    return false
+  }
+  if (!pending && state.revision > 0) {
+    try { localStorage.setItem(SEARCH_REVISION_CACHE, String(state.revision)) } catch { /* Advisory cache only. */ }
+  }
+  return true
+}
+
+function queueSearch(app: GoApp, state: SearchHistoryState, cachedForRecovery: boolean, userEdit = false): Promise<boolean> {
+  const write: Promise<boolean> = searchWrites.then(async () => {
+    if (searchWrites !== write) return true
+    let snapshot = state
+    let recoverable = cachedForRecovery
+    try {
+      if (app.SaveSearchHistoryRevision) {
+        if (!(await app.SaveSearchHistoryRevision(snapshot))) {
+          recoverable = false
+          if (!userEdit || !app.SearchHistoryState || searchWrites !== write) return false
+          const current = await app.SearchHistoryState()
+          if (searchWrites !== write) return true
+          searchRevision = Math.max(searchRevision, current.revision) + 1
+          snapshot = { terms: snapshot.terms, revision: searchRevision }
+          recoverable = writeSearchHistory(snapshot, true)
+          if (!(await app.SaveSearchHistoryRevision(snapshot))) return false
+        }
+      } else {
+        await app.SaveSearchHistory(snapshot.terms)
+      }
+    } catch (e) {
+      warn(e)
+      return recoverable
+    }
+    if (searchWrites === write && !writeSearchHistory(snapshot, false) && !recoverable) {
+      try { localStorage.removeItem(LS.search) } catch { /* The local cache is unavailable. */ }
+    }
+    return true
+  })
+  searchWrites = write
+  return write
+}
+
+export function saveSearch(terms: string[]): Promise<boolean> {
+  const snapshot = [...terms]
+  const app = api()
+  if (!app) return Promise.resolve(writeSearchHistory({ terms: snapshot, revision: 0 }, false))
+  desktopSearch = snapshot
+  searchRevision = Math.max(searchRevision, readSearchHistory()?.revision ?? 0) + 1
+  const state = { terms: snapshot, revision: searchRevision }
+  const cachedForRecovery = writeSearchHistory(state, true)
+  return queueSearch(app, state, cachedForRecovery, true)
+}
+
 function settingSnapshot(raw: string): Record<string, unknown> | undefined {
   try {
     const value = JSON.parse(raw)

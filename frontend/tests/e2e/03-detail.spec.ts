@@ -11,6 +11,11 @@ test.describe('03 短剧详情', () => {
   test('opens a cast member’s works and links to the corresponding details', async ({ page }) => {
     const cast = page.getByRole('link', { name: '搜索 苏晚宁 的作品' })
     await expect(page.getByRole('heading', { name: '演示主演' })).toBeVisible()
+    const newTab = page.context().waitForEvent('page')
+    await cast.click({ button: 'middle' })
+    const searchTab = await newTab
+    await expect(searchTab.getByTestId('history-item').first()).toContainText('苏晚宁')
+    await searchTab.close()
     await cast.focus()
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: /^“苏晚宁”\s*的搜索结果$/ })).toBeVisible()

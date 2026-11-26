@@ -45,7 +45,6 @@ const err = ref(''); const items = ref<Drama[]>([])
 let token = 0
 async function run() {
   const my = ++token; state.value = 'loading'; page.value = 1
-  if (q.value) hist.add(q.value)
   if (route.query.state === 'loading') return
   try {
     const mode = route.query.state === 'error' ? 'error' : 'normal'
@@ -104,7 +103,10 @@ const kinds = computed(() => [
 ])
 const sorts = [{ k: 'hot', l: '最热' }, { k: 'new', l: '最新' }, { k: 'rating', l: '评分最高' }]
 const kindTone = (k: string) => (k === '漫剧' ? 'purple' : k === 'AI剧' ? 'blue' : 'red')
-const go = (t: string) => router.push({ name: 'search', query: { q: t } })
+const go = (t: string) => {
+  hist.add(t)
+  return router.push({ name: 'search', query: { q: t } })
+}
 const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 </script>
 <template>

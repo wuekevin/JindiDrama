@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, loadCachedSetting, waitForWindowWrites, LS, cacheStats, cacheSetLimit, logEvent } from './index'
+import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, saveSearch, loadCachedSearchHistory, loadCachedSetting, waitForWindowWrites, LS, cacheStats, cacheSetLimit, logEvent } from './index'
 const calls: string[] = []
 const receipt = { writer: expect.stringMatching(/^[a-f0-9]{32}$/), revision: expect.any(Number) }
 const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], History: async () => [{ dramaId: 'd9', episode: 7, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: 5 }], SearchHistory: async () => ['替嫁'],
@@ -441,6 +441,192 @@ describe('wails bridge', () => {
         history: [], preserveNewerHistory: true, receipt, readBack: true, legacyJournal: undefined,
       })
       expect(JSON.parse(localStorage.getItem(LS.library)!)).toMatchObject({ favorites: ['d3', 'd9', 'd7'] })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('retains a cleared search history when SQLite rejects the write and reads old rows on restart', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let rows = ['旧搜索词']
+    const SaveSearchHistory = vi.fn().mockRejectedValueOnce(new Error('locked'))
+      .mockImplementation(async (terms: string[]) => { rows = terms })
+    vi.stubGlobal('go', { app: { App: { ...fake, SearchHistory: async () => rows, SaveSearchHistory } } })
+    try {
+      await prime()
+      expect(localStorage.getItem(LS.search)).toBe('["旧搜索词"]')
+      await saveSearch([])
+      await waitForWindowWrites()
+      expect(rows).toEqual(['旧搜索词'])
+      await prime()
+      await waitForWindowWrites()
+      expect(loadCachedSearchHistory()).toEqual([])
+      expect(localStorage.getItem(LS.search)).toBe('[]')
+      expect(rows).toEqual([])
+      expect(SaveSearchHistory.mock.calls).toEqual([[[]], [[]]])
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('waits for the latest search snapshot on close and coalesces queued older searches', async () => {
+    let release!: () => void
+    const activeWrite = new Promise<void>((resolve) => { release = resolve })
+    const SaveSearchHistory = vi.fn().mockReturnValueOnce(activeWrite).mockResolvedValue(undefined)
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveSearchHistory } } })
+    try {
+      void saveSearch(['第一条'])
+      await vi.waitFor(() => expect(SaveSearchHistory).toHaveBeenCalledTimes(1))
+      void saveSearch(['待跳过'])
+      void saveSearch([])
+      const closed = vi.fn()
+      const close = waitForWindowWrites().then(closed)
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(SaveSearchHistory).toHaveBeenCalledTimes(1)
+      expect(closed).not.toHaveBeenCalled()
+      release()
+      await close
+      expect(SaveSearchHistory.mock.calls).toEqual([[['第一条']], [[]]])
+    } finally {
+      release()
+      await waitForWindowWrites()
+    }
+  })
+
+  it('discards a stale desktop search read after a newer clear is acknowledged', async () => {
+    let completeRead!: (terms: string[]) => void
+    const stale = new Promise<string[]>((resolve) => { completeRead = resolve })
+    const SearchHistory = vi.fn().mockReturnValueOnce(stale)
+    vi.stubGlobal('go', { app: { App: { ...fake, SearchHistory } } })
+    const startup = prime()
+    try {
+      await vi.waitFor(() => expect(SearchHistory).toHaveBeenCalledTimes(1))
+      expect(await saveSearch([])).toBe(true)
+      completeRead(['过期搜索'])
+      await startup
+      expect(loadCachedSearchHistory()).toEqual([])
+      expect(localStorage.getItem(LS.search)).toBe('[]')
+    } finally {
+      completeRead([])
+      await startup
+    }
+  })
+
+  it('reports a search change unconfirmed when SQLite and the recovery cache both reject it', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+    const SaveSearchHistory = vi.fn().mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveSearchHistory } } })
+    try {
+      await prime()
+      expect(loadCachedSearchHistory()).toEqual(['替嫁'])
+      expect(await saveSearch([])).toBe(false)
+      expect(loadCachedSearchHistory()).toEqual([])
+      expect(await saveSearch(['新词'])).toBe(true)
+    } finally {
+      write.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('replaces the legacy search cache atomically even when localStorage cannot add a key', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    localStorage.setItem(LS.search, '["先前留下的完整搜索关键词"]')
+    const setItem = Storage.prototype.setItem
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (this: Storage, key, value) {
+      if (key !== LS.search) throw new DOMException('full', 'QuotaExceededError')
+      setItem.call(this, key, value)
+    })
+    const SaveSearchHistory = vi.fn().mockRejectedValueOnce(new Error('locked')).mockResolvedValueOnce(undefined)
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveSearchHistory } } })
+    try {
+      expect(await saveSearch([])).toBe(true)
+      expect(JSON.parse(localStorage.getItem(LS.search)!)).toMatchObject({ pending: true, terms: [], revision: expect.any(Number) })
+      await prime()
+      await waitForWindowWrites()
+      expect(loadCachedSearchHistory()).toEqual([])
+      expect(localStorage.getItem(LS.search)).toBe('[]')
+    } finally {
+      write.mockRestore()
+      warn.mockRestore()
+    }
+  })
+
+  it('uses the newer confirmed SQLite revision after storage recovers with an old draft', async () => {
+    let release!: () => void
+    const delay = new Promise<void>((resolve) => { release = resolve })
+    let state = { terms: ['旧词'], revision: 100 }
+    const SaveSearchHistoryRevision = vi.fn(async (draft: typeof state) => {
+      if (draft.terms.length) await delay
+      state = draft
+      return true
+    })
+    vi.stubGlobal('go', { app: { App: { ...fake, SearchHistoryState: async () => state, SaveSearchHistoryRevision } } })
+    await prime()
+    const first = saveSearch(['已暂存的词'])
+    await vi.waitFor(() => expect(SaveSearchHistoryRevision).toHaveBeenCalledTimes(1))
+    const unavailable = () => { throw new DOMException('offline', 'SecurityError') }
+    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(unavailable)
+    const remove = vi.spyOn(Storage.prototype, 'removeItem').mockImplementation(unavailable)
+    try {
+      const cleared = saveSearch([])
+      release()
+      expect(await first).toBe(true)
+      expect(await cleared).toBe(true)
+      expect(state.terms).toEqual([])
+    } finally {
+      release()
+      await waitForWindowWrites()
+      write.mockRestore()
+      remove.mockRestore()
+    }
+    expect(JSON.parse(localStorage.getItem(LS.search)!)).toMatchObject({ pending: true, terms: ['已暂存的词'] })
+    await prime()
+    await waitForWindowWrites()
+    expect(SaveSearchHistoryRevision).toHaveBeenCalledTimes(2)
+    expect(loadCachedSearchHistory()).toEqual([])
+    expect(localStorage.getItem(LS.search)).toBe('[]')
+  })
+
+  it('rebases a new search edit when the initial SQLite revision read fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    let state = { terms: ['已有搜索'], revision: 50_000 }
+    const SearchHistoryState = vi.fn().mockRejectedValueOnce(new Error('initial read failed')).mockImplementation(async () => state)
+    const SaveSearchHistoryRevision = vi.fn(async (draft: typeof state) => {
+      if (draft.revision <= state.revision) return false
+      state = draft
+      return true
+    })
+    vi.stubGlobal('go', { app: { App: { ...fake, SearchHistoryState, SaveSearchHistoryRevision } } })
+    try {
+      localStorage.setItem(LS.search, '["旧版缓存"]')
+      await prime()
+      expect(loadCachedSearchHistory()).toEqual(['旧版缓存'])
+      expect(await saveSearch([])).toBe(true)
+      expect(SaveSearchHistoryRevision).toHaveBeenCalledTimes(2)
+      expect(state).toEqual({ terms: [], revision: 50_001 })
+      expect(localStorage.getItem(LS.search)).toBe('[]')
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('does not report a stale search draft recoverable when refreshing its version also fails', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const state = { terms: ['数据库记录'], revision: 100_000 }
+    const SearchHistoryState = vi.fn().mockRejectedValueOnce(new Error('startup failed'))
+      .mockRejectedValueOnce(new Error('refresh failed')).mockResolvedValue(state)
+    const SaveSearchHistoryRevision = vi.fn().mockResolvedValue(false)
+    vi.stubGlobal('go', { app: { App: { ...fake, SearchHistoryState, SaveSearchHistoryRevision } } })
+    try {
+      await prime()
+      expect(await saveSearch([])).toBe(false)
+      await prime()
+      expect(loadCachedSearchHistory()).toEqual(state.terms)
+      expect(SaveSearchHistoryRevision).toHaveBeenCalledTimes(1)
     } finally {
       warn.mockRestore()
     }

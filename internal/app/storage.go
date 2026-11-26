@@ -113,6 +113,20 @@ func (a *App) SaveSearchHistory(q []string) error {
 	}
 	return a.store.SetSearchHistory(q)
 }
+func (a *App) SearchHistoryState() (sqlite.SearchHistoryState, error) {
+	a.awaitStartup()
+	if a.store == nil {
+		return sqlite.SearchHistoryState{}, ErrNoStore
+	}
+	return a.store.SearchHistoryState()
+}
+func (a *App) SaveSearchHistoryRevision(state sqlite.SearchHistoryState) (bool, error) {
+	a.awaitStartup()
+	if a.store == nil {
+		return false, ErrNoStore
+	}
+	return a.store.SetSearchHistoryRevision(state)
+}
 func (a *App) GetSetting(key string) (string, error) {
 	if a.store == nil {
 		return "", ErrNoStore

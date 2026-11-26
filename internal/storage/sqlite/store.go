@@ -393,39 +393,82 @@ func (s *Store) ClearHistory() error {
 }
 
 // ---- 搜索历史 ----
+const searchHistoryRevisionKey = "search_history_revision"
+
+type SearchHistoryState struct {
+	Terms    []string `json:"terms"`
+	Revision int64    `json:"revision"`
+}
+
 func (s *Store) SearchHistory() ([]string, error) {
-	rows, err := s.db.Query(`SELECT query FROM search_history ORDER BY searched_at DESC LIMIT 10`)
+	state, err := s.SearchHistoryState()
+	return state.Terms, err
+}
+
+func (s *Store) SearchHistoryState() (SearchHistoryState, error) {
+	state := SearchHistoryState{Terms: []string{}}
+	// One SQLite statement reads terms and their revision from the same snapshot,
+	// including the case where the last accepted change cleared every term.
+	rows, err := s.db.Query(`SELECT current.revision, recent.query
+FROM (SELECT COALESCE((SELECT CAST(value_json AS INTEGER) FROM settings WHERE key=?), 0) AS revision) current
+LEFT JOIN (SELECT query, searched_at FROM search_history ORDER BY searched_at DESC LIMIT 10) recent ON TRUE
+ORDER BY recent.searched_at DESC`, searchHistoryRevisionKey)
 	if err != nil {
-		return nil, err
+		return state, err
 	}
 	defer rows.Close()
-	out := []string{}
 	for rows.Next() {
-		var q string
-		if err := rows.Scan(&q); err != nil {
-			return nil, err
+		var q sql.NullString
+		if err := rows.Scan(&state.Revision, &q); err != nil {
+			return state, err
 		}
-		out = append(out, q)
+		if q.Valid {
+			state.Terms = append(state.Terms, q.String)
+		}
 	}
-	return out, rows.Err()
+	return state, rows.Err()
 }
 
 func (s *Store) SetSearchHistory(qs []string) error {
+	_, err := s.setSearchHistory(qs, 0)
+	return err
+}
+
+func (s *Store) SetSearchHistoryRevision(state SearchHistoryState) (bool, error) {
+	if state.Revision < 1 || state.Revision >= 1<<53 {
+		return false, errors.New("无效的搜索历史版本")
+	}
+	return s.setSearchHistory(state.Terms, state.Revision)
+}
+
+func (s *Store) setSearchHistory(qs []string, revision int64) (bool, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM search_history`); err != nil {
-		return err
-	}
 	now := time.Now().UnixMilli()
+	receipt, err := tx.Exec(`INSERT INTO settings(key, value_json, updated_at) VALUES(?, MAX(1, ?), ?)
+ON CONFLICT(key) DO UPDATE SET value_json=CASE WHEN ?=0 THEN CAST(settings.value_json AS INTEGER)+1 ELSE excluded.value_json END,
+updated_at=excluded.updated_at WHERE ?=0 OR CAST(settings.value_json AS INTEGER) < CAST(excluded.value_json AS INTEGER)`,
+		searchHistoryRevisionKey, revision, now, revision, revision)
+	if err != nil {
+		return false, err
+	}
+	claimed, err := receipt.RowsAffected()
+	if err != nil || claimed == 0 {
+		return false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM search_history`); err != nil {
+		return false, err
+	}
 	for i, q := range qs {
 		if _, err := tx.Exec(`INSERT OR IGNORE INTO search_history(query, searched_at) VALUES(?,?)`, q, now-int64(i)); err != nil {
-			return err
+			return false, err
 		}
 	}
-	return tx.Commit()
+	err = tx.Commit()
+	return err == nil, err
 }
 
 // ---- 设置（JSON 文本，key 白名单由上层控制）----

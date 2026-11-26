@@ -13,6 +13,23 @@ test.describe('02 搜索结果', () => {
     await page.getByRole('button', { name: '删除替嫁新娘' }).click(); await expect(page.getByTestId('history-item').filter({ hasText: '替嫁新娘' })).toHaveCount(0)
     await page.getByTestId('clear-history').click(); await expect(page.getByTestId('history-item')).toHaveCount(0)
   })
+  test('cleared recent searches stay cleared through sorting and reload until an explicit search', async ({ page }) => {
+    const recent = page.getByTestId('history-item')
+    await page.getByTestId('clear-history').click()
+    await expect(recent).toHaveCount(0)
+    await page.getByTestId('sort-new').click()
+    await expect(page.getByTestId('result-card').first()).toContainText('AI替嫁')
+    await expect(recent).toHaveCount(0)
+    await page.reload()
+    await expect(page.getByTestId('result-card').first()).toContainText('AI替嫁')
+    await expect(recent).toHaveCount(0)
+    const input = page.getByTestId('search-input')
+    await input.fill('替嫁')
+    await input.press('Enter')
+    await expect(recent).toHaveCount(1)
+    await expect(recent.first()).toContainText('替嫁')
+  })
+
   test('topbar suggestions & enter submit', async ({ page }) => {
     const i = page.getByTestId('search-input'); await i.fill('替嫁'); await i.focus(); await expect(page.getByRole('option')).toHaveCount(6)
     await page.getByRole('option').nth(1).click(); await expect(page).toHaveURL(/q=%E6%9B%BF%E5%AB%81%E6%96%B0%E5%A8%98/)
@@ -37,6 +54,21 @@ test.describe('02 搜索结果', () => {
     expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false)
     fs.mkdirSync('../design/rendered/responsive', { recursive: true }); await page.screenshot({ path: `../design/rendered/responsive/02-${w}x${h}.png` })
   })
+})
+
+test('clearing recent searches reports a browser storage failure', async ({ page }) => {
+  await page.addInitScript(() => {
+    const write = Storage.prototype.setItem
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'jindi.search.v1') throw new DOMException('storage full', 'QuotaExceededError')
+      write.call(this, key, value)
+    }
+  })
+  await page.goto('/#/search')
+  await expect(page.getByTestId('history-item').first()).toBeVisible()
+  await page.getByTestId('clear-history').click()
+  await expect(page.getByText('最近搜索的更改未能保存，重启后可能恢复旧记录。')).toBeVisible()
+  await expect(page.getByTestId('history-item')).toHaveCount(0)
 })
 
 test('global topbar keeps search and window controls usable at 150% zoom', async ({ page }, testInfo) => {
@@ -308,7 +340,10 @@ test('search heading and recent actions fit a long unbroken query at 220% zoom',
     localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 }))
   })
   const query = 'UnbrokenSearch'.repeat(12)
-  await page.goto(`/#/search?q=${query}`)
+  await page.goto('/#/search')
+  const input = page.getByTestId('search-input')
+  await input.fill(query)
+  await input.press('Enter')
   const search = page.getByTestId('page-search')
   await expect(search.getByTestId('empty')).toBeVisible()
   const heading = search.getByRole('heading', { level: 1 })

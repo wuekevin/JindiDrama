@@ -4,12 +4,14 @@ import { useRoute, useRouter } from 'vue-router'
 import { closeDesktopWindow, hasLicensedLibrary, hideWindowToTray, searchProvider } from '@/bindings'
 import { CLOSE_TO_TRAY, TRAY_UNAVAILABLE_MESSAGE, useAppSettings } from '@/stores/appSettings'
 import { useToastStore } from '@/stores/toast'
+import { useSearchStore } from '@/stores/search'
 import { searchDiscovery } from '@/router/searchDiscovery'
 import { Search, Minus, Square, X, CornerUpLeft } from 'lucide-vue-next'
 import UpdateNotifications from './UpdateNotifications.vue'
 import { suggestDemoSearch } from '@/mocks/provider'
 
 const route = useRoute(); const router = useRouter()
+const recentSearch = useSearchStore()
 const topbar = ref<HTMLElement>()
 const compact = ref(false)
 let layoutObserver: ResizeObserver | undefined
@@ -68,6 +70,7 @@ function searchInput(event: Event) {
 function submit(text = q.value) {
   const query = text.trim()
   if (!query) return
+  recentSearch.add(query)
   q.value = query
   closeSuggestions()
   router.push({ name: 'search', query: { q: query } })

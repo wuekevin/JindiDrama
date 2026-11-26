@@ -8,12 +8,14 @@ import { demoClipSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
 import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
+import { useSearchStore } from '@/stores/search'
 import { copyShareLink } from '@/router/shareLinks'
 import { continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 
 const route = useRoute(); const router = useRouter(); const lib = useLibraryStore(); const toast = useToastStore()
+const recentSearch = useSearchStore()
 const root = ref<HTMLElement>()
 const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
@@ -123,7 +125,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
           <div class="sum"><h4>剧情简介</h4><p :class="{ clamp: !expanded }" data-testid="summary">{{ expanded ? detail.long : detail.drama.summary }}</p><button class="exp" data-testid="expand" @click="expanded = !expanded">{{ expanded ? '收起' : '展开' }}<component :is="expanded ? ChevronUp : ChevronDown" :size="14" /></button></div>
           <div v-if="detail.cast.length" class="cast">
             <h4>演示主演</h4>
-            <RouterLink v-for="c in detail.cast" :key="c.name" class="cm" :to="{ name: 'search', query: { q: c.name, cast: '1' } }" :aria-label="`搜索 ${c.name} 的作品`">
+            <RouterLink v-for="c in detail.cast" :key="c.name" class="cm" :to="{ name: 'search', query: { q: c.name, cast: '1' } }" :aria-label="`搜索 ${c.name} 的作品`" @click="recentSearch.add(c.name)" @auxclick.middle="recentSearch.add(c.name)">
               <i :style="{ background: `hsl(${c.hue} 40% 45%)` }">{{ c.name[0] }}</i>
               <span><b>{{ c.name }}</b><em>饰 {{ c.role }}</em></span>
               <ChevronRight :size="14" />

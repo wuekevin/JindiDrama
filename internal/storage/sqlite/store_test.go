@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -91,6 +92,39 @@ func TestSettingsAndSearchHistory(t *testing.T) {
 	_ = s.SetSearchHistory([]string{"替嫁", "古装"})
 	if q, _ := s.SearchHistory(); len(q) != 2 || q[0] != "替嫁" {
 		t.Fatalf("%v", q)
+	}
+}
+
+func TestSearchHistoryRevisionRejectsStaleAndRollsBackOnFailure(t *testing.T) {
+	s := open(t)
+	if err := s.SetSearchHistory([]string{"原记录"}); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := s.SetSearchHistoryRevision(SearchHistoryState{Revision: 3}); !accepted || err != nil {
+		t.Fatalf("clear: accepted=%v err=%v", accepted, err)
+	}
+	if accepted, err := s.SetSearchHistoryRevision(SearchHistoryState{Terms: []string{"旧记录"}, Revision: 2}); accepted || err != nil {
+		t.Fatalf("stale replay: accepted=%v err=%v", accepted, err)
+	}
+	if state, err := s.SearchHistoryState(); err != nil || state.Revision != 3 || state.Terms == nil || len(state.Terms) != 0 {
+		t.Fatalf("after stale replay: state=%+v err=%v", state, err)
+	}
+	if _, err := s.db.Exec(`CREATE TRIGGER fail_search BEFORE INSERT ON search_history
+WHEN NEW.query = '受保护' BEGIN SELECT RAISE(ABORT, 'rejected search'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := s.SetSearchHistoryRevision(SearchHistoryState{Terms: []string{"受保护"}, Revision: 4}); accepted || err == nil {
+		t.Fatalf("failed write: accepted=%v err=%v", accepted, err)
+	}
+	if state, err := s.SearchHistoryState(); err != nil || state.Revision != 3 || len(state.Terms) != 0 {
+		t.Fatalf("after rollback: state=%+v err=%v", state, err)
+	}
+	terms := []string{"最新", "其次"}
+	if accepted, err := s.SetSearchHistoryRevision(SearchHistoryState{Terms: terms, Revision: 4}); !accepted || err != nil {
+		t.Fatalf("retry: accepted=%v err=%v", accepted, err)
+	}
+	if state, err := s.SearchHistoryState(); err != nil || state.Revision != 4 || !slices.Equal(state.Terms, terms) {
+		t.Fatalf("after retry: state=%+v err=%v", state, err)
 	}
 }
 

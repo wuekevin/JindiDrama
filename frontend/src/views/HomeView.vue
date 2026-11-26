@@ -5,6 +5,7 @@ import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity
 import { useCatalogStore } from '@/stores/catalog'
 import { useLibraryStore } from '@/stores/library'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
+import { useSearchStore } from '@/stores/search'
 import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import HeroCarousel from '@/components/HeroCarousel.vue'
 import NewDramaCard from '@/components/NewDramaCard.vue'
@@ -13,10 +14,15 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 
 const route = useRoute(); const router = useRouter()
 const catalog = useCatalogStore(); const lib = useLibraryStore()
+const recentSearch = useSearchStore()
 const icons: Record<string, unknown> = { Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity: InfinityIcon, Building2 }
 const tab = computed(() => route.query.rank === 'rise' || route.query.rank === 'new' ? route.query.rank : 'hot')
 const selectRank = (rank: 'hot' | 'rise' | 'new') =>
   router.replace({ query: { ...route.query, rank: rank === 'hot' ? undefined : rank } })
+function searchCategory(label: string) {
+  recentSearch.add(label)
+  return router.push({ name: 'search', query: { q: label } })
+}
 const tabs = [{ k: 'hot', l: '热门榜' }, { k: 'rise', l: '飙升榜' }, { k: 'new', l: '新剧榜' }] as const
 const mode = () => (['empty', 'error', 'loading'].includes(String(route.query.state)) ? (route.query.state as 'empty'|'error'|'loading') : 'normal')
 const load = () => catalog.loadHome(mode())
@@ -56,7 +62,7 @@ const autoplay = computed(() => route.query.static === undefined)
 
       <section id="categories" class="cats" aria-label="题材精选">
         <h3 class="h-label">题材精选</h3>
-        <button v-for="c in home.categories" :key="c.key" class="chip" :data-testid="`cat-${c.key}`" @click="router.push({ name: 'search', query: { q: c.label } })">
+        <button v-for="c in home.categories" :key="c.key" class="chip" :data-testid="`cat-${c.key}`" @click="searchCategory(c.label)">
           <component :is="icons[c.icon]" :size="18" :color="c.color" :fill="['Flame','Heart','Crown','Zap','Ghost'].includes(c.icon) ? c.color : 'none'" />{{ c.label }}
         </button>
         <button class="more" data-testid="more-topics" @click="router.push({ name: 'search', query: { browse: 'topics' } })">更多<ChevronRight :size="14" /></button>
