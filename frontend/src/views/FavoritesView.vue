@@ -13,13 +13,17 @@ const router = useRouter(); const lib = useLibraryStore()
 const root = ref<HTMLElement>()
 const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
+function updateLayout(width: number) {
+  layout.value = width <= 570 ? 'compact' : width <= 1050 ? 'stacked' : 'wide'
+}
 onMounted(() => {
-  if (!root.value) return
-  layoutObserver = new ResizeObserver(([entry]) => {
-    const width = entry.contentRect.width
-    layout.value = width <= 570 ? 'compact' : width <= 1050 ? 'stacked' : 'wide'
-  })
-  layoutObserver.observe(root.value)
+  const element = root.value
+  if (!element) return
+  // Measure the content box in layout pixels before the first observer callback.
+  const { width, paddingLeft, paddingRight } = getComputedStyle(element)
+  updateLayout(parseFloat(width) - parseFloat(paddingLeft) - parseFloat(paddingRight))
+  layoutObserver = new ResizeObserver(([entry]) => updateLayout(entry.contentRect.width))
+  layoutObserver.observe(element)
 })
 onBeforeUnmount(() => layoutObserver?.disconnect())
 const tab = ref<'all'|'watching'|'done'|'manju'|'real'>('all'); const sort = ref<'recent'|'update'|'heat'>('recent'); const genre = ref(''); const view = ref<'grid'|'list'>('grid')
