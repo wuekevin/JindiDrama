@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream, realpathSync } from 'node:fs'
 import { readFile, readdir, stat, writeFile } from 'node:fs/promises'
@@ -198,7 +198,31 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
   console.log(`GitHub Actions build ${run} attempt ${attempt} matches all ${required.length} successful release jobs`)
 }
 
-async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile) {
+async function verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, files) {
+  const { repository, revision, run, attempt } = handoff
+  const artifact = JSON.parse(await readFile(artifactFile, 'utf8'))
+  const name = `release-handoff-${tag}-attempt-${attempt}`
+  if (artifact?.name !== name || artifact.expired !== false ||
+      !Number.isSafeInteger(artifact.id) || artifact.id < 1 ||
+      !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 ||
+      typeof artifact.digest !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(artifact.digest) ||
+      typeof artifact.url !== 'string' ||
+      artifact.url.toLowerCase() !== `https://api.github.com/repos/${repository.toLowerCase()}/actions/artifacts/${artifact.id}` ||
+      String(artifact.workflow_run?.id) !== run || artifact.workflow_run?.head_sha !== revision) {
+    throw new Error(`GitHub Actions artifact does not match ${name} from build ${run} at ${revision}`)
+  }
+  const expected = { size: artifact.size_in_bytes, digest: artifact.digest.slice(7), files }
+  const helper = fileURLToPath(new URL('./verify-release-archive.py', import.meta.url))
+  const python = process.platform === 'win32' ? 'python' : 'python3'
+  const result = spawnSync(python, ['-I', helper, archiveFile], {
+    encoding: 'utf8', input: JSON.stringify(expected), timeout: 120_000, windowsHide: true,
+  })
+  if (result.error) throw new Error('Cannot run the Python 3 release archive verifier', { cause: result.error })
+  if (result.status !== 0) throw new Error(result.stderr.trim() || 'GitHub handoff ZIP verification failed')
+  console.log(`GitHub Actions artifact ${artifact.id} matches the original ZIP and all ${Object.keys(files).length} handoff files`)
+}
+
+async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile, archiveFile, artifactFile) {
   const handoff = await verifyReleaseTag(tag, directory)
   const { checksums, manifestFile, repository, revision, notes } = handoff
   const draft = JSON.parse(await readFile(metadataFile, 'utf8'))
@@ -214,28 +238,29 @@ async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile) {
   if (!Array.isArray(draft.assets)) throw new Error('Missing GitHub Release draft assets')
 
   checksums.set(manifest, manifestFile.digest)
-  const seen = new Set()
+  const files = new Map()
   for (const asset of draft.assets) {
     const name = asset?.name
-    if (!checksums.has(name) || seen.has(name)) {
+    if (!checksums.has(name) || files.has(name)) {
       throw new Error(`Unexpected or duplicate draft asset: ${JSON.stringify(name)}`)
     }
-    seen.add(name)
     const { size } = name === manifest ? manifestFile : await stat(join(directory, name))
     if (!Number.isSafeInteger(asset.id) || asset.id < 1 || asset.state !== 'uploaded' ||
         size !== asset.size || asset.digest !== 'sha256:' + checksums.get(name)) {
       throw new Error(`Draft asset ID, upload state, size or SHA-256 mismatch: ${name}`)
     }
+    files.set(name, { size, digest: checksums.get(name) })
   }
   for (const name of checksums.keys()) {
-    if (!seen.has(name)) throw new Error(`Missing draft asset: ${name}`)
+    if (!files.has(name)) throw new Error(`Missing draft asset: ${name}`)
   }
   await verifyReleaseJobs(jobsFile, handoff)
+  await verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, Object.fromEntries(files))
   if (remoteReleaseRevision(repository, tag) !== revision) {
     throw new Error('GitHub release tag does not match the handoff build commit')
   }
   console.log('GitHub release tag ' + tag + ' matches build commit ' + revision)
-  console.log(`GitHub Release draft ${draft.id} matches all ${seen.size} handoff files`)
+  console.log(`GitHub Release draft ${draft.id} matches all ${files.size} handoff files`)
 }
 
 function isMainModule(entry) {
@@ -257,11 +282,11 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verifyHostedPackage(directory, platform)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
-  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 2) {
-    await verifyReleaseDraft(platform, directory, extra[0], extra[1])
+  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 4) {
+    await verifyReleaseDraft(platform, directory, ...extra)
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json> <github-jobs.json>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
   }
 }

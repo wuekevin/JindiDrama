@@ -119,6 +119,26 @@ test('verifies the handoff against GitHub release jobs, tags, draft notes and up
   }
   const draftFile = join(cwd, 'draft.json')
   const jobsFile = join(cwd, 'release-jobs.json')
+  const artifactFile = join(cwd, 'github-artifact.json')
+  const archiveFile = join(cwd, 'release-handoff.zip')
+  const python = process.platform === 'win32' ? 'python' : 'python3'
+  const entries = await readdir(output)
+  async function createArchive(names = entries) {
+    const result = spawnSync(python, ['-I', '-m', 'zipfile', '-c', archiveFile, ...names], {
+      cwd: output, encoding: 'utf8',
+    })
+    assert.equal(result.status, 0, result.stderr || result.error?.message)
+    return readFile(archiveFile)
+  }
+  const archive = await createArchive()
+  const zipMetadata = (bytes) => ({
+    digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex'), size_in_bytes: bytes.length,
+  })
+  const artifact = {
+    id: 321, url: 'https://api.github.com/repos/' + repository + '/actions/artifacts/321',
+    name: `release-handoff-${version}-attempt-${attempt}`, expired: false,
+    workflow_run: { id: Number(runID), head_sha: sha }, ...zipMetadata(archive),
+  }
   const jobs = [
     'package-release (windows-latest)', 'package-release (macos-latest)',
     'verify-windows-download', 'verify-macos-intel', 'assemble-release',
@@ -127,24 +147,54 @@ test('verifies the handoff against GitHub release jobs, tags, draft notes and up
     run_url: 'https://api.github.com/repos/' + repository + '/actions/runs/' + runID,
     status: 'completed', conclusion: 'success',
   }))
-  async function checkDraft(data, releaseJobs = jobs, total = releaseJobs.length) {
+  async function checkDraft(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact } = {}) {
     await writeFile(draftFile, JSON.stringify(data))
     await writeFile(jobsFile, JSON.stringify({ total_count: total, jobs: releaseJobs }))
-    return run(checksums, ['--verify-release-draft', version, output, draftFile, jobsFile], { cwd })
+    await writeFile(artifactFile, JSON.stringify(releaseArtifact))
+    return run(checksums, ['--verify-release-draft', version, output, draftFile, jobsFile, archiveFile, artifactFile], { cwd })
   }
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
   assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs/)
-  assert.match((await checkDraft(draft, jobs, jobs.length + 1)).stderr, /complete GitHub Actions jobs response/)
-  assert.match((await checkDraft(draft, jobs.slice(1))).stderr, /Expected one release job named package-release/)
-  assert.match((await checkDraft(draft, [...jobs, jobs.at(-1)])).stderr, /Expected one release job named assemble-release/)
+  assert.match(validDraft.stdout, /artifact 321 matches the original ZIP and all 11 handoff files/)
+  for (const wrong of [
+    { name: artifact.name.replace('attempt-2', 'attempt-1') }, { expired: true },
+    { url: 'https://api.github.com/repos/example/Other/actions/artifacts/321' },
+    { workflow_run: { id: 67890, head_sha: sha } }, { workflow_run: { id: Number(runID), head_sha: wrongSHA } },
+  ]) {
+    const result = await checkDraft(draft, { releaseArtifact: { ...artifact, ...wrong } })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /GitHub Actions artifact does not match/)
+  }
+  await writeFile(archiveFile, archive.subarray(1))
+  assert.match((await checkDraft(draft)).stderr, /ZIP size mismatch/)
+  const damaged = Buffer.from(archive)
+  damaged[0] ^= 1
+  await writeFile(archiveFile, damaged)
+  assert.match((await checkDraft(draft)).stderr, /ZIP SHA-256 mismatch/)
+
+  // Updating the outer digest must not let a different binary through.
+  const portable = join(output, 'JindiDrama.exe')
+  const originalPortable = await readFile(portable)
+  await writeFile(portable, Buffer.alloc(originalPortable.length, 0x61))
+  const different = await createArchive()
+  await writeFile(portable, originalPortable)
+  const replaced = await checkDraft(draft, { releaseArtifact: { ...artifact, ...zipMetadata(different) } })
+  assert.match(replaced.stderr, /ZIP entry SHA-256 mismatch: JindiDrama.exe/)
+  const incomplete = await createArchive(entries.filter((name) => name !== 'SHA256SUMS.txt'))
+  assert.match((await checkDraft(draft, { releaseArtifact: { ...artifact, ...zipMetadata(incomplete) } })).stderr,
+    /ZIP has missing, duplicate or unexpected entries/)
+  await writeFile(archiveFile, archive)
+  assert.match((await checkDraft(draft, { total: jobs.length + 1 })).stderr, /complete GitHub Actions jobs response/)
+  assert.match((await checkDraft(draft, { releaseJobs: jobs.slice(1) })).stderr, /Expected one release job named package-release/)
+  assert.match((await checkDraft(draft, { releaseJobs: [...jobs, jobs.at(-1)] })).stderr, /Expected one release job named assemble-release/)
   for (const wrong of [
     { run_attempt: 1 }, { run_id: 67890 }, { head_sha: wrongSHA }, { workflow_name: 'CI' },
     { run_url: 'https://api.github.com/repos/example/Other/actions/runs/' + runID },
     { status: 'in_progress' }, { conclusion: 'failure' }, { conclusion: 'skipped' },
   ]) {
-    const rejected = await checkDraft(draft, [...jobs.slice(0, -1), { ...jobs.at(-1), ...wrong }])
+    const rejected = await checkDraft(draft, { releaseJobs: [...jobs.slice(0, -1), { ...jobs.at(-1), ...wrong }] })
     assert.equal(rejected.status, 1)
     assert.match(rejected.stderr, /Release job assemble-release must have succeeded/)
   }

@@ -628,3 +628,8 @@
 
 - `--verify-release-draft` 新增该轮次的 GitHub Actions 任务 JSON 参数。核对交付说明对应仓库、运行、轮次和提交，要求 Windows 与 macOS 签名打包、Windows 下载复验、Intel 原生复验和正式交付包组装五项均成功。签名矩阵采用显式任务名，README 记录查询与校验步骤。[GitHub 指定轮次任务 API](https://docs.github.com/en/rest/actions/workflow-jobs#list-jobs-for-a-workflow-run-attempt)
 - Node 22 和 26 各通过 13 项发行工具测试，覆盖缺失、重复、任务失败、跳过及错误仓库或轮次。只读核对已有 .44 GitHub smoke 响应的实际字段及组装任务被跳过。打包 YAML 语法与发行源码历史检查通过。真实签名任务和线上草稿仍待正式发行环境验收。[BMad 记录](../_bmad-output/plan-e13-release-attempt.md)
+
+## E13 发行草稿核验 GitHub 原始交付 ZIP（2026-11-27）
+
+- 草稿核验现要求 GitHub 原始交付 ZIP 和对应 Artifact 元数据。按已核验的发行说明检查制品所属仓库、运行编号、提交、轮次和版本，再检查 ZIP 的字节数与 SHA-256。Python 3 标准库逐项核验 ZIP 内文件，确认与草稿的所有待发布资产一致，包含清单本身。[GitHub Artifacts API](https://docs.github.com/en/rest/actions/artifacts#get-an-artifact)
+- Node 22 与 26 各通过 13 项发行工具测试，覆盖截断、外层摘要不符、成员替换、清单缺失和制品归属错误。使用真实 .44 Windows 和 macOS 原始 Actions ZIP 与 GitHub 摘要复核，档内 15 项成员全部一致。签名交付和线上草稿待正式发行环境验收。[BMad 记录](../_bmad-output/plan-e13-release-archive.md)
