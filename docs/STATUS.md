@@ -589,3 +589,12 @@
 - 更新日志超过 4000 字符时，保留原来的纯文本预览并提示仅显示部分说明。弹窗内可打开当前版本已核验的发布页。恰好 4000 字符的说明视为完整。切换渠道或再次检查时，旧日志及其全文入口随候选撤下。
 - 对照设置设计稿，验证弹窗内正文键盘滚动、Tab 到全文入口、Enter 打开发布页和 Esc 后焦点归还。默认窗口和 1280×860、220% 缩放均核对操作可见。[默认截图](../build/bin/qa-complete-release-notes/release-notes-truncated.png) · [220% 截图](../build/bin/qa-complete-release-notes/release-notes-truncated-220.png)
 - 前端生产构建、122 项 Vitest、44 项设置 Playwright、Go vet、Go 全量、更新和 App 竞态以及 Windows x64 生产交叉编译通过。浏览器使用发布候选夹具验证入口，项目正式 Release 联调仍待发行。[BMad 记录](../_bmad-output/plan-e13-complete-release-notes.md)
+
+## E13 .45 累计候选本地打包（2026-11-27）
+
+- 用隔离发行源码 `317f4bfa592a22dc3ed6465e24e70b5ca0e4ccb2` 构建 `v0.1.0-smoke.20261127.45`，合并 Windows CMS 深链冒烟、CMS 同类短剧、Windows 更新包保存目录保护和版本说明全文入口。
+- 第一轮全量浏览器测试 383 项通过。切源用例在备用视频持续播放时核对精确位置，出现一次时序失败。测试现在先让备用视频等待用户播放，再核对恢复位置和历史写入。单独保留自动续播覆盖。专项重复三轮共 12 项通过，按修正后的提交重建，完整回归 384 项通过。
+- Windows 安装器 22.53 MiB，便携版 32.33 MiB，macOS Universal ZIP 40.86 MiB。Windows 7 项、macOS 6 项通过项目工具、独立 SHA-256 和随包命令，归档后复核一致。安装器内主程序和 WebView2 引导程序与原件一致。macOS 两个切片最低系统版本均为 13.0。
+- Apple Silicon 从最终 ZIP 验证桌面启动、退出、隔离 SQLite 与成品回滚。Go vet、Go 全量、App/更新/CMS Provider 竞态、122 项 Vitest、Node 和 Python 发行工具各 13 项及 Windows 发行脚本测试通过。源码、三个成品切片及 npm 生产依赖扫描均未报告已知漏洞。
+- 本批为本地测试包。Windows 和 Intel Mac 的本批原生、正式签名与公证、真实授权公网片源仍待验收。只读核对 GitHub Release、签名环境和仓库级 Actions secrets 数量均为 0，本机没有可用的代码签名身份。
+- [Windows SHA-256](../build/bin/smoke-20261127.45/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.45/macos/SHA256SUMS.txt) · [浏览器回归](../build/bin/smoke-20261127.45/evidence/e2e.log) · [Apple Silicon 原生](../build/bin/smoke-20261127.45/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate45-packages.md)
