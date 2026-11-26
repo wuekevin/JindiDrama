@@ -139,17 +139,50 @@ async function verifyReleaseTag(tag, directory) {
     throw new Error('Release handoff version or build commit does not match the local release tag')
   }
   console.log('Release tag ' + tag + ' matches build commit ' + revision)
-  return { checksums, manifestFile, repository }
+  return { checksums, manifestFile, repository, revision, notes }
+}
+
+function remoteReleaseRevision(repository, tag) {
+  const ref = 'refs/tags/' + tag
+  const peeled = ref + '^{}'
+  let output
+  try {
+    output = execFileSync('git', ['ls-remote', '--exit-code', '--tags',
+      'https://github.com/' + repository + '.git', ref, peeled], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 64 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    })
+  } catch {
+    throw new Error('Cannot resolve GitHub release tag ' + tag)
+  }
+  const refs = new Map()
+  for (const line of output.trimEnd().split(/\r?\n/)) {
+    const [sha, name, extra] = line.split('\t')
+    if (name !== ref && name !== peeled) continue
+    if (!/^[0-9a-f]{40}$/.test(sha) || extra !== undefined || refs.has(name)) {
+      throw new Error('Unexpected GitHub release tag result: ' + tag)
+    }
+    refs.set(name, sha)
+  }
+  if (!refs.has(ref)) throw new Error('Cannot resolve exact GitHub release tag ' + tag)
+  return refs.get(peeled) ?? refs.get(ref)
+}
+
+function normalizedReleaseBody(body) {
+  return body.replace(/\r\n/g, '\n').trimEnd()
 }
 
 async function verifyReleaseDraft(tag, directory, metadataFile) {
-  const { checksums, manifestFile, repository } = await verifyReleaseTag(tag, directory)
+  const { checksums, manifestFile, repository, revision, notes } = await verifyReleaseTag(tag, directory)
   const draft = JSON.parse(await readFile(metadataFile, 'utf8'))
   const prerelease = tag.split('+', 1)[0].includes('-')
   if (draft?.draft !== true || draft.tag_name !== tag || draft.prerelease !== prerelease ||
       !Number.isSafeInteger(draft.id) || draft.id < 1 ||
       typeof draft.url !== 'string' || draft.url.toLowerCase() !== `https://api.github.com/repos/${repository.toLowerCase()}/releases/${draft.id}`) {
     throw new Error('GitHub Release draft does not match the repository, tag, and release channel')
+  }
+  if (typeof draft.body !== 'string' || normalizedReleaseBody(draft.body) !== normalizedReleaseBody(notes)) {
+    throw new Error('GitHub Release draft body does not match RELEASE-NOTES.md')
   }
   if (!Array.isArray(draft.assets)) throw new Error('Missing GitHub Release draft assets')
 
@@ -170,6 +203,10 @@ async function verifyReleaseDraft(tag, directory, metadataFile) {
   for (const name of checksums.keys()) {
     if (!seen.has(name)) throw new Error(`Missing draft asset: ${name}`)
   }
+  if (remoteReleaseRevision(repository, tag) !== revision) {
+    throw new Error('GitHub release tag does not match the handoff build commit')
+  }
+  console.log('GitHub release tag ' + tag + ' matches build commit ' + revision)
   console.log(`GitHub Release draft ${draft.id} matches all ${seen.size} handoff files`)
 }
 

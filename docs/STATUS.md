@@ -611,3 +611,9 @@
 - 现有文件型钥匙串的读取、保存和删除会在系统调用期间临时关闭进程内钥匙串交互。进程级互斥防止操作互相恢复设置。完成后恢复原状态，钥匙串服务和账号命名兼容已有记录。[Apple 钥匙串技术说明](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains) · [Apple 交互控制接口](https://developer.apple.com/documentation/security/keychains)
 - Apple Silicon 原生测试验证交互初始开启和关闭两种情况，均在操作中关闭且操作后恢复。使用随机合成凭据验证写入、重读、替换、清理与配置隔离。Go vet、Go 全量、钥匙串竞态和无 CGO 退回路径通过。Windows x64 凭据测试程序和生产应用交叉编译通过。
 - 当前范围已核对系统交互状态及可用钥匙串的真实读写删除。受锁钥匙串和正式签名应用跨版本访问仍待验收。正式账号仍需授权和接口联调。[BMad 记录](../_bmad-output/plan-e12-keychain-interaction.md)
+
+## E13 Release 草稿正文与远程标签核验（2026-11-27）
+
+- 现有 `--verify-release-draft` 命令复核已验证的 `RELEASE-NOTES.md` 与草稿正文。只读查询 GitHub 的精确版本标签，核对轻量标签或附注标签解引用后的提交是否与交付包一致。标签缺失、移动或草稿正文被改动都会报错。[Git 远程引用查询](https://git-scm.com/docs/git-ls-remote) · [GitHub Release API](https://docs.github.com/en/rest/releases/releases#get-a-release)
+- Node 22 与 Node 26 各通过 13 项发行脚本测试。用本机隔离 Git 远程测试同名分支、轻量标签和附注标签。使用现有 .45 两平台归档复核全部 13 项 SHA-256。
+- GitHub 只读查询仍返回 0 个 Release。真实签名资产和线上草稿仍待正式发行流程验收。[BMad 记录](../_bmad-output/plan-e13-release-draft-tag-and-body.md)

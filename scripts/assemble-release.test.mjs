@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const checksums = fileURLToPath(new URL('./package-checksums.mjs', import.meta.url))
 const assemble = fileURLToPath(new URL('./assemble-release.mjs', import.meta.url))
@@ -68,7 +68,7 @@ function git(cwd, ...args) {
   return result.stdout.trim()
 }
 
-test('verifies the handoff against the local tag and uploaded draft assets', async (t) => {
+test('verifies the handoff against local and GitHub tags, draft notes, and uploaded assets', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'jindi-release-tag-'))
   t.after(() => rm(cwd, { recursive: true, force: true }))
   git(cwd, 'init', '--quiet', '--object-format=sha1')
@@ -92,6 +92,7 @@ test('verifies the handoff against the local tag and uploaded draft assets', asy
   git(cwd, 'tag', 'v0.1.0-rc.2')
   assert.match(check('v0.1.0-rc.2').stderr, /does not match the local release tag/)
   commit('wrong source')
+  const wrongSHA = git(cwd, 'rev-parse', 'HEAD')
   git(cwd, 'tag', '--force', version)
   assert.match(check().stderr, /does not match the local release tag/)
 
@@ -105,9 +106,16 @@ test('verifies the handoff against the local tag and uploaded draft assets', asy
     const bytes = await readFile(join(output, name))
     return { id: index + 101, name, state: 'uploaded', size: bytes.length, digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex') }
   }))
+  const remote = join(cwd, 'remote.git')
+  git(cwd, 'init', '--bare', '--quiet', '--object-format=sha1', remote)
+  const remoteURL = 'https://github.com/' + repository + '.git'
+  git(cwd, 'config', 'url.' + pathToFileURL(remote).href + '.insteadOf', remoteURL)
+  git(cwd, 'push', '--quiet', remote, 'refs/tags/' + version, 'HEAD:refs/heads/' + version)
+
+  const body = await readFile(join(output, 'RELEASE-NOTES.md'), 'utf8')
   const draft = {
     id: 123, url: `https://api.github.com/repos/${repository}/releases/123`,
-    tag_name: version, draft: true, prerelease: true, assets,
+    tag_name: version, draft: true, prerelease: true, assets, body,
   }
   const draftFile = join(cwd, 'draft.json')
   async function checkDraft(data) {
@@ -117,6 +125,25 @@ test('verifies the handoff against the local tag and uploaded draft assets', asy
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
+  assert.match(validDraft.stdout, new RegExp('GitHub release tag .* matches build commit ' + sha))
+  const normalizedDraft = await checkDraft({ ...draft, body: body.trimEnd().replace(/\n/g, '\r\n') })
+  assert.equal(normalizedDraft.status, 0, normalizedDraft.stderr)
+  for (const invalidBody of [null, body + '\nUnverified change']) {
+    const rejected = await checkDraft({ ...draft, body: invalidBody })
+    assert.equal(rejected.status, 1)
+    assert.match(rejected.stderr, /draft body does not match RELEASE-NOTES.md/)
+  }
+
+  git(remote, 'update-ref', 'refs/tags/' + version, wrongSHA)
+  const moved = await checkDraft(draft)
+  assert.equal(moved.status, 1)
+  assert.match(moved.stderr, /GitHub release tag does not match the handoff build commit/)
+  git(remote, 'update-ref', '-d', 'refs/tags/' + version)
+  assert.match((await checkDraft(draft)).stderr, /Cannot resolve GitHub release tag/)
+  git(remote, 'update-ref', 'refs/tags/' + version, sha)
+  const remoteLightweight = await checkDraft(draft)
+  assert.equal(remoteLightweight.status, 0, remoteLightweight.stderr)
+
   for (const wrong of [{ draft: false }, { prerelease: false }, { tag_name: 'v0.2.0' },
     { url: 'https://api.github.com/repos/example/Other/releases/123' }]) {
     const result = await checkDraft({ ...draft, ...wrong })

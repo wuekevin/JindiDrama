@@ -107,8 +107,8 @@ GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-win
 
 1. 在拟发布提交上以 `release` 模式运行 `package` 工作流。签名、公证、双平台验收和下载复验全部通过后，会产生 `release-handoff-<版本>-attempt-<轮次>`。如果一轮失败，重跑全部任务或重新发起打包，使两个平台产物来自同一轮。下载交付包并解压到干净目录。
 2. 在本地仓库准备指向构建提交的拟发布标签。运行 `node scripts/package-checksums.mjs --verify-release-tag v0.1.0 "<解压目录>"`，将 `v0.1.0` 替换为拟发布标签。命令校验交付包内全部文件的 SHA-256，以及发行说明中的版本和构建提交。核对说明中的 GitHub 打包运行和轮次后再发布。
-3. 确认 GitHub 上的标签指向同一个构建提交，附注标签以解引用后的提交为准。用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
-4. 用已登录的 GitHub CLI 查询草稿 ID，再读取资产元数据并校验。示例中的 `123456789`、`v0.1.0` 和目录替换为本次发行值。JSON 保存到交付包目录之外。命令成功后由维护者发布。
+3. 在 GitHub 上准备指向构建提交的版本标签。用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
+4. 用已登录的 GitHub CLI 查询草稿 ID，再核对草稿正文、上传资产以及远程标签实际指向的构建提交。示例中的 `123456789`、`v0.1.0` 和目录替换为本次发行值。JSON 保存到交付包目录之外。命令成功后由维护者发布。
 
 ```sh
 gh api --paginate repos/wuekevin/JindiDrama/releases --jq '.[] | select(.draft) | [.id, .tag_name] | @tsv'
