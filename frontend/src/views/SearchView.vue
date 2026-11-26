@@ -166,7 +166,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
             <div class="tags"><span v-if="d.kind" class="tag" :class="kindTone(d.kind)">{{ d.kind }}</span><span v-for="t in d.tags" :key="t" class="tag">{{ t }}</span></div>
             <p class="sum clamp-2">{{ d.summary }}</p>
           </div>
-          <div class="act"><span v-if="!d.providerOnly || d.episodeCount > 0" class="eps">共{{ d.episodeCount }}集<template v-if="!d.providerOnly && d.kind !== '本地片库'"> · {{ d.finished ? '已完结' : '连载中' }}</template></span>
+          <div class="act"><span class="eps">共{{ d.episodeCount }}集<template v-if="!d.providerOnly && d.kind !== '本地片库'"> · {{ d.finished ? '已完结' : '连载中' }}</template></span>
             <BaseButton v-if="!d.providerOnly" data-testid="play-now" @click="watchIt(d.id)"><Play :size="15" fill="currentColor" />立即播放</BaseButton>
             <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id, d.providerOnly))">查看详情</BaseButton></div>
         </li>
