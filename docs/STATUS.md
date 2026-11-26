@@ -472,3 +472,12 @@
 - 苹果 CMS 正在播放的分集连续 20 秒不推进后转入既有切源流程。暂停、结束、已离开的媒体和过期票据不会触发。暂停期间仍能手动恢复；没有可用的备用源时进入原有重试状态。
 - 原生复验使用 Wails、Go 转发、WKWebView 和独立 SQLite。只替换外部 HTTP 传输，上游夹具发出部分 MP4 后截断。两轮在同一张票据下切到备用源并接播，第二轮播放到 13 秒后正常退出，SQLite 完整性通过。
 - 前端生产构建、122 项 Vitest、67 项目录与播放 Playwright 通过。新增回归验证没有媒体错误事件时仍能切源，暂停不切源。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e12-cms-native-playback-watchdog.md)
+
+## E13 播放恢复与发行门禁本地打包 .42（2026-11-27）
+
+- 从隔离发行源码 `fa39b56d9e78784a033507866c56d337abd99423` 构建 `v0.1.0-smoke.20261127.42`。本批包含发行标签核验、macOS 分发策略门禁、收藏和历史重试，以及播放器切源接播与停滞恢复。Windows 安装器 22.50 MiB，便携版 32.26 MiB，macOS Universal ZIP 40.83 MiB。
+- Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立 shasum 和随包说明中的命令，产物移入项目后复验一致。安装器内应用与便携版逐字节一致，WebView2 安装组件与 Wails 原件一致。Universal 两个切片最低系统均为 macOS 13.0。
+- Apple Silicon 从最终 ZIP 启动，应用版本、原生窗口、Wails 页面、正常退出与独立 SQLite 完整性全部通过。Go 源码、三个二进制切片和 npm 生产依赖扫描未报告漏洞。
+- 打包和浏览器回归的 68 个前端生产文件哈希一致。374 项全量 Playwright、122 项 Vitest、Go vet 和 Go 全量、Node 22 与 Python macOS 发行工具各 13 项通过。本轮只执行本地打包。
+- 正式签名、公证、Windows 和 Intel Mac 当前批次原生、真实授权公网片源仍待验收。本地包 Windows 未签名，macOS 采用 ad-hoc 签名。核对 GitHub 发行环境、仓库级签名凭据和 Release 数量均为 0。
+- [Windows SHA-256](../build/bin/smoke-20261127.42/windows/SHA256SUMS.txt) · [macOS SHA-256](../build/bin/smoke-20261127.42/macos/SHA256SUMS.txt) · [原生验收](../build/bin/smoke-20261127.42/evidence/arm64-native.log) · [BMad 记录](../_bmad-output/plan-e13-cms-release-batch42.md)
