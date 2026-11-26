@@ -31,6 +31,9 @@ func (a *App) CatalogPlayback(id string, index int) (provider.PlaybackTicket, er
 	if cms, ok := a.p.(*applecms.Provider); ok {
 		// CMS resolves eligibility, episode ID and sources from one exact detail.
 		ticket, err := cms.ResolvePlayback(ctx, id, index)
+		if errors.Is(err, applecms.ErrRateLimited) {
+			return provider.PlaybackTicket{}, applecms.ErrRateLimited
+		}
 		if errors.Is(err, provider.ErrEpisodeUnavailable) {
 			return provider.PlaybackTicket{}, provider.ErrEpisodeUnavailable
 		}

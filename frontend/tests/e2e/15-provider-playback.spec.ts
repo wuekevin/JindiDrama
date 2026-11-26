@@ -381,6 +381,29 @@ test('CMS detail and playback use the combined bridge and retry without falling 
   expect(await calls(page)).toEqual(['catalog:' + cmsId + ':3'])
 })
 
+test('CMS playback shows its rate limit and can retry after cooldown', async ({ page }) => {
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute)
+  await page.evaluate(() => {
+    type Desktop = { CatalogPlayback(id: string, episode: number): Promise<unknown> }
+    const app = (window as unknown as { go: { app: { App: Desktop } } }).go.app.App
+    const playback = app.CatalogPlayback.bind(app)
+    let limited = true
+    app.CatalogPlayback = async (id, episode) => {
+      if (limited) {
+        limited = false
+        throw '苹果 CMS 请求过于频繁，请稍后重试'
+      }
+      return playback(id, episode)
+    }
+  })
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  await expect(page.getByTestId('error')).toContainText('苹果 CMS 请求过于频繁，请稍后重试')
+  await expect(page.locator('video')).toHaveCount(0)
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect.poll(() => durationMs(historyVideo(page, 1))).toBeGreaterThan(10_000)
+})
+
 test('empty CMS home keeps the catalog heading and a catalog-specific empty state', async ({ page }) => {
   await fixture(page, 'apple-cms-empty')
   await page.goto('/#/home')

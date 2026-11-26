@@ -29,9 +29,12 @@ const (
 	maxRoutes        = 32
 	maxMediaSources  = 4
 	ticketLifetime   = 15 * time.Minute
+	defaultRetryWait = 5 * time.Second
 )
 
 var (
+	// ErrRateLimited tells callers the active CMS is cooling down.
+	ErrRateLimited   = errors.New("苹果 CMS 请求过于频繁，请稍后重试")
 	errUpstream      = errors.New("苹果 CMS 目录暂不可用")
 	errInvalidPage   = errors.New("苹果 CMS 请求页码无效")
 	errPageMismatch  = errors.New("苹果 CMS 返回的页码与请求不一致")
@@ -50,6 +53,8 @@ type Provider struct {
 	media    func(string) (provider.MediaSource, bool)
 	genreMu  sync.Mutex
 	genreIDs map[string]bool
+	retryMu  sync.Mutex
+	retryAt  time.Time
 }
 
 type CatalogPage struct {
@@ -123,6 +128,9 @@ func (p *Provider) CatalogPage(ctx context.Context, query string, page int) (Cat
 }
 
 func (p *Provider) CatalogGenres(ctx context.Context) ([]CatalogGenre, error) {
+	if p.coolingDown() {
+		return nil, ErrRateLimited
+	}
 	p.genreMu.Lock()
 	defer p.genreMu.Unlock()
 	return p.refreshCatalogGenres(ctx)
@@ -164,6 +172,9 @@ func (p *Provider) refreshCatalogGenres(ctx context.Context) ([]CatalogGenre, er
 }
 
 func (p *Provider) requireCatalogGenre(ctx context.Context, id string) error {
+	if p.coolingDown() {
+		return ErrRateLimited
+	}
 	p.genreMu.Lock()
 	defer p.genreMu.Unlock()
 	if p.genreIDs == nil {
@@ -375,7 +386,37 @@ type response struct {
 	Class     json.RawMessage `json:"class"`
 }
 
+func retryWait(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 64); err == nil || (errors.Is(err, strconv.ErrRange) && decimalDigits(value, len(value))) {
+		const maxSeconds = uint64((1<<63 - 1) / time.Second)
+		return time.Duration(min(seconds, maxSeconds)) * time.Second
+	}
+	if date, err := http.ParseTime(value); err == nil {
+		return max(0, date.Sub(now))
+	}
+	return defaultRetryWait
+}
+
+func (p *Provider) coolingDown() bool {
+	p.retryMu.Lock()
+	defer p.retryMu.Unlock()
+	return time.Now().Before(p.retryAt)
+}
+
+func (p *Provider) extendCooldown(until time.Time) {
+	p.retryMu.Lock()
+	defer p.retryMu.Unlock()
+	if until.After(p.retryAt) {
+		p.retryAt = until
+	}
+}
+
 func (p *Provider) request(ctx context.Context, params url.Values) (response, error) {
+	if p.coolingDown() {
+		return response{}, ErrRateLimited
+	}
+
 	endpoint := p.endpoint
 	query := endpoint.Query()
 	query.Set("at", "json")
@@ -394,6 +435,11 @@ func (p *Provider) request(ctx context.Context, params url.Values) (response, er
 		return response{}, errUpstream
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusTooManyRequests {
+		now := time.Now()
+		p.extendCooldown(now.Add(retryWait(res.Header.Get("Retry-After"), now)))
+		return response{}, ErrRateLimited
+	}
 	if res.StatusCode != http.StatusOK || res.ContentLength > maxResponseBytes {
 		return response{}, errUpstream
 	}

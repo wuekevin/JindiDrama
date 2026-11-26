@@ -420,3 +420,10 @@
 - 新增 Chromium 回归直接访问本机 HTTP 服务，该服务声明完整正文长度并在写入部分字节后截断。验证两路失败、可重试、换用新票据地址、读到备用源以及保存后的进度推进。
 - 类型检查、生产构建、122 项 Vitest、60 项目录与播放 Playwright、Go vet 和 Go 全量通过。回归来自自制样片。真实授权公网片源、Windows 和 Intel Mac 原生、正式签名与公证仍待验收。
 - 同日复核签名与平台准备状态。GitHub 仓库未配置发行环境或仓库级 Actions secrets，也未发现 Release。本机没有 Developer ID Application 签名身份，x86_64 执行测试被系统拒绝。
+
+## E12 苹果 CMS 目录限流冷却（2026-11-27）
+
+- 配置的苹果 CMS Provider 收到 HTTP 429 时返回固定提示，并在该实例内共享冷却。目录、搜索、分类、详情和新取票核验会在冷却期间直接返回。RFC 定义的秒数和 HTTP 日期形式都可读取，缺失或无效时使用 5 秒冷却。应用不自动重试，已签发的媒体转发仍由其票据管理。[HTTP 429](https://www.rfc-editor.org/rfc/rfc6585.html#section-4) · [Retry-After](https://www.rfc-editor.org/rfc/rfc9110.html#section-10.2.3)
+- 本机 HTTP 夹具确认 429 后各入口没有产生额外的上游请求，分类入口无需等待正在进行的刷新，另一 Provider 实例不受影响。HTTP 夹具用 1 秒 Retry-After 验证自然到期后恢复。截止时间比较另行验证较短值不会替换已有较晚值，并核对零、过期日期、无效值和超出整数范围的秒数。
+- 新取票核验触发限流时，Wails 播放页显示固定限流提示与重试入口。Apple Silicon 本机夹具返回 429 后触发提示，冷却结束后重试并实际解码第 3 集。
+- 前端类型检查、生产构建、122 项 Vitest、61 项目录及播放回归、Go vet、Go 全量、CMS Provider 与 App 竞态和 Windows amd64 生产交叉构建通过。本轮累计到本地候选，.40 测试包早于此修复。

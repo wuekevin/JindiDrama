@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"jindi-drama/internal/provider"
+	"jindi-drama/internal/provider/applecms"
 )
 
 func TestAppleCMSStartupConfiguration(t *testing.T) {
@@ -348,5 +349,35 @@ func TestAppleCMSGenreBindingsUseConfiguredCatalog(t *testing.T) {
 	}
 	if got, want := strings.Join(calls, ","), "list::1:,detail:"+genre+":1:,detail:"+genre+":2:,detail:::43"; got != want {
 		t.Fatalf("upstream queries = %s, want %s", got, want)
+	}
+}
+
+func TestAppleCMSPlaybackPreservesRateLimit(t *testing.T) {
+	var calls atomic.Int32
+	client := &http.Client{Transport: catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+		calls.Add(1)
+		if req.URL.Query().Has("ids") {
+			return &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{"Retry-After": {"30"}},
+				Body: io.NopCloser(strings.NewReader("private upstream message"))}, nil
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(
+			`{"code":1,"list":[{"vod_id":42,"vod_name":"限流剧目","vod_total":1,"vod_play_url":"1$https://media.example.test/one.mp4"}]}`))}, nil
+	})}
+	a := New()
+	if err := configureAppleCMS(a, "https://catalog.example.test", client); err != nil {
+		t.Fatal(err)
+	}
+	home, err := a.Home()
+	if err != nil || len(home) != 1 {
+		t.Fatalf("seed catalog: %+v, %v", home, err)
+	}
+	for range 2 {
+		ticket, err := a.CatalogPlayback(home[0].ID, 1)
+		if !errors.Is(err, applecms.ErrRateLimited) || ticket.LeaseID != "" || len(ticket.Sources) != 0 {
+			t.Fatalf("rate-limited ticket: %+v, %v", ticket, err)
+		}
+	}
+	if total := calls.Load(); total != 2 {
+		t.Fatalf("rate-limited retry reached the upstream: %d", total)
 	}
 }

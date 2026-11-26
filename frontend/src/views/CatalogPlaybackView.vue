@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import type Hls from 'hls.js'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { ErrorState } from '@/components/ui'
@@ -19,6 +20,7 @@ import type { HistoryEntry } from '@/types'
 import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-contracts'
 
 const hlsType = 'application/vnd.apple.mpegurl'
+const cmsRateLimitError = '苹果 CMS 请求过于频繁，请稍后重试'
 
 const route = useRoute()
 const router = useRouter()
@@ -377,8 +379,11 @@ async function load() {
     sources.value = choices
     state.value = 'ready'
     watchExpiry(current)
-  } catch {
-    if (isPlaybackRoute(path, current)) fail('无法取得可用的播放源，请重试。')
+  } catch (cause) {
+    if (!isPlaybackRoute(path, current)) return
+    const message = cause instanceof Error ? cause.message : cause
+    fail(isAppleCMSDramaId(targetId) && message === cmsRateLimitError
+      ? cmsRateLimitError + '。' : '无法取得可用的播放源，请重试。')
   }
 }
 

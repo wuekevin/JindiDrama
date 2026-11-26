@@ -448,3 +448,128 @@ func TestCatalogCoverMetadataIsOptionalAndResolvedAgainstEndpoint(t *testing.T) 
 		}
 	}
 }
+
+func TestCatalogRequestsCoolDownAcrossOperations(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "30")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = io.WriteString(w, "private upstream message")
+			return
+		}
+		_, _ = io.WriteString(w, `{"code":1,"list":[]}`)
+	}))
+	defer server.Close()
+
+	p := fixtureProvider(t, server.URL, server.Client())
+	ctx := t.Context()
+	if _, err := p.Search(ctx, "海岛"); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("429 should report a fixed rate limit error: %v", err)
+	}
+	if _, err := p.Home(ctx); !errors.Is(err, ErrRateLimited) {
+		t.Fatal("home bypassed the rate limit")
+	}
+	if _, err := p.CatalogGenres(ctx); !errors.Is(err, ErrRateLimited) {
+		t.Fatal("genres bypassed the rate limit")
+	}
+	if _, err := p.CatalogDetail(ctx, p.idPrefix+"42"); !errors.Is(err, ErrRateLimited) {
+		t.Fatal("detail bypassed the rate limit")
+	}
+	if _, err := p.ResolvePlayback(ctx, p.idPrefix+"42", 1); !errors.Is(err, ErrRateLimited) {
+		t.Fatal("ticket lookup bypassed the rate limit")
+	}
+	// An in-flight category refresh holds this lock while waiting on HTTP.
+	p.genreMu.Lock()
+	categoryErrors := make(chan error, 2)
+	go func() {
+		_, err := p.CatalogGenres(ctx)
+		categoryErrors <- err
+	}()
+	go func() {
+		_, err := p.CatalogGenrePage(ctx, "7", 1)
+		categoryErrors <- err
+	}()
+	for range 2 {
+		select {
+		case err := <-categoryErrors:
+			if !errors.Is(err, ErrRateLimited) {
+				t.Errorf("category request while throttled: %v", err)
+			}
+		case <-time.After(time.Second):
+			p.genreMu.Unlock()
+			t.Fatal("throttled category request waited for the in-flight refresh")
+		}
+	}
+	p.genreMu.Unlock()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("blocked operations reached the upstream: %d requests", got)
+	}
+	other := fixtureProvider(t, server.URL, server.Client())
+	if _, err := other.Home(ctx); err != nil || calls.Load() != 2 {
+		t.Fatalf("another provider inherited the cooldown: %v", err)
+	}
+	p.retryMu.Lock()
+	firstDeadline := p.retryAt
+	p.retryMu.Unlock()
+	p.extendCooldown(firstDeadline.Add(-time.Second))
+	p.retryMu.Lock()
+	if !p.retryAt.Equal(firstDeadline) {
+		t.Errorf("a shorter cooldown replaced the existing deadline: %v", p.retryAt)
+	}
+	p.retryAt = time.Now().Add(-time.Second)
+	p.retryMu.Unlock()
+	if _, err := p.Home(ctx); err != nil || calls.Load() != 3 {
+		t.Fatalf("expired cooldown did not allow a new request: %v", err)
+	}
+}
+
+func TestRetryWait(t *testing.T) {
+	now := time.Date(2026, 11, 27, 0, 0, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name  string
+		value string
+		wait  time.Duration
+	}{
+		{"seconds", " 120 ", 2 * time.Minute},
+		{"date", now.Add(42 * time.Second).Format(http.TimeFormat), 42 * time.Second},
+		{"past date", now.Add(-time.Second).Format(http.TimeFormat), 0},
+		{"zero", "0", 0},
+		{"invalid", "-1", defaultRetryWait},
+		{"absent", "", defaultRetryWait},
+		{"large", "18446744073709551615", ((1<<63 - 1) / time.Second) * time.Second},
+		{"overflowing digits", "18446744073709551616", ((1<<63 - 1) / time.Second) * time.Second},
+		{"overflowing invalid", "18446744073709551616x", defaultRetryWait},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := retryWait(tt.value, now); got != tt.wait {
+				t.Fatalf("retryWait(%q) = %s, want %s", tt.value, got, tt.wait)
+			}
+		})
+	}
+}
+
+func TestCatalogCooldownExpiresNaturally(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if calls.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = io.WriteString(w, `{"code":1,"list":[]}`)
+	}))
+	defer server.Close()
+
+	p := fixtureProvider(t, server.URL, server.Client())
+	if _, err := p.Home(t.Context()); !errors.Is(err, ErrRateLimited) {
+		t.Fatalf("initial cooldown: %v", err)
+	}
+	if _, err := p.Home(t.Context()); !errors.Is(err, ErrRateLimited) || calls.Load() != 1 {
+		t.Fatalf("request during cooldown: %v, calls: %d", err, calls.Load())
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if _, err := p.Home(t.Context()); err != nil || calls.Load() != 2 {
+		t.Fatalf("request after Retry-After: %v, calls: %d", err, calls.Load())
+	}
+}
