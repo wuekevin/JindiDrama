@@ -37,6 +37,7 @@ export function scheduleDanmaku(
   width: number,
   height: number,
   measureWidth: (item: DanmakuItem) => number,
+  duration = Infinity,
 ): DanmakuSchedule {
   const velocity = width * 1.3 * settings.speed / BASE_DURATION
   const trajectories: DanmakuTrajectory[] = []
@@ -71,6 +72,8 @@ export function scheduleDanmaku(
       candidate.availableAt < earliest.availableAt ? candidate : earliest)
     const textWidth = measureWidth(item)
     const startsAt = Math.max(item.at, lane.availableAt)
+    // The clip ends before an item admitted here could travel into view.
+    if (startsAt >= duration) continue
     const clear = startsAt + clearance(textWidth)
     lane.reservations.push({ start: startsAt, clear })
     lane.availableAt = clear

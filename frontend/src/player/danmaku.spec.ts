@@ -25,4 +25,11 @@ describe('danmaku engine', () => {
       ['mine', 1], ['also mine', 3], ['clear', 6],
     ])
   })
+  it('does not reserve local entry times beyond the clip end', () => {
+    const items = ['first', 'second', 'third'].map((id) => ({ id, at: 23, text: id, likes: 0, lane: 0, mine: true }))
+    const plan = scheduleDanmaku(items, DEFAULT_DANMAKU, 800, 26, () => 252, 24)
+    expect(plan.trajectories.map(({ item }) => item.id)).toEqual(['first'])
+    expect(activeDanmaku(plan, 23.75).map(({ item }) => item.id)).toEqual(['first'])
+  })
+
 })

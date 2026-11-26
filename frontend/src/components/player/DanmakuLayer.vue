@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { DanmakuItem } from '@/player/danmaku'
 import { activeDanmaku, scheduleDanmaku } from '@/player/danmaku'
 import { useSettingsStore } from '@/stores/player'
-const props = defineProps<{ items: DanmakuItem[]; time: number }>()
+const props = defineProps<{ items: DanmakuItem[]; time: number; duration: number }>()
 const s = useSettingsStore()
 const layer = ref<HTMLElement>()
 const width = ref(0)
@@ -36,7 +36,7 @@ const schedule = computed(() => {
       widths.set(item.text, measured)
     }
     return measured + (item.mine ? 20 : 0)
-  })
+  }, props.duration > 0 ? props.duration : undefined)
 })
 const placed = computed(() => activeDanmaku(schedule.value, props.time))
 </script>

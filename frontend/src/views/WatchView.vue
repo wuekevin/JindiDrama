@@ -290,7 +290,7 @@ async function toggleEpisodeLike() {
         </template>
       </section>
       <section v-if="layout === 'dmk'" ref="companion" class="rail" tabindex="-1">
-        <DanmakuSettings :key="`${dramaId}:${episode}`" :time="player.time.value" :draft="danmakuDraft" :send-danmaku="sendDm" :pending-recovery="pendingDanmakuRecovery" :recovering="recoveringDanmaku" :retry-recovery="retryDanmakuRecovery" />
+        <DanmakuSettings :key="`${dramaId}:${episode}`" :time="player.time.value" :draft="danmakuDraft" :local-items="mine" :send-danmaku="sendDm" :pending-recovery="pendingDanmakuRecovery" :recovering="recoveringDanmaku" :retry-recovery="retryDanmakuRecovery" />
       </section>
       <section v-else-if="layout === 'cmt'" ref="companion" class="drawer" tabindex="-1">
         <CommentPanel :key="`${dramaId}-${episode}`" @close="setPanel('')" />

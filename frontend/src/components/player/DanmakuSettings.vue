@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue'
+import { fmt } from '@/player/machine'
 import { localId } from '@/localId'
 import { normalizeDanmakuText, UndurableDanmakuError } from '@/bindings/danmakuRecovery'
 import type { DanmakuDraft, DanmakuSubmission } from '@/player/danmakuDraft'
 import { MessageSquareText, Eye, Scan, Flame, ShieldCheck, Plus, X, Smile, Check } from 'lucide-vue-next'
 import { useSettingsStore } from '@/stores/player'
 import { useToastStore } from '@/stores/toast'
-import { isBlocked, type Area, type Density } from '@/player/danmaku'
+import { isBlocked, type Area, type DanmakuItem, type Density } from '@/player/danmaku'
 const props = defineProps<{
   time: number
   draft: DanmakuDraft
+  localItems: readonly DanmakuItem[]
   pendingRecovery: boolean
   recovering: boolean
   retryRecovery: () => void
@@ -42,7 +44,7 @@ async function send(event?: KeyboardEvent) {
     await props.sendDanmaku(attempt)
     draft.attempt = undefined
     if (normalizeDanmakuText(draft.text) === t) draft.text = ''
-    if (active && props.draft === draft) toast.push('弹幕已发送（本地演示）', 'success')
+    if (active && props.draft === draft) toast.push('弹幕已发送，可在本集本机弹幕中查看', 'success')
   } catch (error) {
     if (active && props.draft === draft) {
       const message = error instanceof UndurableDanmakuError
@@ -73,6 +75,12 @@ const pct = (v: number, lo: number, hi: number) => ((v - lo) / (hi - lo)) * 100
       <div v-if="adding" class="addrow"><input v-model="word" placeholder="输入要屏蔽的关键词" data-testid="kw-input" @keydown.enter="addWord" /><button data-testid="kw-confirm" @click="addWord">确定</button></div>
       <ul><li v-for="w in d.blocked" :key="w" data-testid="kw">{{ w }}<button :aria-label="`移除${w}`" @click="s.removeBlock(w)"><X :size="12" /></button></li></ul></div>
     <div class="send"><h4><MessageSquareText :size="22" />发送弹幕</h4><div class="srow"><div class="ip"><input v-model="draft.text" placeholder="发一条弹幕，和大家一起聊剧情吧~" aria-label="弹幕内容" data-testid="dm-input" @keydown.enter="send" /><Smile :size="22" /></div><button class="go" data-testid="dm-send" :disabled="draft.sending" @click="send()">发送</button></div>
+      <details v-if="localItems.length" class="local-log" data-testid="dm-local-log">
+        <summary>本集本机弹幕</summary>
+        <ul tabindex="0" aria-label="本机弹幕记录" data-player-scroll>
+          <li v-for="item in localItems" :key="item.id"><span>{{ fmt(item.at) }}</span><span>{{ item.text }}</span></li>
+        </ul>
+      </details>
       <p v-if="pendingRecovery" class="pending" role="status">本地弹幕补写暂未完成。<button :disabled="recovering" @click="retryRecovery()">重试补写</button></p>
     </div>
   </aside>
@@ -89,5 +97,6 @@ const pct = (v: number, lo: number, hi: number) => ((v - lo) / (hi - lo)) * 100
 .addrow { display: flex; gap: 8px; margin-top: 10px; input { flex: 1; height: 34px; padding: 0 12px; border-radius: 17px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border); outline: 0; } button { padding: 0 16px; border-radius: 17px; background: var(--g-accent); } }
 .kw ul { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; li { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 15px; background: rgba(255,255,255,.1); font-size: 14px; button { display: grid; place-items: center; color: var(--c-text-2); } } }
 .send { margin-top: auto; padding: 14px; border-radius: 14px; background: var(--c-surface); border: 1px solid var(--c-border); h4 { display: flex; align-items: center; gap: 8px; font-size: 18px; margin-bottom: 12px; } .srow { display: flex; gap: 10px; } .ip { flex: 1; display: flex; align-items: center; gap: 8px; height: 48px; padding: 0 14px; border-radius: 24px; border: 1px solid var(--c-border-strong); input { flex: 1; background: none; border: 0; outline: 0; font-size: 14.5px; min-width: 0; } } .go { width: 76px; height: 48px; border-radius: 24px; background: var(--g-accent); font-weight: 700; font-size: 16px; } }
+.local-log { margin-top: 12px; summary { cursor: pointer; } ul { max-height: 160px; overflow-y: auto; padding-top: 6px; &:focus-visible { outline: 2px solid var(--c-accent-2); outline-offset: -2px; } } li { display: flex; gap: 12px; padding: 6px 0; overflow-wrap: anywhere; } li span:first-child { flex: none; color: var(--c-text-2); font-variant-numeric: tabular-nums; } }
 .pending { margin-top: 8px; color: var(--c-text-2); button { margin-left: 6px; color: var(--c-accent-2); text-decoration: underline; } }
 </style>

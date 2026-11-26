@@ -157,12 +157,12 @@ const actions: Record<string, () => void> = {
 function key(e: KeyboardEvent) {
   const target = e.target
   if (e.defaultPrevented || e.isComposing || !(target instanceof HTMLElement) ||
-      target.isContentEditable || target.closest('input,textarea,select') || document.querySelector('[aria-modal=true]')) return
+      target.isContentEditable || target.closest('input,textarea,select,[data-player-scroll]') || document.querySelector('[aria-modal=true]')) return
   if (e.key === 'Escape') {
     menu.value = ''
     return
   }
-  if (e.key === ' ' && target.closest('button,a[href],[role=button]')) return
+  if (e.key === ' ' && target.closest('button,a[href],summary,[role=button]')) return
   const pressed = normalizeKey(e)
   if (!pressed) return
   const action = Object.keys(actions).find((name) => preferences.s.shortcuts[name] === pressed)
@@ -190,7 +190,7 @@ const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volu
     }" tabindex="0" data-testid="player" :data-state="player.state.value">
     <video v-if="p.mode === 'demo'" :ref="(el) => (p.video.value = el as HTMLVideoElement | null)" class="vid" playsinline preload="auto" data-testid="video" @loadedmetadata="p.onMeta" @canplay="p.onMeta" @timeupdate="p.onTime" @seeked="p.onSeeked" @ended="p.onEnded" @waiting="p.onWaiting" @playing="p.onMediaControl" @pause="p.onMediaControl" @error="p.onError" @click="p.toggle()"><source v-for="(s, i) in playbackSources" :key="s.src" :src="s.src" :type="s.type" @error="i === playbackSources.length - 1 && p.onError()" /></video>
     <div v-else class="bg" :style="{ backgroundImage: `url('${bg}')` }" @click="p.toggle()" />
-    <DanmakuLayer :items="items" :time="player.time.value" />
+    <DanmakuLayer :items="items" :time="player.time.value" :duration="player.duration.value" />
     <header ref="header" class="top">
       <button class="rnd" aria-label="返回" data-testid="player-back" @click="emit('back')"><ChevronLeft :size="22" /></button>
       <span v-if="variant === 'danmaku'" class="ttl">{{ drama.title }} 第{{ episode }}集</span>
