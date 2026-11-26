@@ -29,5 +29,13 @@ describe('history helpers', () => {
     expect(watchStatus(bookmark, drama as any)).toBe('unknown')
     expect(watchStatus({ ...bookmark, percent: 99 }, drama as any)).toBe('watching')
   })
+  it('uses actual CMS watch time including records that lack a position', () => {
+    const bookmark = {
+      dramaId: 'apple-cms:0123456789abcdef0123456789abcdef:90071992547409931234',
+      episode: 3, percent: 50, watchedAt: 0, durationSec: 3600,
+    }
+    expect(watchHours([{ ...bookmark, positionSec: 5 }])).toBe(0)
+    expect(watchHours([bookmark, { ...bookmark, dramaId: 'local-x', positionSec: 3600 }])).toBe(1.5)
+  })
   it('hours positive', () => { expect(watchHours([{ dramaId: 'x', episode: 10, percent: 50, watchedAt: 0 }])).toBeCloseTo(1.1, 1) })
 })

@@ -3,9 +3,12 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Clock, Play, Trash2, LayoutGrid, List, ChevronDown, ChevronUp, ChartColumn, Filter, Settings, ChevronRight, Ellipsis, Check } from 'lucide-vue-next'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
-import { continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, playbackRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { useLibraryStore } from '@/stores/library'
 import { watchStatus, historyDay, agoText, watchHours } from '@/composables'
+import { useCMSHistoryDetails } from '@/composables/useCMSHistoryDetails'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
+import { catalogPlaceholderCover, fallbackCatalogCover, vCancelCatalogCover } from '@/mocks/provider'
 import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, EmptyState, ProgressBar, Modal } from '@/components/ui'
 import type { Drama, HistoryEntry } from '@/types'
@@ -47,14 +50,35 @@ type Row = ReturnType<typeof historyDay> & {
   h: HistoryEntry
   d: Drama
   status: ReturnType<typeof watchStatus>
-  issue: ReturnType<typeof savedMediaIssue>
+  issue: ReturnType<typeof savedMediaIssue> | 'catalog'
   continuation?: number
+  cms?: boolean
+  detailAvailable?: boolean
 }
-const rows = computed<Row[]>(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt).flatMap((h) => {
+const recentHistory = computed(() => [...lib.history].sort((a, b) => b.watchedAt - a.watchedAt))
+const { details: cmsDetails, loadMore: loadMoreCMS, loading: loadingCMS, hasMore: hasMoreCMS } = useCMSHistoryDetails(
+  () => recentHistory.value.map(({ dramaId }) => dramaId).filter(isAppleCMSDramaId),
+)
+const rows = computed<Row[]>(() => recentHistory.value.flatMap((h): Row[] => {
+  const day = historyDay(h.watchedAt, now.value)
+  if (isAppleCMSDramaId(h.dramaId)) {
+    const detail = cmsDetails.get(h.dramaId)
+    const d = detail?.drama ?? {
+      id: h.dramaId, title: '苹果 CMS 短剧', cover: catalogPlaceholderCover,
+      summary: '', tags: [], episodeCount: h.episodeCountAtWatch ?? 0, updatedTo: 0, finished: false, heat: 0,
+    }
+    const episode = detail ? catalogBookmarkEpisode(detail, h) : undefined
+    return [{
+      h, d, ...day, cms: true, detailAvailable: !!detail,
+      issue: !detail?.catalogPlayback ? 'catalog' : episode === undefined ? 'episode' : undefined,
+      status: !d.episodeCount && h.percent === 100 ? 'unknown' : watchStatus(h, d),
+      continuation: h.percent === 100 && episode === h.episode ? undefined : episode,
+    }]
+  }
   const d = savedCard(h.dramaId)
   if (!d) return []
   return [{
-    h, d, ...historyDay(h.watchedAt, now.value),
+    h, d, ...day,
     status: watchStatus(h, d), issue: savedMediaIssue(d, h.episode), continuation: continuationEpisode(d, h),
   }]
 }))
@@ -74,8 +98,18 @@ const groups = computed(() => [{ k: 'today', l: '今天' }, { k: 'yesterday', l:
 const stat = computed(() => ({ total: rows.value.length, watching: rows.value.filter((r) => r.status === 'watching').length, done: rows.value.filter((r) => r.status === 'done').length, hours: watchHours(lib.history) }))
 const latest = computed(() => rows.value.find((r) => r.continuation === r.h.episode)
   ?? rows.value.find((r) => r.continuation !== undefined))
-const detailTarget = (r: Row) => r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id)
-const resume = (r: Row) => router.push(r.issue ? detailTarget(r) : playbackRoute(r.d.id, r.continuation ?? r.h.episode))
+function openDetails(r: Row) {
+  if (r.cms && !r.detailAvailable) return
+  void router.push(r.issue === 'library' ? { name: 'licensed' } : detailRoute(r.d.id, r.cms))
+}
+function resume(r: Row) {
+  if (r.issue) return openDetails(r)
+  const episode = r.continuation ?? r.h.episode
+  void router.push(r.cms ? catalogPlaybackRoute(r.d.id, episode) : playbackRoute(r.d.id, episode))
+}
+const issueText = (r: Row) => r.issue === 'catalog' ? '当前片源不可用'
+  : r.issue === 'library' ? '本地媒体不可用' : r.issue === 'episode' ? '该分集不可用'
+  : r.status === 'unknown' ? '完成状态未知' : r.d.tags.slice(0, 2).join(' · ')
 function toggleBatch() { batch.value = !batch.value; picked.value = new Set(); menu.value = '' }
 function closeMenu(event: KeyboardEvent) {
   if (!menu.value) return
@@ -159,14 +193,20 @@ const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
         <ul :class="[view === 'list' || g.k === 'earlier' ? 'rows' : 'cards', g.k]">
           <li v-for="r in g.items" :key="r.d.id" class="it" :class="{ sel: picked.has(r.d.id) }" data-testid="history-item">
             <button class="cb" :class="{ on: picked.has(r.d.id) }" role="checkbox" :aria-checked="picked.has(r.d.id)" :aria-label="`选择${r.d.title}`" data-testid="hcheck" @click="pick(r.d.id)"><Check v-if="picked.has(r.d.id)" :size="12" /></button>
-            <img :src="r.d.cover" :alt="r.d.title" @click="rowClick(r)" />
-            <div class="b"><h3 class="clamp-2">{{ r.d.title }}</h3><p class="tg">{{ r.issue === 'library' ? '本地媒体不可用' : r.issue === 'episode' ? '该分集不可用' : r.status === 'unknown' ? '完成状态未知' : r.d.tags.slice(0, 2).join(' · ') }}<span v-if="r.issue && r.status === 'unknown'"> · 完成状态未知</span><span v-else-if="r.issue && r.status === 'done'"> · 已看完</span></p><p class="ep">第{{ r.h.episode }}集<template v-if="r.h.episodeCountAtWatch && r.h.episodeCountAtWatch !== r.d.episodeCount"> / 当时共{{ r.h.episodeCountAtWatch }}集</template><template v-else-if="!r.issue"> / 共{{ r.d.episodeCount }}集</template></p>
+            <img :key="r.d.cover" v-cancel-catalog-cover :crossorigin="r.cms ? 'anonymous' : undefined"
+              :src="r.d.cover" :alt="r.d.title" :loading="r.cms ? 'lazy' : undefined" @error="fallbackCatalogCover" @click="rowClick(r)" />
+            <div class="b"><h3 class="clamp-2">{{ r.d.title }}</h3><p class="tg">{{ issueText(r) }}<span v-if="r.issue && r.status === 'unknown'"> · 完成状态未知</span><span v-else-if="r.issue && r.status === 'done'"> · 已看完</span></p><p class="ep">第{{ r.h.episode }}集<template v-if="r.h.episodeCountAtWatch && (!r.detailAvailable && r.cms || r.h.episodeCountAtWatch !== r.d.episodeCount)"> / 当时共{{ r.h.episodeCountAtWatch }}集</template><template v-else-if="!r.issue"> / 共{{ r.d.episodeCount }}集</template></p>
               <div class="pg"><ProgressBar :value="r.h.percent" /><i>{{ r.h.percent }}%</i></div></div>
-            <div class="ac"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.age) }}</span>
-              <button v-if="r.issue" class="done" @click="resume(r)">{{ r.issue === 'library' ? '查看片库' : '选集' }}</button>
+            <div class="ac" :class="{ 'only-menu': r.cms && !r.detailAvailable }"><span v-if="g.k === 'earlier'" class="ago">{{ agoText(r.age) }}</span>
+              <template v-if="r.issue">
+                <button v-if="!r.cms || r.detailAvailable" class="done" @click="openDetails(r)">{{ r.issue === 'catalog' ? '查看详情' : r.issue === 'library' ? '查看片库' : '选集' }}</button>
+              </template>
               <button v-else-if="r.status === 'done'" class="done" data-testid="done-badge" aria-label="已看完，重播本集" @click="resume(r)">已看完 · 重播<Check :size="12" /></button><button v-else class="go" data-testid="resume" @click="resume(r)"><Play :size="11" fill="currentColor" />{{ r.continuation === undefined ? '重播本集' : r.continuation !== r.h.episode ? '看下一集' : '继续观看' }}</button>
-              <div class="mw" @keydown.esc.stop="closeMenu"><button aria-label="更多" :aria-expanded="menu === r.d.id" data-testid="h-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn on-dark"><li><button data-testid="h-delete" @click="delOne(r.d.id)">删除此记录</button></li><li><button @click="router.push(detailTarget(r))">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li></ul></div></div>
+              <div class="mw" @keydown.esc.stop="closeMenu"><button aria-label="更多" :aria-expanded="menu === r.d.id" data-testid="h-more" @click="menu = menu === r.d.id ? '' : r.d.id"><Ellipsis :size="18" /></button><ul v-if="menu === r.d.id" class="mn on-dark"><li><button data-testid="h-delete" @click="delOne(r.d.id)">删除此记录</button></li><li v-if="!r.cms || r.detailAvailable"><button @click="openDetails(r)">{{ r.issue === 'library' ? '查看片库' : '查看详情' }}</button></li></ul></div></div>
           </li></ul></section>
+      <BaseButton v-if="hasMoreCMS" variant="ghost" :disabled="loadingCMS" @click="loadMoreCMS">
+        {{ loadingCMS ? '正在核验片源记录…' : '核验更多片源记录' }}
+      </BaseButton>
       <div v-if="batch" class="batchbar on-dark" data-testid="batchbar"><span>已选 {{ picked.size }} 条</span><BaseButton :disabled="!picked.size" data-testid="batch-delete" @click="openBatchConfirmation">删除选中</BaseButton><BaseButton variant="ghost" @click="finishBatch">取消批量</BaseButton></div>
     </section>
     <aside class="side">
@@ -197,7 +237,7 @@ const rowClick = (r: Row) => (batch.value ? pick(r.d.id) : resume(r))
 .b { min-width: 0; h3 { font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; } .tg { overflow-wrap: anywhere; font-size: 12.5px; color: var(--c-text-2); margin-top: 4px; } .ep { font-size: 13px; margin-top: 8px; color: var(--c-text-2); } .pg { display: flex; align-items: center; gap: 8px; margin-top: 8px; :deep(.bar) { flex: 1; } i { font-style: normal; font-size: 12.5px; color: var(--c-text-2); width: 34px; text-align: right; } } }
 .go, .done { white-space: nowrap; flex: none; display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 14px; border-radius: 14px; font-size: 13px; font-weight: 600; } .go { background: var(--g-accent); } .done { background: rgba(255,255,255,.1); border: 1px solid var(--c-border-strong); } .ago { white-space: nowrap; font-size: 12.5px; color: var(--c-text-2); margin-left: auto; }
 .cb { width: 20px; height: 20px; border-radius: 6px; border: 2px solid var(--c-text-3); display: grid; place-items: center; background: var(--c-surface-hover); &.on { background: var(--c-accent); border-color: var(--c-accent); color: #fff; } }
-.mw { position: relative; } .mn { position: absolute; right: 0; top: 26px; z-index: 8; min-width: 120px; padding: 6px; border-radius: 10px; background: #2a1719; border: 1px solid var(--c-border-strong); button { width: 100%; height: 32px; border-radius: 6px; &:hover { background: var(--c-surface-hover); } } }
+.mw { position: relative; } .only-menu .mw { margin-inline-start: auto; } .mn { position: absolute; right: 0; top: 26px; z-index: 8; min-width: 120px; padding: 6px; border-radius: 10px; background: #2a1719; border: 1px solid var(--c-border-strong); button { width: 100%; height: 32px; border-radius: 6px; &:hover { background: var(--c-surface-hover); } } }
 .batchbar { position: sticky; bottom: 6px; z-index: 7; display: flex; align-items: center; gap: 14px; margin-top: 14px; padding: 10px 18px; border-radius: 16px; background: rgba(40,22,24,.96); border: 1px solid var(--c-border-strong); span { margin-right: auto; color: var(--c-text-2); } }
 .pn { padding: 14px 16px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035)); border: 1px solid var(--c-border); h3 { display: flex; align-items: center; gap: 10px; font-size: 18px;  } h4 { font-size: 14px; margin: 14px 0 8px; &::before { content: '•'; color: var(--c-accent); margin-right: 8px; } } }
 .fh { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; svg:last-child { margin-left: auto; } }

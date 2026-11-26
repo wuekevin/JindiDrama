@@ -1,3 +1,4 @@
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import type { Drama, HistoryEntry } from '@/types'
 export function watchStatus(history: HistoryEntry | undefined, drama: Drama): 'unwatched' | 'watching' | 'done' | 'unknown' {
   if (!history) return 'unwatched'
@@ -25,7 +26,7 @@ export function agoText(age: number): string {
 
 export function watchHours(hs: HistoryEntry[]): number {
   const minutes = hs.reduce((total, entry) => {
-    if (entry.dramaId.startsWith('local-')) {
+    if (entry.dramaId.startsWith('local-') || isAppleCMSDramaId(entry.dramaId)) {
       return total + (entry.positionSec ?? (entry.durationSec ?? 0) * entry.percent / 100) / 60
     }
     return total + (entry.episode - 1 + entry.percent / 100) * 6.7

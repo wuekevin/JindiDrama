@@ -1,4 +1,5 @@
 import { watchStatus } from '@/composables'
+import type { DramaDetail } from '@/mocks/provider'
 import type { Drama, HistoryEntry } from '@/types'
 
 export function savedMediaIssue(drama: Drama, episode: number) {
@@ -15,6 +16,16 @@ export function continuationEpisode(drama: Drama, history: HistoryEntry) {
   if (history.percent !== 100 || watchStatus(history, drama) !== 'watching') return
   const episode = history.episode + 1
   if (!savedMediaIssue(drama, history.episode) && !savedMediaIssue(drama, episode)) return episode
+}
+
+export function availableCatalogEpisode(detail: DramaDetail | undefined | null, episode: number) {
+  return detail?.episodes.find((item) => item.index === episode && item.available && item.id)
+}
+
+export function catalogBookmarkEpisode(detail: DramaDetail, history: HistoryEntry) {
+  if (!detail.appleCMS || !detail.catalogPlayback || !availableCatalogEpisode(detail, history.episode)) return
+  const next = continuationEpisode(detail.drama, history)
+  return next !== undefined && availableCatalogEpisode(detail, next) ? next : history.episode
 }
 
 export function detailRoute(id: string, activeCatalog = false) {

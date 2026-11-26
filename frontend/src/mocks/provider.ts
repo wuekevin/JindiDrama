@@ -1,6 +1,7 @@
 // 目录展示数据来自 Go Provider。浏览器预览使用内置演示目录。
 import type { ObjectDirective } from 'vue'
 import type { Drama, HistoryEntry } from '@/types'
+import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadCatalogGenrePage, loadCatalogGenres, loadCatalogPage, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama, type CatalogPage } from '@/bindings'
 import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKINGS, type CastMember, type DemoSeason } from './data'
 import { posterSvg } from './posters'
@@ -8,7 +9,7 @@ import { posterSvg } from './posters'
 const delay = (ms = 120) => new Promise((r) => setTimeout(r, ms))
 export interface HomePayload { catalogLabel?: string; banners: typeof BANNERS; categories: typeof CATEGORIES; todayNew: Drama[]; rankings: Record<'hot'|'rise'|'new', Drama[]> }
 
-const catalogCover = posterSvg({ hue: 218, hue2: 229, seed: 4 })
+export const catalogPlaceholderCover = posterSvg({ hue: 218, hue2: 229, seed: 4 })
 const catalogCoverURL = /^http:\/\/127\.0\.0\.1:([1-9][0-9]{0,4})\/catalog-cover\/[0-9a-f]{32}$/
 
 function isCatalogCover(value: unknown): value is string {
@@ -27,7 +28,7 @@ export const vCancelCatalogCover: ObjectDirective<HTMLImageElement> = {
 export function fallbackCatalogCover(event: Event) {
   const image = event.currentTarget
   if (image instanceof HTMLImageElement && isCatalogCover(image.getAttribute('src'))) {
-    image.src = catalogCover
+    image.src = catalogPlaceholderCover
   }
 }
 
@@ -53,7 +54,7 @@ function providerCard(drama: CatalogDrama): Drama {
   return {
     id: drama.id, title: drama.title, summary: drama.summary, tags: drama.tags ?? [],
     episodeCount: count, updatedTo: Math.max(0, Math.min(count, drama.updatedTo)),
-    cover: isCatalogCover(drama.cover) ? drama.cover : catalogCover, providerOnly: true, heat: 0, finished: false,
+    cover: isCatalogCover(drama.cover) ? drama.cover : catalogPlaceholderCover, providerOnly: true, heat: 0, finished: false,
   }
 }
 
@@ -201,14 +202,16 @@ export async function searchDramas(q: string, f: SearchFilters = {}, mode: 'norm
 }
 
 export interface DemoHighlight { id: number; title: string; dur: string }
-export interface DramaDetail { drama: Drama; episodes: { id?: string; index: number; available: boolean }[]; catalogPlayback?: boolean; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
+export interface DramaDetail { drama: Drama; episodes: { id?: string; index: number; available: boolean }[]; catalogPlayback?: boolean; appleCMS?: boolean; rating?: number; plays?: string; favs?: string; cast: readonly CastMember[]; schedule?: string; long: string; seasons: DemoSeason[]; highlights: DemoHighlight[] }
 const DEMO_HIGHLIGHTS: DemoHighlight[] = [1, 2, 3].map((id) => ({ id, title: `演示片段 ${id}`, dur: '00:24' }))
 export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', catalogRoute = false): Promise<DramaDetail | null> {
   await delay(120)
   if (mode === 'error') throw new Error('详情加载失败，请稍后重试')
-  const demo = await usesDemoCatalog()
+  const provider = await catalogProviderName()
+  const demo = provider === 'mock'
   if (catalogRoute) {
-    if (demo) return null
+    const appleCMS = isAppleCMSDramaId(id)
+    if (demo || (appleCMS && provider !== 'apple-cms')) return null
     const capabilities = await requireCapability('catalog')
     try {
       const detail = await loadProviderDetail(id, true)
@@ -221,6 +224,7 @@ export async function getDetail(id: string, mode: 'normal'|'error' = 'normal', c
           dramaId === id && Number.isInteger(index) && index > 0 && index <= drama.episodeCount,
         ).map((episode) => ({ ...episode, available: episode.available && episode.index <= drama.updatedTo })),
         catalogPlayback: capabilities.playback === 'ready' && hasCatalogPlayback(),
+        appleCMS,
         cast: [], long: record.summary, seasons: [], highlights: [],
       }
     } catch (error) {

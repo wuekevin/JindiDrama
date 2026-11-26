@@ -114,6 +114,9 @@ func (a *App) applyWindowClose(ctx context.Context, action windowCloseAction) bo
 	if a.explicitQuit.Load() {
 		return true
 	}
+	if action == closeMinimise || action == closeTray {
+		runtime.EventsEmit(ctx, beforeWindowHideEvent)
+	}
 	switch action {
 	case closeTray:
 		if a.hideToTray(ctx) {
@@ -147,6 +150,7 @@ func DesktopWindowMenu(a *App) *menu.Menu {
 }
 
 const (
+	beforeWindowHideEvent    = "jindi-before-window-hide"
 	windowCloseReadyEvent    = "jindi-window-close-ready"
 	windowCloseDeadlineEvent = "jindi-window-close-deadline"
 	windowCloseCanceledEvent = "jindi-window-close-canceled"

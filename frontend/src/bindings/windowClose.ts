@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { hasPendingDanmakuWrite, hasUnconfirmedLibrarySave, waitForWindowWrites } from './index'
 
+export const BEFORE_WINDOW_HIDE = 'jindi-before-window-hide'
 export const BEFORE_WINDOW_CLOSE = 'jindi-before-window-close'
 export const WINDOW_CLOSE_CANCELED = 'jindi-window-close-canceled'
 
@@ -16,6 +17,7 @@ export function registerWindowClose() {
   const emit = runtime.EventsEmit.bind(runtime)
   let active: { id: string; reply: () => void } | undefined
 
+  runtime.EventsOn(BEFORE_WINDOW_HIDE, () => window.dispatchEvent(new Event(BEFORE_WINDOW_HIDE)))
   runtime.EventsOn(WINDOW_CLOSE_CANCELED, (id) => {
     if (active || repliedAttempt !== id) return
     repliedAttempt = undefined

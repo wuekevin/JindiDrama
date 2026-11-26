@@ -4,13 +4,17 @@ import { useRoute, useRouter } from 'vue-router'
 import { ChevronLeft } from 'lucide-vue-next'
 import type Hls from 'hls.js'
 import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
+import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
 import { ErrorState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
-import { catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
+import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
+import { availableCatalogEpisode, catalogPlaybackRoute, detailRoute } from '@/router/libraryRoutes'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
+import { useLibraryStore } from '@/stores/library'
+import type { HistoryEntry } from '@/types'
 import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-contracts'
 
 const hlsType = 'application/vnd.apple.mpegurl'
@@ -25,6 +29,7 @@ const episode = computed(() => {
 })
 const preferences = useAppSettings()
 const settings = useSettingsStore()
+const library = useLibraryStore()
 const state = ref<'loading' | 'ready' | 'error'>('loading')
 const error = ref('')
 const detail = ref<DramaDetail>()
@@ -38,7 +43,122 @@ let expiryTimer: number | undefined
 let activeLease: string | undefined
 let hls: Hls | undefined
 
-function stopMedia() {
+type WatchTarget = { id: string; episode: number; episodeCount: number }
+type Progress = { position: number; duration: number; percent: number }
+type MediaHistory = {
+  target: WatchTarget
+  media: HTMLVideoElement
+  source: MediaSource
+  checkpoint?: HistoryEntry
+  pending: boolean
+  restoring: boolean
+  startedAt?: number
+  lastPosition: number
+  progress?: Progress
+  saved?: Progress
+}
+let watchTarget: WatchTarget | undefined
+let mediaHistory: MediaHistory | undefined
+let closing = false
+
+function currentHistory(event: Event) {
+  const current = mediaHistory
+  if (current && state.value === 'ready' && event.currentTarget === current.media &&
+      video.value === current.media && source.value === current.source && Date.now() < expiresAt) return current
+}
+
+function restoreHistory(current: MediaHistory) {
+  const { media, checkpoint, target } = current
+  if (!current.pending || !Number.isFinite(media.duration) || media.duration <= 0) return
+  const position = resumePosition(checkpoint, target.episode, media.duration)
+  const ranges = media.seekable
+  if (position > 0 && !ranges.length && media.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
+  current.pending = false
+  if (position <= 0 || !ranges.length) return
+  const seek = seekablePosition(ranges, position, media.currentTime)
+  current.lastPosition = seek
+  if (seek !== media.currentTime) {
+    current.restoring = true
+    media.currentTime = seek
+  }
+}
+
+function onPlayable(event: Event) {
+  const current = currentHistory(event)
+  if (current) restoreHistory(current)
+}
+
+function onPlaying(event: Event) {
+  const current = currentHistory(event)
+  if (!current || current.media.paused) return
+  if (closing) {
+    current.media.pause()
+  } else if (current.startedAt === undefined) {
+    current.startedAt = current.media.currentTime
+    current.progress = undefined
+  }
+}
+
+function onSeeked(event: Event) {
+  const current = currentHistory(event)
+  if (!current || current.media.seeking || closing) return
+  if (current.restoring) {
+    current.restoring = false
+    current.lastPosition = current.media.currentTime
+    return
+  }
+  saveProgress(true)
+}
+
+function captureProgress(current: MediaHistory, failed: boolean) {
+  const media = current.media
+  const { currentTime, duration } = media
+  if (current.startedAt === undefined || current.pending || current.restoring || media.seeking ||
+      (!failed && media.error) || !media.played.length || !Number.isFinite(duration) || duration <= 0 ||
+      !Number.isFinite(currentTime)) return
+  // A failed decoder can reset its position. Keep the last valid sample in that case.
+  if (failed && (currentTime <= 0 || currentTime > duration)) return
+  const position = Math.max(0, Math.min(currentTime, duration))
+  const ended = !failed && media.ended
+  if (!current.progress && (position === current.lastPosition || position === current.startedAt) && !ended) return
+  const percent = ended ? 100 : Math.min(99, Math.floor(position * 100 / duration))
+  current.progress = { position, duration, percent }
+  if (ended) current.startedAt = undefined
+}
+
+function saveProgress(force: boolean, failed = false) {
+  const current = mediaHistory
+  if (!current) return
+  // A ticket can expire between media events. Keep only the last position sampled while it was valid.
+  if (Date.now() < expiresAt) captureProgress(current, failed)
+  const progress = current.progress
+  if (!progress || (!force && Math.abs(progress.position - current.lastPosition) < 5 && progress.percent !== 100)) return
+  const saved = current.saved
+  if (saved?.position === progress.position && saved.duration === progress.duration && saved.percent === progress.percent) return
+  current.saved = progress
+  current.lastPosition = progress.position
+  const { id, episode, episodeCount } = current.target
+  library.record(id, episode, progress.percent, progress.position, progress.duration, episodeCount)
+}
+
+function onProgress(event: Event) {
+  if (!closing && currentHistory(event)) saveProgress(event.type !== 'timeupdate')
+}
+
+function saveOnExit() { saveProgress(true) }
+
+function onWindowClose() {
+  if (closing || !watchTarget) return
+  closing = true
+  video.value?.pause()
+  saveOnExit()
+}
+
+function onWindowCloseCanceled() { closing = false }
+
+function stopMedia(failed = false) {
+  saveProgress(true, failed)
+  mediaHistory = undefined
   const player = hls
   hls = undefined
   player?.destroy()
@@ -102,6 +222,7 @@ async function load() {
   clearTimeout(expiryTimer)
   stopMedia()
   releaseLease()
+  watchTarget = undefined
   sources.value = []
   selected.value = 0
   error.value = ''
@@ -116,8 +237,8 @@ async function load() {
       state.value = 'error'
       return
     }
-    const requested = result.episodes.find(({ index }) => index === targetEpisode)
-    if (!requested?.available || !requested.id) {
+    const requested = availableCatalogEpisode(result, targetEpisode)
+    if (!requested?.id) {
       error.value = '所选分集暂不可播放。'
       state.value = 'error'
       return
@@ -134,6 +255,7 @@ async function load() {
       throw new Error()
     }
     activeLease = ticket.leaseId
+    if (result.appleCMS) watchTarget = { id: targetId, episode: targetEpisode, episodeCount: result.drama.episodeCount }
     expiresAt = Date.parse(ticket.expiresAt ?? '')
     sources.value = choices
     state.value = 'ready'
@@ -151,7 +273,7 @@ function failMedia(media: HTMLVideoElement, choice: MediaSource) {
     expireTicket()
     return
   }
-  stopMedia()
+  stopMedia(true)
   if (selected.value + 1 < sources.value.length) {
     selected.value++
     return
@@ -169,7 +291,16 @@ function mediaError(event: Event) {
 }
 
 watch([video, source], async ([media, choice]) => {
-  if (!media || !choice || choice.type !== hlsType || state.value !== 'ready') return
+  if (!media || !choice || state.value !== 'ready') return
+  if (watchTarget) {
+    const target = watchTarget
+    const checkpoint = library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
+    mediaHistory = {
+      target, media, source: choice, checkpoint, pending: true, restoring: false, lastPosition: 0,
+    }
+    restoreHistory(mediaHistory)
+  }
+  if (choice.type !== hlsType) return
   const current = generation
   const isCurrent = () => current === generation && video.value === media && source.value === choice && state.value === 'ready'
   if (expiresAt <= Date.now()) {
@@ -203,11 +334,20 @@ function applyPreferences(event: Event) {
   if (event.currentTarget !== video.value || !video.value) return
   video.value.volume = settings.volume / 100
   video.value.playbackRate = settings.speed
+  onPlayable(event)
 }
 
 watch([id, episode], load, { immediate: true })
+window.addEventListener('pagehide', saveOnExit)
+window.addEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
+window.addEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
+window.addEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
 onBeforeUnmount(() => {
   generation++
+  window.removeEventListener('pagehide', saveOnExit)
+  window.removeEventListener(BEFORE_WINDOW_HIDE, saveOnExit)
+  window.removeEventListener(BEFORE_WINDOW_CLOSE, onWindowClose)
+  window.removeEventListener(WINDOW_CLOSE_CANCELED, onWindowCloseCanceled)
   clearTimeout(expiryTimer)
   stopMedia()
   releaseLease()
@@ -224,7 +364,9 @@ onBeforeUnmount(() => {
       <ErrorState v-else-if="state === 'error'" :message="error" @retry="load" />
       <video v-else-if="source" :key="source.src" ref="video" controls playsinline preload="metadata"
         controlslist="nodownload" :src="source.type === hlsType ? undefined : source.src"
-        :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences" />
+        :aria-label="`第${episode}集视频`" @error="mediaError" @loadedmetadata="applyPreferences"
+        @durationchange="onPlayable" @progress="onPlayable" @canplay="onPlayable" @seeked="onSeeked"
+        @playing="onPlaying" @timeupdate="onProgress" @pause="onProgress" @ended="onProgress" />
     </div>
     <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
       <button v-for="item in detail.episodes" :key="item.index" type="button" :disabled="!item.available"

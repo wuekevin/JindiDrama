@@ -10,7 +10,7 @@ import { useLibraryStore } from '@/stores/library'
 import { useToastStore } from '@/stores/toast'
 import { useSearchStore } from '@/stores/search'
 import { copyShareLink } from '@/router/shareLinks'
-import { catalogPlaybackRoute, continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
+import { availableCatalogEpisode, catalogBookmarkEpisode, catalogPlaybackRoute, continuationEpisode, detailRoute, savedMediaIssue } from '@/router/libraryRoutes'
 import { observeContentWidth } from '@/layoutWidth'
 import { BaseButton, ErrorState, EmptyState } from '@/components/ui'
 import Skeleton from '@/components/ui/Skeleton.vue'
@@ -65,7 +65,8 @@ async function load(focusHeading = false) {
     detail.value = result
     state.value = result ? 'ready' : 'notfound'
     const history = lib.history.find((entry) => entry.dramaId === id.value)
-    group.value = history && result && !result.drama.providerOnly && !savedMediaIssue(result.drama, history.episode)
+    group.value = history && result && (result.drama.providerOnly
+      ? catalogBookmarkEpisode(result, history) !== undefined : !savedMediaIssue(result.drama, history.episode))
       ? Math.floor((history.episode - 1) / 20) : 0
     expanded.value = false
     if (result && focusHeading) {
@@ -84,23 +85,25 @@ const eps = computed(() => {
   const range = groups.value[group.value]
   return range ? (detail.value?.episodes ?? []).filter(({ index }) => index >= range.from && index <= range.to) : []
 })
-const hist = computed(() => detail.value?.drama.providerOnly ? undefined : lib.history.find((h) => h.dramaId === id.value))
+const hist = computed(() => detail.value?.drama.providerOnly && !detail.value.appleCMS
+  ? undefined : lib.history.find((h) => h.dramaId === id.value))
 const hasEpisode = (episode: number) => detail.value?.episodes.some((item) => item.index === episode && item.available)
 const continuation = computed(() => {
   const history = hist.value
   const current = detail.value
   if (!history || !current || !hasEpisode(history.episode)) return
-  const next = continuationEpisode(current.drama, history)
+  const next = current.drama.providerOnly ? catalogBookmarkEpisode(current, history) : continuationEpisode(current.drama, history)
+  if (current.drama.providerOnly && next === undefined) return
   if (next !== undefined && next !== history.episode && hasEpisode(next)) {
     return { episode: next, percent: 0, label: '看下一集' }
   }
   return { episode: history.episode, percent: history.percent, label: history.percent === 100 ? '重播本集' : '继续观看' }
 })
-const firstAvailableEpisode = computed(() => detail.value?.episodes.find(({ available }) => available)?.index)
+const firstAvailableEpisode = computed(() => detail.value?.episodes.find(({ available, id }) => available && id)?.index)
 const watchEp = (ep: number) => {
   if (!hasEpisode(ep)) { toast.push(`第${ep}集尚未更新`, 'error'); return }
   if (detail.value?.drama.providerOnly) {
-    if (detail.value.catalogPlayback) void router.push(catalogPlaybackRoute(id.value, ep))
+    if (detail.value.catalogPlayback && availableCatalogEpisode(detail.value, ep)) void router.push(catalogPlaybackRoute(id.value, ep))
     return
   }
   void router.push(`/watch/${id.value}/${ep}`)
@@ -141,6 +144,7 @@ const { cards: guess, canShuffle, shuffle } = useRelatedDramas(recommendationSou
           <div v-if="detail.drama.providerOnly">
             <div v-if="detail.catalogPlayback && firstAvailableEpisode" class="cta">
               <BaseButton size="lg" data-testid="catalog-watch-now" @click="watchEp(firstAvailableEpisode)"><Play :size="17" fill="currentColor" />立即观看</BaseButton>
+              <button v-if="continuation" class="cont" data-testid="catalog-continue" @click="watchEp(continuation.episode)"><CirclePlay :size="30" /><span>{{ continuation.label }}<em>第{{ continuation.episode }}集 · {{ continuation.percent }}%</em></span></button>
             </div>
             <p v-else class="status">当前剧目播放暂不可用。</p>
           </div>
