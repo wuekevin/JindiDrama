@@ -18,11 +18,89 @@ export function filterDanmaku(items: DanmakuItem[], s: DanmakuSettings): Danmaku
   return items.filter((d) => !isBlocked(d.text, s.blocked) && (!s.hotOnly || d.hot || d.mine) && (d.mine || hash(d.id) % 100 < densityKeep[s.density] * 100))
     .map((d) => ({ ...d, lane: lo + (d.lane % (hi - lo + 1)) }))
 }
-export interface Placed { item: DanmakuItem; x: number; y: number } // x: 0=右缘外 …1=左缘外；y: 0..1
-export function place(items: DanmakuItem[], t: number, s: DanmakuSettings): Placed[] {
-  const dur = BASE_DURATION / s.speed
-  return filterDanmaku(items, s).filter((d) => t >= d.at && t < d.at + dur).map((d) => ({ item: d, x: (t - d.at) / dur, y: (d.lane + 0.5) / LANES }))
+export interface DanmakuTrajectory {
+  item: DanmakuItem
+  y: number
+  startsAt: number
+  exitsAt: number
 }
+
+export interface DanmakuSchedule {
+  trajectories: DanmakuTrajectory[]
+  width: number
+  velocity: number
+}
+
+export function scheduleDanmaku(
+  items: DanmakuItem[],
+  settings: DanmakuSettings,
+  width: number,
+  height: number,
+  measureWidth: (item: DanmakuItem) => number,
+): DanmakuSchedule {
+  const velocity = width * 1.3 * settings.speed / BASE_DURATION
+  const trajectories: DanmakuTrajectory[] = []
+  const schedule = { trajectories, width, velocity }
+  if (!Number.isFinite(velocity) || velocity <= 0 || !Number.isFinite(height) || height <= 0) return schedule
+
+  const areaHeight = settings.area === 'full' ? height : height / 2
+  const areaTop = settings.area === 'bottom' ? areaHeight : 0
+  const linePitch = Math.ceil(settings.fontSize * 1.2) + 5
+  const maxLanes = settings.area === 'full' ? LANES : LANES / 2
+  const laneCount = Math.min(maxLanes, Math.floor(areaHeight / linePitch))
+  if (!Number.isFinite(laneCount) || laneCount < 1) return schedule
+
+  const lanes = Array.from({ length: laneCount }, (_, i) => ({
+    y: (areaTop + (i + .5) * areaHeight / laneCount) / height,
+    availableAt: -Infinity,
+    reservations: [] as { start: number; clear: number }[],
+    nextReservation: 0,
+  }))
+  const ordered = filterDanmaku(items, settings)
+    .filter((item) => Number.isFinite(item.at) && item.at >= 0)
+    .sort((a, b) => a.at - b.at)
+  const clearance = (textWidth: number) => (textWidth + 8) / velocity
+  const append = (item: DanmakuItem, textWidth: number, y: number, startsAt: number) => {
+    const exitsAt = startsAt + (width + textWidth) / velocity
+    trajectories.push({ item, y, startsAt, exitsAt })
+  }
+
+  // Reserve the user's own submissions first so a burst of regular comments cannot hide them.
+  for (const item of ordered.filter((entry) => entry.mine)) {
+    const lane = lanes.reduce((earliest, candidate) =>
+      candidate.availableAt < earliest.availableAt ? candidate : earliest)
+    const textWidth = measureWidth(item)
+    const startsAt = Math.max(item.at, lane.availableAt)
+    const clear = startsAt + clearance(textWidth)
+    lane.reservations.push({ start: startsAt, clear })
+    lane.availableAt = clear
+    append(item, textWidth, lane.y, startsAt)
+  }
+  for (const lane of lanes) lane.availableAt = -Infinity
+
+  for (const item of ordered.filter((entry) => !entry.mine)) {
+    const textWidth = measureWidth(item)
+    const clearsAt = item.at + clearance(textWidth)
+    for (let i = 0; i < laneCount; i++) {
+      const lane = lanes[(item.lane + i) % laneCount]
+      while (lane.nextReservation < lane.reservations.length && lane.reservations[lane.nextReservation].clear <= item.at) {
+        lane.nextReservation++
+      }
+      const reserved = lane.reservations[lane.nextReservation]
+      if (lane.availableAt > item.at || (reserved && reserved.start < clearsAt)) continue
+      append(item, textWidth, lane.y, item.at)
+      lane.availableAt = clearsAt
+      break
+    }
+  }
+  return schedule
+}
+
+export function activeDanmaku(schedule: DanmakuSchedule, time: number) {
+  return schedule.trajectories.filter(({ startsAt, exitsAt }) => time >= startsAt && time < exitsAt)
+    .map(({ item, y, startsAt }) => ({ item, y, left: schedule.width - (time - startsAt) * schedule.velocity }))
+}
+
 export function genDanmaku(episode: number, durationSec: number): DanmakuItem[] {
   const pool = ['这也太甜了吧！', '男主好帅啊！', '终于在一起了！等了这么多集', '这眼神！我沦陷了…', '这对CP我嗑定了！', '女主好美，演技绝了！', '这段好有张力！', '编剧太会写了！', '替嫁的反转来了吗？！', '啊啊啊终于亲上了', '年度最佳名场面！', '求更新！根本不够看！', '总裁终于不装了！', '没想到替嫁还有这种反转！', '两个人的氛围感绝了', '这段我直接爆哭…', '我已经循环三遍了…', '这种拉扯感太上头了！', '前方高能', '剧透预警别说', '广告好烦', '无关的话题', '好想看下一集']
   const n = 600; const out: DanmakuItem[] = []

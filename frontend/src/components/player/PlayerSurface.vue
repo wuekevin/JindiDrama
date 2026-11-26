@@ -19,31 +19,39 @@ const emit = defineEmits<{ next: []; prev: []; back: []; comments: []; danmakuPa
 const s = useSettingsStore(); const toast = useToastStore(); const root = ref<HTMLElement>()
 const preferences = useAppSettings()
 const screenshotBusy = ref(false)
+const header = ref<HTMLElement>()
 const footer = ref<HTMLElement>()
+const danmakuTop = ref(40)
+const danmakuBottom = ref(70)
 const surfaceWidth = ref(Infinity)
 const popupHeight = ref(240)
 const compactControls = computed(() => surfaceWidth.value <= (props.variant === 'tall' ? 720 : 450))
 let controlObserver: ResizeObserver | undefined
 onMounted(() => {
   const surface = root.value
+  const top = header.value
   const controls = footer.value
-  if (!surface || !controls) return
-  const updatePopupHeight = () => {
-    popupHeight.value = Math.max(36, surface.clientHeight - controls.offsetHeight - 10)
+  if (!surface || !top || !controls) return
+  const updateInsets = () => {
+    const controlsHeight = controls.offsetHeight
+    popupHeight.value = Math.max(36, surface.clientHeight - controlsHeight - 10)
+    danmakuTop.value = top.offsetHeight + 4
+    danmakuBottom.value = controlsHeight + 4
   }
   const updateControls = () => {
     surfaceWidth.value = surface.clientWidth
-    updatePopupHeight()
+    updateInsets()
   }
   controlObserver = new ResizeObserver(updateControls)
   controlObserver.observe(surface)
+  controlObserver.observe(top, { box: 'border-box' })
   controlObserver.observe(controls, { box: 'border-box' })
   // The parent can switch to its stacked grid during the first render.
   void nextTick(async () => {
     if (!surface.isConnected) return
     updateControls()
     await nextTick()
-    if (surface.isConnected) updatePopupHeight()
+    if (surface.isConnected) updateInsets()
   })
 })
 onBeforeUnmount(() => controlObserver?.disconnect())
@@ -175,11 +183,15 @@ function seekKey(e: KeyboardEvent) {
 const volIcon = computed(() => (p.muted.value || s.volume === 0 ? VolumeX : Volume2))
 </script>
 <template>
-  <div ref="root" class="player on-dark" :class="[variant, { compactControls, snug: surfaceWidth <= 800 }]" :style="{ '--popup-height': popupHeight + 'px' }" tabindex="0" data-testid="player" :data-state="player.state.value">
+  <div ref="root" class="player on-dark" :class="[variant, { compactControls, snug: surfaceWidth <= 800 }]" :style="{
+      '--popup-height': popupHeight + 'px',
+      '--danmaku-top': danmakuTop + 'px',
+      '--danmaku-bottom': danmakuBottom + 'px',
+    }" tabindex="0" data-testid="player" :data-state="player.state.value">
     <video v-if="p.mode === 'demo'" :ref="(el) => (p.video.value = el as HTMLVideoElement | null)" class="vid" playsinline preload="auto" data-testid="video" @loadedmetadata="p.onMeta" @canplay="p.onMeta" @timeupdate="p.onTime" @seeked="p.onSeeked" @ended="p.onEnded" @waiting="p.onWaiting" @playing="p.onMediaControl" @pause="p.onMediaControl" @error="p.onError" @click="p.toggle()"><source v-for="(s, i) in playbackSources" :key="s.src" :src="s.src" :type="s.type" @error="i === playbackSources.length - 1 && p.onError()" /></video>
     <div v-else class="bg" :style="{ backgroundImage: `url('${bg}')` }" @click="p.toggle()" />
     <DanmakuLayer :items="items" :time="player.time.value" />
-    <header class="top">
+    <header ref="header" class="top">
       <button class="rnd" aria-label="返回" data-testid="player-back" @click="emit('back')"><ChevronLeft :size="22" /></button>
       <span v-if="variant === 'danmaku'" class="ttl">{{ drama.title }} 第{{ episode }}集</span>
       <span class="sp" />

@@ -139,7 +139,7 @@ for (const dpi of [100, 150, 220]) {
       let holdInitialResize = true
       window.ResizeObserver = class extends NativeResizeObserver {
         observe(target: Element, options?: ResizeObserverOptions) {
-          if (holdInitialResize && target.matches('[data-testid=page-watch], [data-testid=player], [data-testid=player] > footer')) {
+          if (holdInitialResize && target.matches('[data-testid=page-watch], [data-testid=player], [data-testid=player] > header, [data-testid=player] > footer')) {
             deferred.push(() => super.observe(target, options))
             return
           }
