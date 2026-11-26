@@ -2,11 +2,13 @@ package app
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"net"
 	"net/http"
 	"net/netip"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,7 +17,7 @@ var errCatalogAddress = errors.New("媒体地址未通过验证")
 func newCatalogMediaClient() *http.Client {
 	return &http.Client{
 		Transport: &http.Transport{
-			DialContext:           dialCatalogMedia,
+			DialContext:           catalogIdleDial(dialCatalogMedia),
 			ForceAttemptHTTP2:     true,
 			DisableCompression:    true,
 			TLSHandshakeTimeout:   8 * time.Second,
@@ -25,6 +27,49 @@ func newCatalogMediaClient() *http.Client {
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
+}
+
+// HTTP/1.1 can block inside a single body Read after consuming part of a
+// chunked response. Renew the deadline at each underlying socket read.
+type catalogIdleConn struct {
+	net.Conn
+	timeout atomic.Int64
+}
+
+func (c *catalogIdleConn) Read(out []byte) (int, error) {
+	if timeout := time.Duration(c.timeout.Load()); timeout > 0 {
+		if err := c.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+			return 0, err
+		}
+	}
+	return c.Conn.Read(out)
+}
+
+func catalogIdleDial(dial func(context.Context, string, string) (net.Conn, error)) func(context.Context, string, string) (net.Conn, error) {
+	return func(ctx context.Context, network, address string) (net.Conn, error) {
+		conn, err := dial(ctx, network, address)
+		if err != nil {
+			return nil, err
+		}
+		return &catalogIdleConn{Conn: conn}, nil
+	}
+}
+
+func enableCatalogWireIdle(conn net.Conn, timeout time.Duration) bool {
+	secured, ok := conn.(*tls.Conn)
+	if !ok || secured.ConnectionState().NegotiatedProtocol == "h2" {
+		return false
+	}
+	wire, ok := secured.NetConn().(*catalogIdleConn)
+	if !ok {
+		return false
+	}
+	// A pooled connection can already have a read pending before this request.
+	if err := wire.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return false
+	}
+	wire.timeout.Store(int64(timeout))
+	return true
 }
 
 var reservedCatalogNetworks = []netip.Prefix{

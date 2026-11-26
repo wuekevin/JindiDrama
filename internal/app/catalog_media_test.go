@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -44,6 +45,159 @@ func issueTestStream(t *testing.T, relay *catalogMediaRelay, path string) provid
 		t.Fatal(err)
 	}
 	return ticket
+}
+
+func TestCatalogRelayUpstreamReadIdle(t *testing.T) {
+	t.Run("HTTP1", func(t *testing.T) { testCatalogRelayUpstreamReadIdle(t, false) })
+	t.Run("HTTP2", func(t *testing.T) { testCatalogRelayUpstreamReadIdle(t, true) })
+}
+
+func testCatalogRelayUpstreamReadIdle(t *testing.T, http2 bool) {
+	const idle = 300 * time.Millisecond
+	const chunkCount = 8
+	chunk := strings.Repeat("a", 8192)
+	canceled := make(chan string, 2)
+	peers := make(chan string, 2)
+	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if (req.ProtoMajor == 2) != http2 {
+			t.Errorf("unexpected upstream protocol: %s", req.Proto)
+		}
+		flush := http.NewResponseController(w)
+		switch req.URL.Path {
+		case "/stalled.mp4":
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, chunk)
+			_ = flush.Flush()
+		case "/stalled.m3u8":
+			w.Header().Set("Content-Type", catalogHLSType)
+			_, _ = io.WriteString(w, "#EXTM3U\n")
+			_ = flush.Flush()
+		case "/delayed.mp4":
+			peers <- req.RemoteAddr
+			time.Sleep(idle * 2 / 3)
+			w.Header().Set("Content-Type", "video/mp4")
+			_, _ = io.WriteString(w, "delayed")
+			return
+		case "/split.mp4":
+			conn, wire, err := http.NewResponseController(w).Hijack()
+			if err != nil {
+				t.Errorf("split chunk upstream: %v", err)
+				return
+			}
+			defer conn.Close()
+			_, _ = wire.WriteString("HTTP/1.1 200 OK\r\nContent-Type: video/mp4\r\nTransfer-Encoding: chunked\r\n\r\n")
+			if wire.Flush() != nil {
+				return
+			}
+			time.Sleep(idle * 2 / 3)
+			_, _ = wire.WriteString("3\r\nabc\r\n3\r\n")
+			if wire.Flush() != nil {
+				return
+			}
+			time.Sleep(idle * 2 / 3)
+			_, _ = wire.WriteString("xyz\r\n0\r\n\r\n")
+			_ = wire.Flush()
+			return
+		case "/steady.mp4":
+			peers <- req.RemoteAddr
+			w.Header().Set("Content-Type", "video/mp4")
+			for part := 0; part < chunkCount; part++ {
+				time.Sleep(idle / 4)
+				if _, err := io.WriteString(w, chunk); err != nil || flush.Flush() != nil {
+					return
+				}
+			}
+			return
+		default:
+			http.NotFound(w, req)
+			return
+		}
+		<-req.Context().Done()
+		canceled <- req.URL.Path
+	}))
+	upstream.EnableHTTP2 = http2
+	upstream.StartTLS()
+	t.Cleanup(upstream.Close)
+
+	client := newCatalogMediaClient()
+	transport := client.Transport.(*http.Transport)
+	transport.DialContext = catalogIdleDial((&net.Dialer{}).DialContext)
+	transport.TLSClientConfig = upstream.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	relay, err := startCatalogMediaRelay(client, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(relay.close)
+	relay.readIdleTimeout = idle
+
+	ticket, err := relay.issue(provider.PlaybackTicket{Sources: []provider.MediaSource{
+		{Src: upstream.URL + "/stalled.mp4", Type: "video/mp4"},
+		{Src: upstream.URL + "/stalled.m3u8", Type: catalogHLSType},
+		{Src: upstream.URL + "/steady.mp4", Type: "video/mp4"},
+		{Src: upstream.URL + "/split.mp4", Type: "video/mp4"},
+	}}, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	browser := &http.Client{Timeout: 2 * time.Second}
+	t.Cleanup(browser.CloseIdleConnections)
+	get := func(address string) (int, string, error) {
+		t.Helper()
+		res, err := browser.Get(address)
+		if err != nil {
+			return 0, "", err
+		}
+		defer res.Body.Close()
+		body, err := io.ReadAll(res.Body)
+		return res.StatusCode, string(body), err
+	}
+
+	status, body, err := get(ticket.Sources[0].Src)
+	if status != http.StatusOK || body == "" || !strings.HasPrefix(chunk, body) || !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("stalled media: status=%d bytes=%d err=%v", status, len(body), err)
+	}
+	status, body, err = get(ticket.Sources[1].Src)
+	if status != http.StatusBadGateway || body != "" || err != nil {
+		t.Fatalf("stalled playlist: status=%d bytes=%d err=%v", status, len(body), err)
+	}
+	stopped := make(map[string]bool, 2)
+	for range 2 {
+		select {
+		case path := <-canceled:
+			stopped[path] = true
+		case <-time.After(time.Second):
+			t.Fatalf("stalled upstream requests not canceled: %v", stopped)
+		}
+	}
+	if !stopped["/stalled.mp4"] || !stopped["/stalled.m3u8"] {
+		t.Fatalf("unexpected canceled upstream requests: %v", stopped)
+	}
+	started := time.Now()
+	status, body, err = get(ticket.Sources[2].Src)
+	if status != http.StatusOK || body != strings.Repeat(chunk, chunkCount) || err != nil || time.Since(started) <= idle {
+		t.Fatalf("steady alternate: status=%d bytes=%d err=%v", status, len(body), err)
+	}
+	if !http2 {
+		// The background read on a reused connection already spent time idle.
+		time.Sleep(idle * 2 / 3)
+		reused, err := relay.issue(provider.PlaybackTicket{Sources: []provider.MediaSource{
+			{Src: upstream.URL + "/delayed.mp4", Type: "video/mp4"},
+		}}, time.Now().Add(time.Minute))
+		if err != nil {
+			t.Fatal(err)
+		}
+		status, body, err = get(reused.Sources[0].Src)
+		if status != http.StatusOK || body != "delayed" || err != nil {
+			t.Fatalf("reused connection: status=%d body=%q err=%v", status, body, err)
+		}
+		if steadyPeer, reusedPeer := <-peers, <-peers; steadyPeer != reusedPeer {
+			t.Fatalf("expected reuse, got different upstream connections: %s, %s", steadyPeer, reusedPeer)
+		}
+		status, body, err = get(ticket.Sources[3].Src)
+		if status != http.StatusOK || body != "abcxyz" || err != nil {
+			t.Fatalf("split chunk alternate: status=%d body=%q err=%v", status, body, err)
+		}
+	}
 }
 
 func TestCatalogRelayStreamsRangeWithoutForwardingCredentials(t *testing.T) {

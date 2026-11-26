@@ -8,9 +8,11 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"jindi-drama/internal/provider"
@@ -18,6 +20,7 @@ import (
 
 const catalogMediaPath = "/catalog-media/"
 const maxCatalogLeases = 64
+const catalogReadIdleTimeout = 12 * time.Second
 
 type catalogMediaLease struct {
 	ctx     context.Context
@@ -27,14 +30,28 @@ type catalogMediaLease struct {
 }
 
 type catalogMediaRelay struct {
-	mu     sync.Mutex
-	leases map[string]catalogMediaLease
-	host   string
-	server *http.Server
-	cancel context.CancelFunc
-	client *http.Client
-	covers *catalogCoverService
-	closed bool
+	mu              sync.Mutex
+	leases          map[string]catalogMediaLease
+	host            string
+	server          *http.Server
+	cancel          context.CancelFunc
+	client          *http.Client
+	covers          *catalogCoverService
+	readIdleTimeout time.Duration
+	closed          bool
+}
+
+type catalogIdleBody struct {
+	io.ReadCloser
+	cancel  context.CancelFunc
+	timeout time.Duration
+}
+
+func (b catalogIdleBody) Read(out []byte) (int, error) {
+	// Cancel only while reading upstream. Downstream writes keep the lease deadline.
+	timer := time.AfterFunc(b.timeout, b.cancel)
+	defer timer.Stop()
+	return b.ReadCloser.Read(out)
 }
 
 func startCatalogMediaRelay(client *http.Client, covers *catalogCoverService) (*catalogMediaRelay, error) {
@@ -43,7 +60,10 @@ func startCatalogMediaRelay(client *http.Client, covers *catalogCoverService) (*
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	r := &catalogMediaRelay{host: listener.Addr().String(), cancel: cancel, client: client, covers: covers, leases: make(map[string]catalogMediaLease)}
+	r := &catalogMediaRelay{
+		host: listener.Addr().String(), cancel: cancel, client: client, covers: covers,
+		readIdleTimeout: catalogReadIdleTimeout, leases: make(map[string]catalogMediaLease),
+	}
 	r.server = &http.Server{
 		Handler: r, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 30 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return ctx },
@@ -205,6 +225,12 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		// A manifest is served only after validating and rewriting its full body.
 		method, rangeHeader = http.MethodGet, ""
 	}
+	var wireIdle atomic.Bool
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) {
+			wireIdle.Store(enableCatalogWireIdle(info.Conn, r.readIdleTimeout))
+		},
+	})
 	up, err := http.NewRequestWithContext(ctx, method, upstreamURL, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
@@ -217,6 +243,10 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	if err != nil {
 		w.WriteHeader(http.StatusBadGateway)
 		return
+	}
+	if !wireIdle.Load() {
+		// A multiplexed connection can stay active while this stream stalls.
+		res.Body = catalogIdleBody{ReadCloser: res.Body, cancel: cancel, timeout: r.readIdleTimeout}
 	}
 	defer res.Body.Close()
 	mediaType, _, err := mime.ParseMediaType(res.Header.Get("Content-Type"))
@@ -273,7 +303,11 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		if res.ContentLength >= 0 {
 			body = io.LimitReader(body, res.ContentLength)
 		}
-		_, _ = io.Copy(w, body)
+		copied, err := io.Copy(w, body)
+		if err != nil || (res.ContentLength >= 0 && copied != res.ContentLength) {
+			// A normal final chunk would make truncated media look complete.
+			panic(http.ErrAbortHandler)
+		}
 	}
 }
 
