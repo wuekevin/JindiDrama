@@ -442,3 +442,9 @@
 - 新增只读命令 `node scripts/package-checksums.mjs --verify-release-tag <标签> <交付目录>`。它复验完整交付清单，将指定的本地 Git 标签解析为提交，再核对正式发行说明中的版本和构建提交。README 将该命令纳入发布核对流程，打包运行和轮次继续由维护者在 GitHub 核对。
 - 隔离真实 Git 仓库覆盖轻量及附注标签。缺少标签时，即使存在同名分支也会拒绝。版本不匹配、标签移动到其他提交和产物篡改均被拒绝。新增回归在旧脚本失败，修复后 Node 22 和 Node 26 各 13 项通过。已有 .41 测试包的 Windows 7 项、macOS 6 项 SHA-256 复验通过。
 - 本轮使用本地隔离夹具，没有创建项目发行标签、触发打包或发布 Release。正式签名、公证及其交付包仍待实跑。[BMad 记录](../_bmad-output/plan-e13-release-tag-verification.md)
+
+## E13 正式 macOS 包分发策略检查（2026-11-27）
+
+- Apple Silicon 和 Intel 打包验收共用的归档冒烟脚本，在正式模式解包后依次核对代码签名、公证票据和 macOS 分发策略，再启动应用。现代系统用 `syspolicy_check distribution`，旧系统用 `spctl`。检查失败时输出会随冒烟诊断保留。[Apple 技术说明](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates)
+- 从 .41 原始 ZIP 取出的应用通过代码签名结构检查，但被本机分发策略拒绝。系统报告 ad-hoc 签名且无附加公证票据。原归档 bundle ID 曾启动过，为复验用同一应用建立测试副本并更换隔离 ID。正式冒烟在票据检查失败并保留诊断，普通冒烟正常启动和退出，SQLite 完整性通过。
+- 13 项 Python macOS 工具回归通过，覆盖测试包、两种系统工具选择、分发拒绝和诊断。未提供正式 Developer ID 签名或公证包，正式成功路径仍待实跑。本轮未触发 GitHub 打包。[BMad 记录](../_bmad-output/plan-e13-macos-distribution-policy.md)

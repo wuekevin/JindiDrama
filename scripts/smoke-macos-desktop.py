@@ -111,6 +111,21 @@ def verify_database(profile, probe, output):
                    stdout=output, stderr=subprocess.STDOUT)
 
 
+def verify_archive_signature(app, release, output):
+    commands = [["codesign", "--verify", "--deep", "--strict", app]]
+    if release:
+        commands.append(["xcrun", "stapler", "validate", app])
+        policy_tool = pathlib.Path("/usr/bin/syspolicy_check")
+        if policy_tool.is_file():
+            commands.append([str(policy_tool), "distribution", app])
+        else:
+            commands.append(["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=2", app])
+    for command in commands:
+        subprocess.run(command, check=True, timeout=60, stdout=output, stderr=subprocess.STDOUT)
+    if release:
+        print("Archived app passed macOS distribution policy assessment", flush=True)
+
+
 def run_app(executable, helper, database_probe, profile, output, timeout, version, arch):
     env = dict(os.environ, JINDIDRAMA_DATA_DIR=str(profile))
     env.pop("JINDIDRAMA_LICENSED_MEDIA_DIR", None)
@@ -171,7 +186,7 @@ def main():
     parser.add_argument("archive", type=pathlib.Path)
     parser.add_argument("--version", required=True, help="expected full application version, including v prefix")
     parser.add_argument("--arch", choices=("arm64", "amd64"), help="expected running architecture (defaults to host)")
-    parser.add_argument("--release", action="store_true", help="require the stapled notarization ticket")
+    parser.add_argument("--release", action="store_true", help="require notarization and system distribution policy approval")
     parser.add_argument("--diagnostics-dir", type=pathlib.Path, help="directory for a failure report")
     parser.add_argument("--startup-timeout", type=int, default=45, choices=range(5, 181), metavar="5–180")
     args = parser.parse_args()
@@ -205,9 +220,8 @@ def main():
             if not re.fullmatch(r"[A-Za-z0-9.-]+", bundle_id):
                 raise ValueError("Invalid app bundle identifier")
             with exclusive_webview_profile(bundle_id):
-                subprocess.run(["codesign", "--verify", "--deep", "--strict", app], check=True)
-                if args.release:
-                    subprocess.run(["xcrun", "stapler", "validate", app], check=True)
+                with output.open("ab") as stream:
+                    verify_archive_signature(app, args.release, stream)
 
                 source = work / "window.swift"
                 source.write_text(WINDOW_HELPER)
@@ -216,7 +230,7 @@ def main():
                 database_probe = work / "database-probe"
                 # The existing Windows probe exposes a platform-independent verify-db command.
                 probe_env = dict(os.environ, GOOS="darwin", GOARCH=arch, CGO_ENABLED="0")
-                with output.open("wb") as stream:
+                with output.open("ab") as stream:
                     subprocess.run(
                         ["go", "build", "-mod=readonly", "-o", database_probe, "./cmd/windows-desktop-smoke"],
                         cwd=SOURCE_ROOT, env=probe_env, check=True, stdout=stream, stderr=subprocess.STDOUT,

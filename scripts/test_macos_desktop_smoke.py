@@ -5,11 +5,45 @@ import runpy
 import subprocess
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 smoke = runpy.run_path(str(Path(__file__).with_name("smoke-macos-desktop.py")))
 ready = smoke["ready"]
+
+
+class DistributionPolicyTests(unittest.TestCase):
+    def test_smoke_uses_only_bundle_signature(self):
+        app = Path("/fixture/JindiDrama.app")
+        with tempfile.TemporaryFile() as output, patch("subprocess.run") as run:
+            smoke["verify_archive_signature"](app, False, output)
+            run.assert_called_once_with(
+                ["codesign", "--verify", "--deep", "--strict", app],
+                check=True, timeout=60, stdout=output, stderr=subprocess.STDOUT,
+            )
+
+    def test_release_requires_ticket_and_system_distribution_policy(self):
+        app = Path("/fixture/JindiDrama.app")
+        for modern, policy in (
+            (True, ["/usr/bin/syspolicy_check", "distribution", app]),
+            (False, ["/usr/sbin/spctl", "--assess", "--type", "execute", "--verbose=2", app]),
+        ):
+            with self.subTest(modern=modern), tempfile.TemporaryFile() as output, patch(
+                "pathlib.Path.is_file", return_value=modern,
+            ), patch("subprocess.run") as run:
+                def check(command, **kwargs):
+                    if command == policy:
+                        raise subprocess.CalledProcessError(1, command)
+                run.side_effect = check
+                with self.assertRaises(subprocess.CalledProcessError):
+                    smoke["verify_archive_signature"](app, True, output)
+                self.assertEqual(run.call_args_list, [
+                    call(["codesign", "--verify", "--deep", "--strict", app],
+                         check=True, timeout=60, stdout=output, stderr=subprocess.STDOUT),
+                    call(["xcrun", "stapler", "validate", app],
+                         check=True, timeout=60, stdout=output, stderr=subprocess.STDOUT),
+                    call(policy, check=True, timeout=60, stdout=output, stderr=subprocess.STDOUT),
+                ])
 
 
 class ReadyMarkerTests(unittest.TestCase):
