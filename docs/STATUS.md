@@ -700,3 +700,10 @@
 
 - 授权 HLS 点播接受媒体清单中的 `#EXT-X-KEY:METHOD=NONE`，并在转发时保留该标记。含密钥 URI、异常属性、主清单上的明文标记或任何加密声明的清单仍会整体拒绝。旧版在读取明文标记时返回 502。Go 转发测试证实修复后保留明文标记、正确改写分段地址，拒绝有风险的示例且不发布任何资源。[RFC 8216 §4.3.2.4](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.2.4)
 - Go vet、全量测试和 HLS 竞态测试通过。在 Apple Silicon 原生 WKWebView 从 CMS 目录打开分集，通过 Go 中转实际解码带该标记的 24 秒自制 fMP4。播放进度推进，正常退出，隔离 SQLite 完整性通过。原生构建使用隔离测试传输。首次并行构建和竞态链接遇到磁盘空间不足。清理隔离副本后串行复验。原生测试构建显式补齐 Wails 的系统框架链接参数，并用实际路径应用测试传输。实际授权公网 CMS 和跨平台原生仍待验收。[本机日志](../build/bin/qa-hls-clear-marker/native-run.log) · [BMad 记录](../_bmad-output/plan-e12-hls-clear-marker.md)
+
+## E13 .49 累计候选本地打包（2026-11-27）
+
+- 从发行源码 `9208b80b42e77f4d00e87e77090a5ce59d5566a2` 构建 `v0.1.0-smoke.20261127.49`，合并更新下载错误指引、苹果 CMS 试看权限和 HLS 明文兼容性。浏览器回归与两平台打包的前端资源 SHA-256 一致。前端生产构建、122 项 Vitest、391 项 Playwright、Go vet、Go 全量以及 App/CMS/更新/开机启动竞态测试通过。首次在打包期间并行执行的 Go 全量测试遇到链接文件格式错误，打包结束后全量与竞态复验通过。[浏览器回归](../build/bin/smoke-20261127.49/evidence/e2e.log)
+- Windows x64 安装器 22.54 MiB、便携版 32.34 MiB。核对了 PE 版本、NSIS 内嵌程序和 WebView2 引导程序。macOS Universal ZIP 40.88 MiB，包含 arm64 和 x86_64，两者最低系统版本均为 macOS 13.0。Windows 7 项和 macOS 6 项 SHA-256 通过项目校验器、独立命令、随包命令与归档复验。[Windows 清单](../build/bin/smoke-20261127.49/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.49/macos/SHA256SUMS.txt)
+- 从最终 ZIP 完成 Apple Silicon 原生窗口就绪、正常退出、SQLite 完整性和回滚。16 项 macOS 工具测试、13 项 Node 发行工具测试和 Windows PowerShell 夹具通过。Go 源码、Windows x64 和 macOS 双切片、npm 生产依赖扫描均未报告已知漏洞。[原生验收](../build/bin/smoke-20261127.49/evidence/macos-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate49-packages.md)
+- 本批为本地 smoke。Windows 包未签名，macOS 为本地临时签名。GitHub 只读核对显示仓库的 Release、签名环境和仓库级 Actions secrets 均为 0，本机有效代码签名身份为 0。当前候选的 Windows 与 Intel Mac 原生、正式签名和公证、正式安装包更新与授权公网片源仍待验收。[发行前置条件](../build/bin/smoke-20261127.49/evidence/release-prerequisites.log)
