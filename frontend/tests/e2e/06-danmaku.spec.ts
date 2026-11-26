@@ -1,7 +1,11 @@
 import { test, expect } from './fixtures'
 test.describe('06 弹幕设置', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/watch/d1/32?panel=danmaku&t=192&paused'); await page.waitForSelector('[data-testid=danmaku-settings]'); await page.evaluate(() => localStorage.removeItem('jindi.player.v1')); await page.reload(); await page.waitForSelector('[data-testid=danmaku-settings]') })
-  test('screenshot', async ({ page }) => { await expect(page.getByTestId('danmaku-item').first()).toBeVisible(); await page.screenshot({ path: '../design/rendered/06-弹幕设置.png' }) })
+  test('screenshot', async ({ page }) => {
+    await expect(page.getByTestId('danmaku-item').first()).toBeVisible()
+    await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'paused')
+    await page.screenshot({ path: '../design/rendered/06-弹幕设置.png' })
+  })
   test('master switch hides all danmaku', async ({ page }) => { await expect(page.getByTestId('danmaku-item').first()).toBeVisible(); await page.getByTestId('dm-enabled').click(); await expect(page.getByTestId('danmaku-item')).toHaveCount(0); await page.getByTestId('dm-enabled').click(); await expect(page.getByTestId('danmaku-item').first()).toBeVisible() })
   test('opacity / font size sliders change rendering', async ({ page }) => {
     await page.getByTestId('dm-size').fill('24'); await expect(page.getByTestId('danmaku-item').first()).toHaveCSS('font-size', '24px')

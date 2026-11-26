@@ -372,7 +372,11 @@ test('an acknowledged comment in one window does not remove another window pendi
 
 test.describe('05 评论互动', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/watch/d1/32?panel=comments&t=192&paused'); await page.waitForSelector('[data-testid=comment]') })
-  test('screenshot', async ({ page }) => { await expect(page.getByTestId('comment-total')).toContainText('3,217'); await page.screenshot({ path: '../design/rendered/05-评论互动.png' }) })
+  test('screenshot', async ({ page }) => {
+    await expect(page.getByTestId('comment-total')).toContainText('3,217')
+    await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'paused')
+    await page.screenshot({ path: '../design/rendered/05-评论互动.png' })
+  })
   test('post validation: empty disabled, >500 disabled with counter', async ({ page }) => {
     const post = page.getByTestId('comment-post'); await expect(post).toBeDisabled()
     await page.getByTestId('comment-input').fill('a'.repeat(501)); await expect(post).toBeDisabled(); await expect(page.getByTestId('comment-count')).toHaveClass(/over/)

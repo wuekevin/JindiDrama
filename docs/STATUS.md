@@ -633,3 +633,10 @@
 
 - 草稿核验现要求 GitHub 原始交付 ZIP 和对应 Artifact 元数据。按已核验的发行说明检查制品所属仓库、运行编号、提交、轮次和版本，再检查 ZIP 的字节数与 SHA-256。Python 3 标准库逐项核验 ZIP 内文件，确认与草稿的所有待发布资产一致，包含清单本身。[GitHub Artifacts API](https://docs.github.com/en/rest/actions/artifacts#get-an-artifact)
 - Node 22 与 26 各通过 13 项发行工具测试，覆盖截断、外层摘要不符、成员替换、清单缺失和制品归属错误。使用真实 .44 Windows 和 macOS 原始 Actions ZIP 与 GitHub 摘要复核，档内 15 项成员全部一致。签名交付和线上草稿待正式发行环境验收。[BMad 记录](../_bmad-output/plan-e13-release-archive.md)
+
+## E13 当前发行源码本地集中验收（2026-11-27）
+
+- 从隔离发行源码 `7a6fd61ece30172dcf15f1d98c9751be2a0c765f` 重建前端。类型检查、生产构建、122 项 Vitest、387 项 Playwright、Go vet、Go 全量及 App/CMS/钥匙串竞态测试通过。并行执行时 Go 检查曾因磁盘空间不足中断，确认旧临时解包与归档一致并清理后完成串行复验。
+- 重拍十页 1448×1086 截图并对照设计稿。评论和弹幕两页的截图测试现在等待播放器进入暂停就绪态，避免把加载遮罩存为基准。修改后两个套件共 54 项通过。设计与实际的媒体素材、部分控件及视口内显示范围仍有差异。[回归日志](../build/bin/qa-current-20261127.46/e2e.log) · [十页对照上半](../build/bin/qa-current-20261127.46/visual-diff/review-0.png) · [十页对照下半](../build/bin/qa-current-20261127.46/visual-diff/review-5.png)
+- Apple Silicon 从本地 `v0.1.0-smoke.20261127.46` ZIP 验证实际架构、版本、启动与正常退出、隔离 SQLite 及回滚。测试应用采用 ad-hoc 签名，最低 macOS 13.0。Windows x64 生产交叉编译成功，校验 PE 架构和应用版本。Node 与 macOS 发行工具各 13 项通过，Windows 会话与签名 PowerShell 夹具通过。[Mac 原生验收](../build/bin/qa-current-20261127.46/mac-native.log) · [测试 ZIP 校验清单](../build/bin/qa-current-20261127.46/SHA256SUMS.txt)
+- 按生产标签扫描的 Go 源码、Mac 与 Windows 二进制及 npm 生产依赖未报告已知漏洞。Go 源码扫描使用隔离缓存复验。GitHub 只读查询显示签名环境、仓库级 Actions secrets 和 Release 均为 0。当前源码的 Windows、Intel Mac 原生、正式签名和公证及授权公网片源待验收。[BMad 记录](../_bmad-output/plan-e13-current-local-acceptance.md)
