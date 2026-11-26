@@ -1,6 +1,6 @@
 // 目录展示数据来自 Go Provider。浏览器预览使用内置演示目录。
 import type { Drama, HistoryEntry } from '@/types'
-import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama } from '@/bindings'
+import { activeProviderName, hasCatalogPlayback, hasProviderCapabilities, loadCatalogDrama, loadCatalogPage, loadHomeFeed, loadProviderCapabilities, loadProviderCatalog, loadProviderDetail, searchActiveCatalog, searchProvider, type CatalogDrama } from '@/bindings'
 import { BANNERS, byId, CATEGORIES, demoCastFor, demoSeasonsFor, DRAMAS, RANKINGS, type CastMember, type DemoSeason } from './data'
 import { posterSvg } from './posters'
 
@@ -9,9 +9,13 @@ export interface HomePayload { catalogLabel?: string; banners: typeof BANNERS; c
 
 const catalogCover = posterSvg({ hue: 218, hue2: 229, seed: 4 })
 
-export async function usesDemoCatalog() {
+export async function catalogProviderName() {
   const name = activeProviderName()
-  return name ? (await name) === 'mock' : !hasProviderCapabilities()
+  return name ?? (hasProviderCapabilities() ? undefined : 'mock')
+}
+
+export async function usesDemoCatalog() {
+  return (await catalogProviderName()) === 'mock'
 }
 
 async function requireCapability(capability: 'catalog' | 'search') {
@@ -29,6 +33,17 @@ function providerCard(drama: CatalogDrama): Drama {
     episodeCount: count, updatedTo: Math.max(0, Math.min(count, drama.updatedTo)),
     cover: catalogCover, providerOnly: true, heat: 0, finished: false,
   }
+}
+
+export const MAX_CMS_PAGE = 100_000
+
+export async function loadCMSCatalogPage(query: string, page: number, mode: 'normal' | 'error') {
+  if (mode === 'error') throw new Error('苹果 CMS 目录暂不可用')
+  const result = await loadCatalogPage(query.trim(), page)
+  if (!result || result.page !== page || !Array.isArray(result.entries) || typeof result.hasMore !== 'boolean') {
+    throw new Error('苹果 CMS 目录响应无效')
+  }
+  return { entries: result.entries.map(providerCard), hasMore: result.entries.length > 0 && result.hasMore }
 }
 
 export async function loadCatalogHome(mode: 'normal'|'empty'|'error' = 'normal'): Promise<HomePayload> {

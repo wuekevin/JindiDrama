@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
-import { loadCatalogHome, searchDramas, usesDemoCatalog, HOT_WORDS, type SearchFilters } from '@/mocks/provider'
+import { catalogProviderName, loadCatalogHome, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
@@ -15,6 +15,7 @@ const route = useRoute(); const router = useRouter(); const hist = useSearchStor
 const catalog = useLicensedCatalog()
 const PAGE = 5
 const root = ref<HTMLElement>()
+const heading = ref<HTMLElement>()
 const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
 let layoutObserver: ResizeObserver | undefined
 onMounted(() => {
@@ -26,7 +27,10 @@ onMounted(() => {
   })
   layoutObserver.observe(root.value)
 })
-onBeforeUnmount(() => layoutObserver?.disconnect())
+onBeforeUnmount(() => {
+  token++
+  layoutObserver?.disconnect()
+})
 const q = computed(() => String(route.query.q ?? ''))
 const castOnly = computed(() => route.query.cast === '1')
 const discovery = computed(() => searchDiscovery(route.query))
@@ -45,28 +49,91 @@ const kind = computed(() => String(route.query.kind ?? ''))
 const status = computed(() => String(route.query.status ?? '') as SearchFilters['status'])
 const sort = computed(() => String(route.query.sort ?? 'comprehensive') as NonNullable<SearchFilters['sort']>)
 const page = ref(1)
+const cmsPage = computed(() => {
+  const raw = route.query.page
+  if (typeof raw !== 'string' || !/^[0-9]{1,6}$/.test(raw)) return 1
+  const value = Number(raw)
+  return value >= 1 && value <= MAX_CMS_PAGE ? value : 1
+})
+const cmsPagination = ref(false)
+const cmsHasMore = ref(false)
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
 const isDemo = ref(false)
 const localResultsOnly = ref(false)
 const err = ref(''); const items = ref<Drama[]>([])
 let token = 0
+let providerKnown = false
+let providerName: string | undefined
+let lastCMSRequest: { scope: string; page: number } | undefined
+const patch = (o: Record<string, string | undefined>) => router.replace({ query: { ...route.query, ...o } })
+const errorMessage = (cause: unknown) => typeof cause === 'string' ? cause
+  : cause instanceof Error ? cause.message : '搜索服务暂时不可用'
+function focusResults() {
+  heading.value?.focus({ preventScroll: true })
+  root.value?.scrollIntoView({ block: 'start' })
+}
+function retry() {
+  if (cmsPagination.value) focusResults()
+  void run()
+}
 async function run() {
-  const my = ++token; state.value = 'loading'; page.value = 1
+  const my = ++token
+  state.value = 'loading'
+  page.value = 1
+  cmsHasMore.value = false
   localResultsOnly.value = false
   if (route.query.state === 'loading') return
   try {
-    const demo = await usesDemoCatalog()
+    const name = await catalogProviderName()
     if (my !== token) return
+    const sourceChanged = providerKnown && name !== providerName
+    providerKnown = true
+    providerName = name
+    if (sourceChanged && route.query.page !== undefined && (cmsPagination.value || name === 'apple-cms')) {
+      await patch({ page: undefined })
+      return
+    }
+
+    const demo = name === 'mock'
     isDemo.value = demo
     const mode = route.query.state === 'error' ? 'error' : 'normal'
     const section = feed.value
     const topicBrowse = browseTopics.value
     const selectedTopic = topic.value
+    cmsPagination.value = name === 'apple-cms' && (section === 'today' ||
+      (!section && !topicBrowse && !castOnly.value && kind.value !== '本地片库'))
     let results: Drama[]
     let localOnly = false
     let tags: string[] = []
     let label: string | undefined
-    if (section) {
+    if (cmsPagination.value) {
+      const keyword = section ? '' : q.value
+      const requestedPage = cmsPage.value
+      const scope = section ? 'today' : `search:${keyword}`
+      const pageChanged = lastCMSRequest?.scope === scope
+        ? lastCMSRequest.page !== requestedPage
+        : requestedPage > 1
+      lastCMSRequest = { scope, page: requestedPage }
+      label = section ? '片源目录' : undefined
+      catalogLabel.value = label
+      if (pageChanged) {
+        await nextTick()
+        if (my !== token) return
+        focusResults()
+      }
+      const local = !section && requestedPage === 1 ? catalog.searchLocal(keyword) : []
+      try {
+        const remote = await loadCMSCatalogPage(keyword, requestedPage, mode)
+        if (my !== token) return
+        cmsHasMore.value = remote.hasMore
+        results = [...local, ...remote.entries]
+      } catch (error) {
+        if (my !== token) return
+        if (!local.length) throw error
+        localOnly = true
+        results = local
+      }
+    } else if (section) {
       const home = await loadCatalogHome(mode)
       label = home.catalogLabel
       results = section === 'today' ? home.todayNew : home.rankings[section]
@@ -96,7 +163,7 @@ async function run() {
     state.value = results.length ? 'ready' : 'empty'
   } catch (cause) {
     if (my !== token) return
-    err.value = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : '搜索服务暂时不可用'
+    err.value = errorMessage(cause)
     state.value = 'error'
   }
 }
@@ -104,7 +171,13 @@ watch([
   () => discovery.value ?? route.fullPath,
   () => browseTopics.value ? topic.value : '',
   () => route.query.state,
-], run, { immediate: true })
+  () => feed.value === 'today' ? route.query.page : undefined,
+], ([key, selectedTopic, mode], [previousKey, previousTopic, previousMode]) => {
+  // Other providers already have the full discovery list in memory.
+  if (key === previousKey && selectedTopic === previousTopic && mode === previousMode &&
+      providerKnown && providerName !== 'apple-cms' && !cmsPagination.value) return
+  void run()
+}, { immediate: true })
 const pages = computed(() => Math.max(1, Math.ceil(items.value.length / PAGE)))
 const currentPage = computed(() => {
   if (!discovery.value) return page.value
@@ -112,17 +185,21 @@ const currentPage = computed(() => {
   const value = typeof raw === 'string' ? Number(raw) : 1
   return Number.isSafeInteger(value) && value > 0 ? Math.min(value, pages.value) : 1
 })
-const shown = computed(() => items.value.slice((currentPage.value - 1) * PAGE, currentPage.value * PAGE))
-const patch = (o: Record<string, string | undefined>) => router.replace({ query: { ...route.query, ...o } })
+const shown = computed(() => cmsPagination.value ? items.value
+  : items.value.slice((currentPage.value - 1) * PAGE, currentPage.value * PAGE))
 function selectPage(value: number) {
-  if (discovery.value) void patch({ page: value === 1 ? undefined : String(value) })
+  const routePage = value === 1 ? undefined : String(value)
+  if (cmsPagination.value) void router.push({ query: { ...route.query, page: routePage } })
+  else if (discovery.value) void patch({ page: routePage })
   else page.value = value
 }
 const selectTopic = (event: Event) => {
   const value = (event.target as HTMLSelectElement).value
   return patch({ topic: value || undefined, page: undefined })
 }
-const selectKind = (value: string) => patch(value === '本地片库' ? { kind: value, status: undefined } : { kind: value || undefined })
+const selectKind = (value: string) => patch(value === '本地片库'
+  ? { kind: value, status: undefined, page: undefined }
+  : { kind: value || undefined, page: undefined })
 const kinds = computed(() => isDemo.value ? [
   { k: '', l: '全部', i: null }, { k: '真人剧', l: '真人剧', i: Video }, { k: '漫剧', l: '漫剧', i: Cat }, { k: 'AI剧', l: 'AI剧', i: Bot },
   ...(!castOnly.value && catalog.entries.length ? [{ k: '本地片库', l: '本地片库', i: BookOpen }] : []),
@@ -142,9 +219,10 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
   <div ref="root" class="search" :class="[layout, { discovery: discoveryTitle }]" data-testid="page-search">
     <div class="main">
       <header class="head">
-        <h1><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
-        <p v-if="state === 'ready' || state === 'empty'" class="count" data-testid="result-count">共找到 {{ items.length }} 部相关内容</p>
+        <h1 ref="heading" :tabindex="cmsPagination ? -1 : undefined"><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
+        <p v-if="state === 'ready' || state === 'empty'" class="count" data-testid="result-count">{{ cmsPagination ? '本页共' : '共找到' }} {{ items.length }} 部相关内容</p>
         <p v-if="localResultsOnly" class="count" role="status">主目录暂不可用，已显示本地片库的匹配结果。</p>
+        <BaseButton v-if="cmsPagination && localResultsOnly" class="catalog-retry" variant="outline" @click="retry">重试</BaseButton>
       </header>
       <label v-if="browseTopics" class="topic-filter">
         题材
@@ -162,8 +240,8 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
         <button v-for="s in sorts" :key="s.k" :class="{ on: sort === s.k }" :data-testid="`sort-${s.k}`" @click="patch({ sort: s.k })">{{ s.l }}</button></div>
 
       <div v-if="state === 'loading'" class="list"><Skeleton v-for="i in 4" :key="i" style="height: 138px" /></div>
-      <ErrorState v-else-if="state === 'error'" :message="err" @retry="run" />
-      <EmptyState v-else-if="state === 'empty'" :title="feed ? '暂无短剧' : browseTopics && topic && !knownTopic ? '目录没有这个题材' : '没有找到相关短剧'" :hint="discoveryTitle ? undefined : '换个关键词，或查看热搜关键词'">
+      <ErrorState v-else-if="state === 'error'" :message="err" @retry="retry" />
+      <EmptyState v-else-if="state === 'empty'" :title="cmsPagination && cmsPage > 1 ? '本页暂无短剧' : feed ? '暂无短剧' : browseTopics && topic && !knownTopic ? '目录没有这个题材' : '没有找到相关短剧'" :hint="discoveryTitle ? undefined : '换个关键词，或查看热搜关键词'">
         <BaseButton v-if="!discoveryTitle || browseTopics && topic" variant="outline" @click="browseTopics ? patch({ topic: undefined, page: undefined }) : router.push({ name: 'search' })">清除筛选</BaseButton>
       </EmptyState>
       <ul v-else class="list">
@@ -179,7 +257,12 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
             <BaseButton variant="ghost" data-testid="view-detail" @click="router.push(detailRoute(d.id, d.providerOnly))">查看详情</BaseButton></div>
         </li>
       </ul>
-      <nav v-if="state === 'ready' && pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === currentPage }" :aria-current="p === currentPage ? 'page' : undefined" @click="selectPage(p)">{{ p }}</button></nav>
+      <nav v-if="cmsPagination && state !== 'loading'" class="pager cms-pager" aria-label="分页">
+        <button v-if="cmsPage > 1" @click="selectPage(cmsPage - 1)">上一页</button>
+        <span aria-current="page">第 {{ cmsPage }} 页</span>
+        <button v-if="cmsHasMore && cmsPage < MAX_CMS_PAGE" @click="selectPage(cmsPage + 1)">下一页</button>
+      </nav>
+      <nav v-else-if="!cmsPagination && state === 'ready' && pages > 1" class="pager" aria-label="分页"><button v-for="p in pages" :key="p" :class="{ on: p === currentPage }" :aria-current="p === currentPage ? 'page' : undefined" @click="selectPage(p)">{{ p }}</button></nav>
     </div>
 
     <aside class="side">
@@ -214,6 +297,10 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 .sum { font-size: 13.5px; line-height: 1.55; color: var(--c-text-2); }
 .act { flex: none; width: 142px; display: flex; flex-direction: column; gap: 8px; align-items: stretch; .eps { font-size: 13px; text-align: center; color: var(--c-text-2); } :deep(.btn) { border-radius: 20px; } }
 .pager { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; button { width: 34px; height: 34px; border-radius: 10px; background: var(--c-surface); &.on { background: var(--g-accent); } } }
+.cms-pager { align-items: center; }
+.cms-pager button { width: auto; padding-inline: 14px; }
+.cms-pager span { padding-inline: 6px; }
+.catalog-retry { margin-top: 10px; }
 .side { flex: none; width: 268px; display: flex; flex-direction: column; gap: 14px; padding-top: 178px; }
 .panel { padding: 16px 16px 12px; border-radius: 20px; background: linear-gradient(180deg, rgba(255,255,255,.07), rgba(255,255,255,.035)); border: 1px solid var(--c-border);
   header { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--c-border); margin-bottom: 6px; h3 { font-size: 20px; } .clr { margin-left: auto; font-size: 13px; color: var(--c-text-2); } }

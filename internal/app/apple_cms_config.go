@@ -42,3 +42,12 @@ func configureAppleCMS(a *App, raw string, client *http.Client) error {
 	})
 	return nil
 }
+
+// CatalogPage addresses only the configured Apple CMS provider.
+func (a *App) CatalogPage(query string, page int) (applecms.CatalogPage, error) {
+	cms, ok := a.p.(*applecms.Provider)
+	if !ok {
+		return applecms.CatalogPage{}, provider.ErrNotAuthorized
+	}
+	return cms.CatalogPage(a.context(), query, page)
+}

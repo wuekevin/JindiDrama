@@ -13,7 +13,7 @@ func TestWebViewBindingSurface(t *testing.T) {
 	// Wails registers exported methods of the bound App value.
 	want := strings.Fields(`
 AppVersion AutostartEnabled BackupNow CacheClear CacheSetLimitMB CacheStats
-CancelUpdateDownload Capabilities CatalogDrama CatalogEpisodes CatalogPlayback CatalogSearch
+CancelUpdateDownload Capabilities CatalogDrama CatalogEpisodes CatalogPage CatalogPlayback CatalogSearch
 CheckUpdate ChooseCacheDirectory ChooseLicensedDirectory ClearHistory ClearLicensedDirectory CloseWindow CompareAndSaveLocalComments DiagnosticsTail DownloadUpdate Drama Episodes ExportDemoEpisode ExportDemoScreenshot ExportLicensedEpisode
 Favorites GetSetting HideWindowToTray History Home HomeFeed LicensedCatalog LicensedConfiguration LocalComments LocalCommentsState LocalDanmaku LocalDataProfile LocalEpisodeLiked LogEvent MarkFrontendReady
 OpenReleasePage ProviderName RecordHistory ReleaseCatalogPlayback RemoveHistory ResetCacheDirectory ResolvePlayback RestoreLibraryBackup SaveFavorites

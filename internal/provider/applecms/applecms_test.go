@@ -163,3 +163,77 @@ func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestCatalogPageMetadata(t *testing.T) {
+	const valid = `{"vod_id":42,"vod_name":"海岛"}`
+	tests := []struct {
+		name     string
+		page     int
+		metadata string
+		list     string
+		hasMore  bool
+		wantErr  error
+	}{
+		{"numbers", 1, `"page":1,"pagecount":2,`, valid, true, nil},
+		{"digit strings", 2, `"page":"002","pagecount":"3",`, valid, true, nil},
+		{"last page", 2, `"page":"2","pagecount":2,`, valid, false, nil},
+		{"legacy response", 1, "", valid, false, nil},
+		{"legacy first page with advertised count", 1, `"pagecount":2,`, valid, false, nil},
+		{"legacy first page with null echo", 1, `"page":null,"pagecount":2,`, valid, false, nil},
+		{"later page without echo", 2, `"pagecount":2,`, valid, false, errPageMismatch},
+		{"later page with null echo", 2, `"page":null,"pagecount":2,`, valid, false, errPageMismatch},
+		{"no page count on a later page", 2, `"page":2,`, valid, false, nil},
+		{"unusable page count", 1, `"page":1,"pagecount":"2 pages",`, valid, false, nil},
+		{"empty page", 2, `"page":2,"pagecount":5,`, "", false, nil},
+		{"invalid records", 2, `"page":2,"pagecount":5,`, `{"vod_id":"a","vod_name":"无效"}`, false, nil},
+		{"bounded final page", maxPage, `"page":100000,"pagecount":100001,`, valid, false, nil},
+		{"different page", 2, `"page":1,"pagecount":2,`, valid, false, errPageMismatch},
+		{"non-digit page", 2, `"page":"2.0","pagecount":2,`, valid, false, errPageMismatch},
+		{"non-integer page", 2, `"page":2e0,"pagecount":2,`, valid, false, errPageMismatch},
+		{"invalid page value", 2, `"page":{},"pagecount":2,`, valid, false, errPageMismatch},
+		{"invalid request", 0, "", "", false, errInvalidPage},
+		{"negative request", -1, "", "", false, errInvalidPage},
+		{"above maximum request", maxPage + 1, "", "", false, errInvalidPage},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var calls atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				q := r.URL.Query()
+				if q.Get("pg") != fmt.Sprint(tt.page) || q.Get("wd") != "海岛 & 信" || q.Has("ids") {
+					t.Errorf("incorrect pagination query: %v", q)
+				}
+				_, _ = fmt.Fprintf(w, `{"code":1,%s"list":[%s]}`, tt.metadata, tt.list)
+			}))
+			defer server.Close()
+			p := fixtureProvider(t, server.URL, server.Client())
+			got, err := p.CatalogPage(t.Context(), " 海岛 & 信 ", tt.page)
+			if err != tt.wantErr {
+				t.Fatalf("error = %v, want %v", err, tt.wantErr)
+			}
+			if tt.wantErr == errInvalidPage {
+				if calls.Load() != 0 {
+					t.Fatal("invalid page reached upstream")
+				}
+				return
+			}
+			if calls.Load() != 1 {
+				t.Fatalf("unexpected number of upstream requests: %d", calls.Load())
+			}
+			if tt.wantErr != nil {
+				if len(got.Entries) != 0 {
+					t.Fatalf("mismatched records escaped: %+v", got)
+				}
+				return
+			}
+			wantEntries := 0
+			if tt.list == valid {
+				wantEntries = 1
+			}
+			if got.Page != tt.page || got.HasMore != tt.hasMore || got.Entries == nil || len(got.Entries) != wantEntries {
+				t.Fatalf("incorrect page: %+v", got)
+			}
+		})
+	}
+}

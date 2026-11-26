@@ -213,3 +213,48 @@ func TestAppleCMSClientDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("redirect handling: %+v, calls=%d, err=%v", rows, calls, err)
 	}
 }
+
+func TestAppleCMSCatalogPageBinding(t *testing.T) {
+	a := New()
+	if _, err := a.CatalogPage("海岛", 2); !errors.Is(err, provider.ErrNotAuthorized) {
+		t.Fatalf("expected non-CMS binding refusal, got %v", err)
+	}
+
+	client := newCatalogMediaClient()
+	var calls []string
+	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+		q := req.URL.Query()
+		calls = append(calls, q.Get("pg")+":"+q.Get("wd"))
+		if req.URL.Host != "catalog.example.test" || req.URL.Path != "/vod" || q.Get("token") != "fixture" ||
+			q.Get("ac") != "detail" || q.Get("at") != "json" || q.Has("ids") {
+			t.Errorf("unexpected CMS request: %s", req.URL)
+		}
+		body := `{"code":1,"page":"2","pagecount":"3","list":[{"vod_id":42,"vod_name":"岸边灯塔"}]}`
+		if q.Has("wd") {
+			body = `{"code":1,"page":2,"pagecount":2,"list":[{"vod_id":43,"vod_name":"海岛归航"}]}`
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(body))}, nil
+	})
+	if err := configureAppleCMS(a, "https://catalog.example.test/vod?token=fixture&pg=7&wd=old", client); err != nil {
+		t.Fatal(err)
+	}
+
+	directory, err := a.CatalogPage("", 2)
+	if err != nil || directory.Page != 2 || !directory.HasMore || len(directory.Entries) != 1 || directory.Entries[0].Title != "岸边灯塔" {
+		t.Fatalf("directory page = %+v, %v", directory, err)
+	}
+	search, err := a.CatalogPage(" 海岛 ", 2)
+	if err != nil || search.Page != 2 || search.HasMore || len(search.Entries) != 1 || search.Entries[0].Title != "海岛归航" {
+		t.Fatalf("search page = %+v, %v", search, err)
+	}
+	payload, err := json.Marshal(search)
+	if err != nil || strings.Contains(string(payload), "fixture") || strings.Contains(string(payload), "pagecount") {
+		t.Fatalf("unexpected page payload: %s, %v", payload, err)
+	}
+	if _, err := a.CatalogPage("", 100001); err == nil {
+		t.Fatal("expected page bound")
+	}
+	if got := strings.Join(calls, ","); got != "2:,2:海岛" {
+		t.Fatalf("upstream queries = %s", got)
+	}
+}

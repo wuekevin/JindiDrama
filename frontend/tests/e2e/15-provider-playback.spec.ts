@@ -44,6 +44,11 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
       Home: async () => mode === 'apple-cms-empty' ? [] : [drama],
       HomeFeed: async () => ({ catalogLabel: cms ? '片源目录' : undefined, todayNew: [], rankings: { hot: [], rise: [], new: [] } }),
       CatalogSearch: async (query: string) => query === '海岛' ? [drama] : [],
+      CatalogPage: async (query: string, page: number) => ({
+        entries: mode !== 'apple-cms-empty' && (!query || query === '海岛') ? [drama] : [],
+        page,
+        hasMore: false,
+      }),
       Capabilities: async () => ({ catalog: 'ready', search: 'ready', playback: mode === 'blocked' ? 'not_authorized' : 'ready' }),
       CatalogDrama: async () => drama,
       CatalogEpisodes: async () => [1, 2, 3].map((index) => ({ id: 'episode-' + index, dramaId: id, index, available: cms && !hls ? index === 3 : index < 3 })),

@@ -23,6 +23,7 @@ import (
 const (
 	maxResponseBytes = 8 << 20
 	maxRecords       = 500
+	maxPage          = 100000
 	maxEpisodes      = 1000
 	maxRoutes        = 32
 	maxMediaSources  = 4
@@ -30,10 +31,12 @@ const (
 )
 
 var (
-	errUpstream  = errors.New("苹果 CMS 目录暂不可用")
-	htmlTag      = regexp.MustCompile(`<[^>]*>`)
-	metadataURL  = regexp.MustCompile(`(?i)https?://[^\s\p{Z}<>"，。；！？、）】》]+`)
-	episodeLabel = regexp.MustCompile(`^(?:([0-9]+)|第\s*([0-9]+)\s*集)$`)
+	errUpstream     = errors.New("苹果 CMS 目录暂不可用")
+	errInvalidPage  = errors.New("苹果 CMS 请求页码无效")
+	errPageMismatch = errors.New("苹果 CMS 返回的页码与请求不一致")
+	htmlTag         = regexp.MustCompile(`<[^>]*>`)
+	metadataURL     = regexp.MustCompile(`(?i)https?://[^\s\p{Z}<>"，。；！？、）】》]+`)
+	episodeLabel    = regexp.MustCompile(`^(?:([0-9]+)|第\s*([0-9]+)\s*集)$`)
 )
 
 type Provider struct {
@@ -41,6 +44,12 @@ type Provider struct {
 	idPrefix string
 	client   *http.Client
 	media    func(string) (provider.MediaSource, bool)
+}
+
+type CatalogPage struct {
+	Entries []provider.Drama `json:"entries"`
+	Page    int              `json:"page"`
+	HasMore bool             `json:"hasMore"`
 }
 
 var _ provider.VideoProvider = (*Provider)(nil)
@@ -89,13 +98,29 @@ func (*Provider) HomeFeed(context.Context) (provider.HomeFeed, error) {
 }
 
 func (p *Provider) Search(ctx context.Context, query string) ([]provider.Drama, error) {
-	items, err := p.request(ctx, strings.TrimSpace(query), "")
-	if err != nil {
-		return nil, err
+	result, err := p.CatalogPage(ctx, query, 1)
+	return result.Entries, err
+}
+
+func (p *Provider) CatalogPage(ctx context.Context, query string, page int) (CatalogPage, error) {
+	if page < 1 || page > maxPage {
+		return CatalogPage{}, errInvalidPage
 	}
-	results := make([]provider.Drama, 0, len(items))
+	data, err := p.request(ctx, strings.TrimSpace(query), "", page)
+	if err != nil {
+		return CatalogPage{}, err
+	}
+	echoedPage := len(data.Page) > 0 && string(data.Page) != "null"
+	if echoedPage {
+		if actual, ok := scalar(data.Page).pageNumber(); !ok || actual != uint64(page) {
+			return CatalogPage{}, errPageMismatch
+		}
+	} else if page > 1 {
+		return CatalogPage{}, errPageMismatch
+	}
+	results := make([]provider.Drama, 0, len(data.List))
 	seen := make(map[string]bool)
-	for _, item := range items {
+	for _, item := range data.List {
 		id := scalar(item.ID).decimal(30)
 		title := metadataText(item.Name)
 		if id == "" || title == "" || seen[id] {
@@ -105,7 +130,12 @@ func (p *Provider) Search(ctx context.Context, query string) ([]provider.Drama, 
 		drama, _ := p.normalize(item, id, title)
 		results = append(results, drama)
 	}
-	return results, nil
+	pageCount, ok := scalar(data.PageCount).pageNumber()
+	return CatalogPage{
+		Entries: results,
+		Page:    page,
+		HasMore: echoedPage && len(results) > 0 && page < maxPage && ok && uint64(page) < pageCount,
+	}, nil
 }
 
 func (p *Provider) Drama(ctx context.Context, id string) (provider.Drama, error) {
@@ -151,10 +181,11 @@ func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[i
 	if !ok || !decimalDigits(vodID, 30) {
 		return provider.Drama{}, nil, provider.ErrNotFound
 	}
-	items, err := p.request(ctx, "", vodID)
+	data, err := p.request(ctx, "", vodID, 0)
 	if err != nil {
 		return provider.Drama{}, nil, err
 	}
+	items := data.List
 	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID {
 		return provider.Drama{}, nil, provider.ErrNotFound
 	}
@@ -189,6 +220,11 @@ func (s scalar) decimal(limit int) string {
 	return ""
 }
 
+func (s scalar) pageNumber() (uint64, bool) {
+	number, err := strconv.ParseUint(s.text(), 10, 64)
+	return number, err == nil
+}
+
 func decimalDigits(value string, limit int) bool {
 	return value != "" && len(value) <= limit && strings.IndexFunc(value, func(r rune) bool {
 		return r < '0' || r > '9'
@@ -209,13 +245,20 @@ type record struct {
 	Pass       json.RawMessage `json:"vod_pwd"`
 }
 
-func (p *Provider) request(ctx context.Context, keyword, id string) ([]record, error) {
+type response struct {
+	Code      json.RawMessage `json:"code"`
+	Page      json.RawMessage `json:"page"`
+	PageCount json.RawMessage `json:"pagecount"`
+	List      []record        `json:"list"`
+}
+
+func (p *Provider) request(ctx context.Context, keyword, id string, page int) (response, error) {
 	endpoint := p.endpoint
 	query := endpoint.Query()
 	query.Set("ac", "detail")
 	query.Set("at", "json")
 	if id == "" {
-		query.Set("pg", "1")
+		query.Set("pg", strconv.Itoa(page))
 		if keyword != "" {
 			query.Set("wd", keyword)
 		}
@@ -226,34 +269,27 @@ func (p *Provider) request(ctx context.Context, keyword, id string) ([]record, e
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
 	if err != nil {
-		return nil, errUpstream
+		return response{}, errUpstream
 	}
 	req.Header.Set("Accept", "application/json")
 	res, err := p.client.Do(req)
 	if err != nil {
-		return nil, errUpstream
+		return response{}, errUpstream
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK || res.ContentLength > maxResponseBytes {
-		return nil, errUpstream
+		return response{}, errUpstream
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, maxResponseBytes+1))
 	if err != nil || len(body) > maxResponseBytes {
-		return nil, errUpstream
+		return response{}, errUpstream
 	}
-	var data struct {
-		Code json.RawMessage `json:"code"`
-		Page json.RawMessage `json:"page"`
-		List []record        `json:"list"`
-	}
+	var data response
 	if err := json.Unmarshal(body, &data); err != nil || scalar(data.Code).decimal(1) != "1" ||
 		data.List == nil || len(data.List) > maxRecords {
-		return nil, errUpstream
+		return response{}, errUpstream
 	}
-	if page := scalar(data.Page).text(); id == "" && page != "" && page != "1" {
-		return nil, errUpstream
-	}
-	return data.List, nil
+	return data, nil
 }
 
 func plainText(value string) string {
