@@ -1,6 +1,11 @@
 package sqlite
 
-import "errors"
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+)
 
 type LocalDanmaku struct {
 	ID       int64  `json:"id"`
@@ -62,4 +67,26 @@ ON CONFLICT(request_id) WHERE request_id IS NOT NULL DO NOTHING`, dramaID, episo
 		return LocalDanmaku{}, err
 	}
 	return saved, nil
+}
+
+// DanmakuProfile scopes a WebView journal to both the opened path and the
+// database's own identity. An unrelated database at the same path stays separate.
+const danmakuDatabaseIDKey = "internal_danmaku_database_id"
+
+func (s *Store) DanmakuProfile() (string, error) {
+	path := s.CommentProfile()
+	value, exists, err := s.GetSetting(danmakuDatabaseIDKey)
+	if err != nil {
+		return "", err
+	}
+	var identity string
+	if path == "" || !exists || json.Unmarshal([]byte(value), &identity) != nil {
+		return "", errors.New("本地弹幕暂存配置不可用")
+	}
+	data, err := hex.DecodeString(identity)
+	if err != nil || len(data) != 16 {
+		return "", errors.New("本地弹幕暂存配置无效")
+	}
+	digest := sha256.Sum256([]byte(path + ":" + identity))
+	return hex.EncodeToString(digest[:]), nil
 }

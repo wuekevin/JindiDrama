@@ -59,6 +59,15 @@ func (a *App) StorageReady() bool {
 	return a.store != nil
 }
 
+// LocalDataProfile identifies the opened database without revealing its path.
+func (a *App) LocalDataProfile() (string, error) {
+	a.awaitStartup()
+	if a.store == nil {
+		return "", ErrNoStore
+	}
+	return a.store.DanmakuProfile()
+}
+
 func (a *App) Favorites() ([]string, error) {
 	if a.store == nil {
 		return nil, ErrNoStore

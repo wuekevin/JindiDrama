@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { Star, Play, Plus, Check, Download, ThumbsUp, Share2, Flame, ChevronDown, RefreshCw } from 'lucide-vue-next'
-import { exportDemoEpisode, loadEpisodeLike, loadLocalDanmaku, saveEpisodeLike, sendLocalDanmaku, type LocalDanmaku } from '@/bindings'
+import { exportDemoEpisode, loadEpisodeLike, loadLocalDanmaku, recoverLocalDanmaku, saveEpisodeLike, sendLocalDanmaku, type LocalDanmaku } from '@/bindings'
 import { byId, DRAMAS } from '@/mocks/data'
 import { epHot, groupEpisodes } from '@/mocks/provider'
 import { useRelatedDramas } from '@/mocks/recommendations'
@@ -11,6 +11,7 @@ import { demoQualityId, demoSources } from '@/player/demoMedia'
 import { useAppSettings } from '@/stores/appSettings'
 import { playbackEndAction } from '@/player/preferences'
 import { episodeDuration, fmt } from '@/player/machine'
+import { normalizeDanmakuText } from '@/bindings/danmakuRecovery'
 import { draftForDanmaku, type DanmakuSubmission } from '@/player/danmakuDraft'
 import { genDanmaku, type DanmakuItem } from '@/player/danmaku'
 import { useLibraryStore } from '@/stores/library'
@@ -67,17 +68,44 @@ const toItem = (item: LocalDanmaku): DanmakuItem => ({
 function mergeMine(items: DanmakuItem[]) {
   mine.value = [...new Map([...mine.value, ...items].map((item) => [item.id, item])).values()]
 }
+const recoveringDanmaku = ref(false)
+const pendingDanmakuRecovery = ref(false)
+let danmakuEpisodeGeneration = 0
+async function retryDanmakuRecovery() {
+  if (recoveringDanmaku.value) return
+  const generation = danmakuEpisodeGeneration
+  const current = () => generation === danmakuEpisodeGeneration
+  recoveringDanmaku.value = true
+  try {
+    const pending = await recoverLocalDanmaku(dramaId.value, episode.value, current, (item, entry) => {
+      if (!current()) return
+      mergeMine([toItem(item)])
+      const draft = danmakuDraft.value
+      if (!draft.sending && draft.attempt?.requestId === entry.requestId) {
+        if (normalizeDanmakuText(draft.text) === entry.text) draft.text = ''
+        draft.attempt = undefined
+      }
+    })
+    if (current()) pendingDanmakuRecovery.value = pending
+  } finally {
+    if (current()) recoveringDanmaku.value = false
+  }
+}
 watch([dramaId, episode], async ([id, ep], _, onCleanup) => {
+  danmakuEpisodeGeneration++
+  onCleanup(() => { danmakuEpisodeGeneration++ })
+  const generation = danmakuEpisodeGeneration
   mine.value = []
+  recoveringDanmaku.value = false
+  pendingDanmakuRecovery.value = false
   if (!byId(id)) return
   cs.open(id, ep)
-  let current = true
-  onCleanup(() => { current = false })
+  void retryDanmakuRecovery()
   try {
     const saved = await loadLocalDanmaku(id, ep)
-    if (current && saved) mergeMine(saved.map(toItem))
+    if (generation === danmakuEpisodeGeneration && saved) mergeMine(saved.map(toItem))
   } catch {
-    if (current) toast.push('本地弹幕读取失败', 'error')
+    if (generation === danmakuEpisodeGeneration) toast.push('本地弹幕读取失败', 'error')
   }
 }, { immediate: true })
 const total = computed(() => drama.value?.episodeCount ?? 0)
@@ -128,12 +156,19 @@ const danmakuDraft = computed(() => draftForDanmaku(dramaId.value, episode.value
 async function sendDm(submission: DanmakuSubmission) {
   const id = dramaId.value
   const ep = episode.value
-  const saved = await sendLocalDanmaku(id, ep, submission)
+  let saved: LocalDanmaku | undefined
+  try {
+    saved = await sendLocalDanmaku(id, ep, submission)
+  } catch (error) {
+    if (dramaId.value === id && episode.value === ep) pendingDanmakuRecovery.value = true
+    throw error
+  }
   if (dramaId.value !== id || episode.value !== ep) return
   mergeMine([saved ? toItem(saved) : {
     id: `demo-${submission.requestId}`, at: submission.offsetMs / 1000, text: submission.text,
     likes: 0, lane: Math.floor(Math.random() * 12), mine: true,
   }])
+  if (pendingDanmakuRecovery.value) void retryDanmakuRecovery()
 }
 const rtab = ref<'eps' | 'cm'>('eps'); const desc = ref(false); const grp = ref(Math.floor((episode.value - 1) / 20)); const exp = ref(false)
 watch(episode, (index) => { grp.value = Math.floor((index - 1) / 20) })
@@ -255,7 +290,7 @@ async function toggleEpisodeLike() {
         </template>
       </section>
       <section v-if="layout === 'dmk'" ref="companion" class="rail" tabindex="-1">
-        <DanmakuSettings :key="`${dramaId}:${episode}`" :time="player.time.value" :draft="danmakuDraft" :send-danmaku="sendDm" />
+        <DanmakuSettings :key="`${dramaId}:${episode}`" :time="player.time.value" :draft="danmakuDraft" :send-danmaku="sendDm" :pending-recovery="pendingDanmakuRecovery" :recovering="recoveringDanmaku" :retry-recovery="retryDanmakuRecovery" />
       </section>
       <section v-else-if="layout === 'cmt'" ref="companion" class="drawer" tabindex="-1">
         <CommentPanel :key="`${dramaId}-${episode}`" @close="setPanel('')" />

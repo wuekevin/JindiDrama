@@ -2,6 +2,7 @@ import { localId } from '@/localId'
 import { loadRecoverableComments, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
 import type { DanmakuSubmission } from '@/player/danmakuDraft'
+import { acknowledgeDanmaku, pendingDanmaku, retainDanmaku, UndurableDanmakuError } from './danmakuRecovery'
 import type { DemoQualityId } from '@/player/demoMedia'
 import { captureLibraryIntent, parseLibraryCache, replayLibraryBatch, type LibraryBatch, type LibraryCache, type LibraryReceipt, type LibraryState } from './libraryRecovery'
 import type { Capability, CapabilityState, HistoryEntry } from '@/types'
@@ -67,6 +68,7 @@ interface GoApp {
   LocalCommentsState?(dramaId: string, episode: number): Promise<CommentState>
   CompareAndSaveLocalComments?(dramaId: string, episode: number, expected: string, snapshot: string, writeId: string): Promise<string>
   SaveLocalComments(dramaId: string, episode: number, snapshot: string): Promise<void>
+  LocalDataProfile?(): Promise<string>
   LocalDanmaku(dramaId: string, episode: number): Promise<LocalDanmaku[]>
   SendLocalDanmakuOnce?(dramaId: string, episode: number, offsetMs: number, text: string, requestId: string): Promise<LocalDanmaku>
   HomeFeed(): Promise<HomeFeed>
@@ -197,38 +199,111 @@ export function saveLocalComments(dramaId: string, episode: number, snapshot: st
 
 export const loadLocalDanmaku = (dramaId: string, episode: number) => api()?.LocalDanmaku(dramaId, episode)
 const danmakuWrites = new Set<Promise<LocalDanmaku>>()
-const danmakuCallbacks = new Map<string, Set<Promise<LocalDanmaku>>>()
-export const hasPendingDanmakuWrite = () => danmakuCallbacks.size > 0
+const activeDanmakuWrites = new Map<string, Promise<LocalDanmaku>>()
+const danmakuProfiles = new WeakMap<GoApp, Promise<string | undefined>>()
+const danmakuMemoryOnly = new Map<string, { app: GoApp; id: string; episode: number; submission: DanmakuSubmission }>()
+export const hasPendingDanmakuWrite = () => danmakuMemoryOnly.size > 0
 const danmakuReceiptTimeoutMs = 8_000
 
-export function sendLocalDanmaku(dramaId: string, episode: number, submission: DanmakuSubmission) {
-  const app = api()
-  if (!app) return
-  const { offsetMs, text, requestId } = submission
-  if (!app.SendLocalDanmakuOnce) return Promise.reject(new Error('本地弹幕发送需要新版桌面桥'))
-  const call = app.SendLocalDanmakuOnce(dramaId, episode, offsetMs, text, requestId)
-  const callbacks = danmakuCallbacks.get(requestId) ?? new Set<Promise<LocalDanmaku>>()
-  callbacks.add(call)
-  danmakuCallbacks.set(requestId, callbacks)
-  // Wails can leave the promise pending if the callback never arrives.
-  const write = new Promise<LocalDanmaku>((resolve, reject) => {
+function waitForDanmakuResult<T>(call: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
     const timer = window.setTimeout(() => reject(new Error('本地弹幕保存回执超时')), danmakuReceiptTimeoutMs)
-    void call.then((item) => {
-      // A receipt confirms all attempts for this exact request.
-      danmakuCallbacks.delete(requestId)
+    void call.then((result) => {
       window.clearTimeout(timer)
-      resolve(item)
+      resolve(result)
     }, (err) => {
-      callbacks.delete(call)
-      if (!callbacks.size && danmakuCallbacks.get(requestId) === callbacks) danmakuCallbacks.delete(requestId)
       window.clearTimeout(timer)
       reject(err)
     })
   })
+}
+
+function danmakuProfile(app: GoApp) {
+  const lookup = app.LocalDataProfile
+  if (!lookup) return Promise.resolve(undefined)
+  const cached = danmakuProfiles.get(app)
+  if (cached) return cached
+  const profile = waitForDanmakuResult(Promise.resolve().then(() => lookup.call(app)))
+    .then((value) => /^[0-9a-f]{64}$/.test(value) ? value : undefined, () => undefined)
+  danmakuProfiles.set(app, profile)
+  void profile.then((value) => {
+    if (!value && danmakuProfiles.get(app) === profile) danmakuProfiles.delete(app)
+  })
+  return profile
+}
+
+function trackDanmakuWrite(write: Promise<LocalDanmaku>) {
   danmakuWrites.add(write)
-  const settled = () => danmakuWrites.delete(write)
-  void write.then(settled, settled)
+  const settle = () => danmakuWrites.delete(write)
+  void write.then(settle, settle)
   return write
+}
+
+function writeDanmaku(app: GoApp, profile: string | undefined, id: string, episode: number, submission: DanmakuSubmission) {
+  const send = app.SendLocalDanmakuOnce
+  if (!send) return Promise.reject(new Error('本地弹幕发送需要新版桌面桥'))
+  const { offsetMs, text, requestId } = submission
+  const active = activeDanmakuWrites.get(requestId)
+  if (active) return active
+  const call = Promise.resolve().then(() => send.call(app, id, episode, offsetMs, text, requestId))
+    .then((item) => {
+      if (!item || item.offsetMs !== offsetMs || item.text !== text || !Number.isSafeInteger(item.id) || item.id < 1) {
+        throw new Error('本地弹幕保存回执无效')
+      }
+      acknowledgeDanmaku(profile, id, episode, submission)
+      danmakuMemoryOnly.delete(requestId)
+      return item
+    })
+  const write = waitForDanmakuResult(call)
+  activeDanmakuWrites.set(requestId, write)
+  const settle = () => { if (activeDanmakuWrites.get(requestId) === write) activeDanmakuWrites.delete(requestId) }
+  void write.then(settle, settle)
+  return write
+}
+
+export function sendLocalDanmaku(id: string, episode: number, submission: DanmakuSubmission) {
+  const app = api()
+  if (!app) return
+  if (!app.SendLocalDanmakuOnce) return Promise.reject(new Error('本地弹幕发送需要新版桌面桥'))
+  danmakuMemoryOnly.set(submission.requestId, { app, id, episode, submission })
+  return trackDanmakuWrite(danmakuProfile(app).then(async (profile) => {
+    const retained = retainDanmaku(profile, id, episode, submission)
+    if (retained) danmakuMemoryOnly.delete(submission.requestId)
+    try {
+      return await writeDanmaku(app, profile, id, episode, submission)
+    } catch (error) {
+      if (!retained && app.LocalDataProfile) throw new UndurableDanmakuError()
+      throw error
+    }
+  }))
+}
+
+export async function recoverLocalDanmaku(
+  id: string,
+  episode: number,
+  current: () => boolean,
+  onSaved: (item: LocalDanmaku, entry: DanmakuSubmission) => void,
+) {
+  const app = api()
+  if (!app?.SendLocalDanmakuOnce) return false
+  const profile = await danmakuProfile(app)
+  if (!current()) return false
+  const stored = profile ? pendingDanmaku(profile, id, episode) : app.LocalDataProfile ? undefined : []
+  let pending = !stored
+  const queued = new Map(stored?.map((entry) => [entry.requestId, entry]))
+  for (const [request, pending] of danmakuMemoryOnly) {
+    if (pending.app === app && pending.id === id && pending.episode === episode) queued.set(request, pending.submission)
+  }
+  for (const entry of queued.values()) {
+    if (!current()) break
+    if (retainDanmaku(profile, id, episode, entry)) danmakuMemoryOnly.delete(entry.requestId)
+    try {
+      onSaved(await trackDanmakuWrite(writeDanmaku(app, profile, id, episode, entry)), entry)
+    } catch {
+      pending = true
+    }
+  }
+  return pending
 }
 
 export const hasLicensedLibrary = () => typeof api()?.LicensedCatalog === 'function'

@@ -231,6 +231,173 @@ test.describe('06 弹幕设置', () => {
     await input.press('Enter')
     await expect(input).toHaveValue('')
   })
+  test('desktop reopens the episode and recovers a failed danmaku only for the original database', async ({ page }, testInfo) => {
+    await page.addInitScript(() => {
+      const profile = () => sessionStorage.getItem('outbox-profile') ?? 'a'.repeat(64)
+      const key = (id: string, ep: number) => `test-danmaku-${profile()}-${id}-${ep}`
+      const read = (id: string, ep: number) => JSON.parse(localStorage.getItem(key(id, ep)) ?? '[]') as Array<{
+        id: number; offsetMs: number; text: string; request: string
+      }>
+      Object.assign(window, { go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDataProfile: async () => profile(),
+        LocalDanmaku: async (id: string, ep: number) =>
+          id === 'd1' && ep === 32 && profile() === 'a'.repeat(64)
+            ? [{ id: 900, offsetMs: 192000, text: '保留已成功保存的弹幕' }, ...read(id, ep)]
+            : read(id, ep),
+        SendLocalDanmakuOnce: async (id: string, ep: number, offsetMs: number, text: string, request: string) => {
+          if (sessionStorage.getItem('outbox-locked') === 'yes') throw new Error('SQLite is locked')
+          const rows = read(id, ep)
+          const existing = rows.find((row) => row.request === request)
+          if (existing) return existing
+          const row = { id: rows.length + 1, offsetMs, text, request }
+          localStorage.setItem(key(id, ep), JSON.stringify([...rows, row]))
+          return row
+        },
+      } } } })
+    })
+    await page.reload()
+    await page.evaluate(() => sessionStorage.setItem('outbox-locked', 'yes'))
+    const input = page.getByTestId('dm-input')
+    const text = '重启时补写原弹幕'
+    await input.fill(text)
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('保存失败')
+    await page.reload()
+    await expect(page.getByRole('button', { name: '重试补写' })).toBeVisible()
+    await expect(page.getByTestId('danmaku-item').filter({ hasText: '保留已成功保存的弹幕' })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('danmaku-pending-recovery.png') })
+    await page.evaluate(() => { location.hash = '/watch/d1/31?panel=danmaku&paused' })
+    await expect(page.getByRole('button', { name: '重试补写' })).toHaveCount(0)
+    await page.evaluate(() => { location.hash = '/watch/d1/32?panel=danmaku&t=192&paused' })
+    await expect(page.getByRole('button', { name: '重试补写' })).toBeVisible()
+
+    await page.evaluate(() => {
+      sessionStorage.removeItem('outbox-locked')
+      sessionStorage.setItem('outbox-profile', 'b'.repeat(64))
+    })
+    await page.reload()
+    await expect(page.getByTestId('danmaku-settings')).toBeVisible()
+    await expect(page.getByTestId('danmaku-item').filter({ hasText: text })).toHaveCount(0)
+
+    await page.evaluate(() => sessionStorage.removeItem('outbox-profile'))
+    await page.reload()
+    const saved = () => page.evaluate(() => JSON.parse(localStorage.getItem(`test-danmaku-${'a'.repeat(64)}-d1-32`) ?? '[]'))
+    await expect.poll(saved).toHaveLength(1)
+    expect((await saved())[0]).toMatchObject({ offsetMs: 192000, text })
+    await expect(page.getByTestId('danmaku-item').filter({ hasText: text })).toHaveCount(1)
+    await page.reload()
+    await expect(page.getByTestId('danmaku-item').filter({ hasText: text })).toHaveCount(1)
+    expect(await saved()).toHaveLength(1)
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('jindi.danmaku.pending.v1.')))).toHaveLength(0)
+  })
+  test('desktop clears the pending journal after replaying a committed danmaku with a lost receipt', async ({ page }) => {
+    await page.addInitScript(() => {
+      const key = 'test-committed-danmaku'
+      const read = () => JSON.parse(localStorage.getItem(key) ?? '[]') as Array<{
+        id: number; offsetMs: number; text: string; request: string
+      }>
+      Object.assign(window, { go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDataProfile: async () => 'a'.repeat(64),
+        LocalDanmaku: async () => read(),
+        SendLocalDanmakuOnce: async (_id: string, _ep: number, offsetMs: number, text: string, request: string) => {
+          const rows = read()
+          const existing = rows.find((row) => row.request === request)
+          if (existing) {
+            if (existing.offsetMs !== offsetMs || existing.text !== text) throw new Error('Request mismatch')
+            if (sessionStorage.getItem('wrong-danmaku-receipt') === text) return { ...existing, offsetMs: offsetMs + 1 }
+            return existing
+          }
+          localStorage.setItem(key, JSON.stringify([...rows, { id: rows.length + 1, offsetMs, text, request }]))
+          throw new Error('Callback disconnected after SQLite committed')
+        },
+      } } } })
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    const text = '正常化后回执丢失的本地弹幕'
+    await input.fill(`\u0085${text}\u0085`)
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('保存失败')
+    await input.fill('另一条仍能独立补写')
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('保存失败')
+    const pending = () => page.evaluate(() => Object.keys(localStorage).filter((key) => key.startsWith('jindi.danmaku.pending.v1.')))
+    expect(await pending()).toHaveLength(2)
+    await page.evaluate((original) => sessionStorage.setItem('wrong-danmaku-receipt', original), text)
+    await page.reload()
+    const retry = page.getByRole('button', { name: '重试补写' })
+    await expect(retry).toBeVisible()
+    await expect.poll(pending).toHaveLength(1)
+    await page.evaluate(() => sessionStorage.removeItem('wrong-danmaku-receipt'))
+    await retry.click()
+    await expect.poll(pending).toHaveLength(0)
+    await expect(page.getByTestId('danmaku-item').filter({ hasText: text })).toHaveCount(1)
+    const rows = await page.evaluate(() => JSON.parse(localStorage.getItem('test-committed-danmaku') ?? '[]'))
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text).toBe(text)
+  })
+
+  test('desktop warns about a danmaku held only in memory when both stores fail', async ({ page }) => {
+    await page.addInitScript(() => {
+      const setItem = Storage.prototype.setItem
+      Storage.prototype.setItem = function (key, value) {
+        if (key.startsWith('jindi.danmaku.pending.v1.')) throw new Error('WebView quota denied')
+        setItem.call(this, key, value)
+      }
+      Object.assign(window, { go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDataProfile: async () => 'a'.repeat(64),
+        LocalDanmaku: async () => [],
+        SendLocalDanmakuOnce: async (_id: string, _ep: number, offsetMs: number, text: string) => {
+          if (sessionStorage.getItem('allow-memory-danmaku') !== 'yes') throw new Error('SQLite write failed')
+          const writes = JSON.parse(sessionStorage.getItem('memory-danmaku-confirmed') ?? '[]') as string[]
+          sessionStorage.setItem('memory-danmaku-confirmed', JSON.stringify([...writes, text]))
+          return { id: writes.length + 1, offsetMs, text }
+        },
+      } } } })
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    await input.fill('只保存在当前窗口')
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('退出后可能丢失这一条')
+    await expect(input).toHaveValue('只保存在当前窗口')
+    await input.fill('第二条仍可补写')
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('退出后可能丢失这一条')
+    await page.evaluate(() => sessionStorage.setItem('allow-memory-danmaku', 'yes'))
+    await page.getByRole('button', { name: '重试补写' }).click()
+    await expect.poll(() => page.evaluate(() => sessionStorage.getItem('memory-danmaku-confirmed')))
+      .toBe(JSON.stringify(['只保存在当前窗口', '第二条仍可补写']))
+    await expect(input).toHaveValue('')
+  })
+  test('desktop retries a memory-only danmaku when the profile lookup stays unavailable', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.assign(window, { go: { app: { App: {
+        StorageReady: async () => false,
+        LocalComments: async () => '',
+        LocalDataProfile: async () => { throw new Error('Database profile is unavailable') },
+        LocalDanmaku: async () => [],
+        SendLocalDanmakuOnce: async (_id: string, _ep: number, offsetMs: number, text: string) => {
+          if (sessionStorage.getItem('permit-volatile-retry') !== 'yes') throw new Error('SQLite write failed')
+          return { id: 1, offsetMs, text }
+        },
+      } } } })
+    })
+    await page.reload()
+    const input = page.getByTestId('dm-input')
+    await input.fill('配置暂不可用也可补写')
+    await input.press('Enter')
+    await expect(page.getByTestId('toast').last()).toContainText('退出后可能丢失这一条')
+    await page.evaluate(() => sessionStorage.setItem('permit-volatile-retry', 'yes'))
+    await page.getByRole('button', { name: '重试补写' }).click()
+    await expect(input).toHaveValue('')
+  })
   test('settings persist after reload', async ({ page }) => { await page.getByTestId('dm-size').fill('20'); await page.reload(); await expect(page.getByTestId('dm-size')).toHaveValue('20') })
   test('back returns to player', async ({ page }) => { await page.getByTestId('danmaku-back').click(); await expect(page.getByTestId('page-watch')).toBeVisible() })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=danmaku-settings]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/06-${w}x${h}.png` }) })

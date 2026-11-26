@@ -52,6 +52,9 @@ UPDATE local_comments SET write_id=lower(hex(randomblob(16)));`, `ALTER TABLE lo
 	{9, `ALTER TABLE local_danmaku ADD COLUMN request_id TEXT;
 CREATE UNIQUE INDEX idx_local_danmaku_request ON local_danmaku(request_id) WHERE request_id IS NOT NULL;`,
 		`DROP INDEX idx_local_danmaku_request; ALTER TABLE local_danmaku DROP COLUMN request_id;`},
+	{10, `INSERT INTO settings(key, value_json, updated_at) VALUES ('` + danmakuDatabaseIDKey + `', json_quote(lower(hex(randomblob(16)))), 0)
+ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, updated_at=excluded.updated_at;`,
+		`DELETE FROM settings WHERE key='` + danmakuDatabaseIDKey + `';`},
 }
 
 const (

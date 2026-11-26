@@ -363,3 +363,11 @@
 - macOS 正式预检仅接收本平台签名和公证所需的 6 个变量。Windows 正式预检仅接收 2 个 PFX 变量。预检缺失时只报告变量名称，每份工作流只读 checkout 都关闭本地凭据持久化。[GitHub Actions 安全说明](https://docs.github.com/en/actions/reference/security/secure-use)
 - 两份工作流 actionlint、14 个合成凭据预检、macOS 单测 10 项、Windows 签名夹具、发行历史及 Node 打包校验和组装 12 项通过。GitHub 的 Intel 运行器标签已对照官方文档。同一 .32 源码另以 Windows 和 macOS 生产标签执行 Go 漏洞扫描，未发现可达已知漏洞。npm 生产依赖审计为 0 项。
 - 仓库级 Actions secrets 数量为 0，本机未找到 Developer ID Application 签名身份。目前持有的 Windows、macOS 安装包用于 smoke。正式签名、公证和红果上游联调待验收。
+
+
+## E06 本地弹幕重启补写（2026-11-26）
+
+- 用户提交尚未确认的本地弹幕会暂存原分集、位置、正文和请求标识。重启打开原分集时自动补写，同一请求只生成一条。回执不符时保留记录并允许手动重试。已保存的弹幕可独立读取，单笔失败不会阻止其他已提交请求。
+- SQLite v10 为数据库增加内部标识。WebView 暂存同时按该标识、已打开的数据库路径和分集隔离。Go 测试覆盖同一路径换库，原库移走后恢复原路径仍能读取自己的暂存。两层写入同时失败时完整请求留在当前会话，界面提示退出可能丢失。[弹幕补写截图](../design/rendered/06-弹幕重启待补写.png)
+- Apple Silicon 原生使用已迁移至 v10 的独立 SQLite。写锁下发送弹幕后应用正常退出，确认数据库尚无对应条目。解锁重启打开该分集后只写入一条，并保持旧弹幕和 SQLite 完整性。v10 → v9 回滚副本逐字段保留已落库弹幕及回执。
+- Node 22 生产构建、117 项 Vitest、301 项 Playwright、Go 全量、vet、App 与 SQLite 竞态、Go 漏洞扫描及 Windows amd64 交叉编译通过。包含修复的 Windows 与 Intel Mac 托管运行仍待验收。
