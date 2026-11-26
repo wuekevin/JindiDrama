@@ -186,6 +186,9 @@ interface LibrarySnapshot {
 
 let persistedLibrary: LibrarySnapshot | undefined
 let libraryWrites = Promise.resolve()
+let playerSettingWrites = Promise.resolve()
+let playerSettingRevision = 0
+const PENDING_PLAYER_SETTING = 'jindi.player.pending.v1'
 
 function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
   const queued = libraryWrites.then(task)
@@ -193,7 +196,7 @@ function queueLibraryTask<T>(task: () => Promise<T>): Promise<T> {
   return queued
 }
 function queuedWindowWrites() {
-  return [windowCloseSettingWrite, libraryWrites, localCommentWrites, ...episodeLikeWrites.values()]
+  return [windowCloseSettingWrite, libraryWrites, localCommentWrites, playerSettingWrites, ...episodeLikeWrites.values()]
 }
 
 export async function waitForWindowWrites() {
@@ -407,7 +410,18 @@ async function primeDesktopStorage(a: GoApp) {
     warn(e)
   }
   try {
-    for (const [ls, key] of Object.entries(SETTING_KEY)) { const v = await a.GetSetting(key); if (v) localStorage.setItem(ls, v) }
+    for (const [ls, key] of Object.entries(SETTING_KEY)) {
+      if (ls === LS.player && localStorage.getItem(PENDING_PLAYER_SETTING) === '1') {
+        const pending = readPendingPlayerSetting()
+        if (pending) {
+          queuePlayerSetting(a, key, pending)
+          continue
+        }
+        localStorage.removeItem(PENDING_PLAYER_SETTING)
+      }
+      const value = await a.GetSetting(key)
+      if (value) localStorage.setItem(ls, value)
+    }
   } catch (e) {
     warn(e)
   }
@@ -578,9 +592,39 @@ function queueLibraryWrite(
   })
 }
 export function saveSearch(q: string[]) { try { localStorage.setItem(LS.search, JSON.stringify(q)) } catch { /* ignore */ } api()?.SaveSearchHistory(q).catch(warn) }
+function readPendingPlayerSetting(): string | undefined {
+  const pending = localStorage.getItem(LS.player)
+  if (!pending) return
+  try {
+    const value = JSON.parse(pending)
+    if (value && typeof value === 'object' && !Array.isArray(value)) return pending
+  } catch { /* Fall back to the desktop setting when cached data is invalid. */ }
+}
+
+function queuePlayerSetting(app: NonNullable<ReturnType<typeof api>>, key: string, serialized: string) {
+  const revision = ++playerSettingRevision
+  playerSettingWrites = playerSettingWrites.then(async () => {
+    if (revision !== playerSettingRevision) return
+    await app.SaveSetting(key, serialized)
+    try {
+      if (revision === playerSettingRevision && localStorage.getItem(LS.player) === serialized) {
+        localStorage.removeItem(PENDING_PLAYER_SETTING)
+      }
+    } catch { /* The desktop database already has this setting. */ }
+  }).catch(warn)
+}
+
 export function saveSetting(lsKey: string, value: unknown) {
-  const s = JSON.stringify(value); try { localStorage.setItem(lsKey, s) } catch { /* ignore */ }
-  const k = SETTING_KEY[lsKey]; if (k) api()?.SaveSetting(k, s).catch(warn)
+  const serialized = JSON.stringify(value)
+  const key = SETTING_KEY[lsKey]
+  const app = api()
+  try {
+    localStorage.setItem(lsKey, serialized)
+    if (app && lsKey === LS.player) localStorage.setItem(PENDING_PLAYER_SETTING, '1')
+  } catch { /* ignore */ }
+  if (!key || !app) return
+  if (lsKey === LS.player) queuePlayerSetting(app, key, serialized)
+  else app.SaveSetting(key, serialized).catch(warn)
 }
 export interface CacheStats { bytes: number; files: number; max: number; path: string; custom?: boolean; fallback?: boolean }
 export const cacheStats = () => api()?.CacheStats() ?? Promise.resolve(null)

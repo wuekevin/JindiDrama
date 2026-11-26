@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, LS, cacheStats, cacheSetLimit, logEvent } from './index'
+import { hasBridge, prime, readLibraryCache, restoreLibraryBackup, retryLibrarySave, saveLibrary, backupNow, LibraryBackupPendingError, saveSetting, waitForWindowWrites, LS, cacheStats, cacheSetLimit, logEvent } from './index'
 const calls: string[] = []
 const receipt = { writer: expect.stringMatching(/^[a-f0-9]{32}$/), revision: expect.any(Number) }
 const fake = { StorageReady: async () => true, Favorites: async () => ['d9'], History: async () => [{ dramaId: 'd9', episode: 7, positionMs: 12000, durationMs: 24000, percent: 50, watchedAt: 5 }], SearchHistory: async () => ['替嫁'],
@@ -611,4 +611,66 @@ describe('wails bridge', () => {
     expect(SaveLibraryChanges.mock.calls[1][0].removed).toEqual([])
   })
 
+})
+
+
+it('serializes rapid player settings writes and waits for the last write before closing', async () => {
+  let finishFirst!: () => void
+  let finishSecond!: () => void
+  const first = new Promise<void>((resolve) => { finishFirst = resolve })
+  const second = new Promise<void>((resolve) => { finishSecond = resolve })
+  const save = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second)
+  vi.stubGlobal('go', { app: { App: { SaveSetting: save } } })
+  try {
+    saveSetting(LS.player, { volume: 38 })
+    await vi.waitFor(() => expect(save.mock.calls).toEqual([['player', '{"volume":38}']]))
+    saveSetting(LS.player, { volume: 22 })
+    saveSetting(LS.player, { volume: 31 })
+    let drained = false
+    const closing = waitForWindowWrites().then(() => { drained = true })
+    expect(save.mock.calls).toEqual([['player', '{"volume":38}']])
+    expect(drained).toBe(false)
+    expect(localStorage.getItem(LS.player)).toBe('{"volume":31}')
+    finishFirst()
+    await vi.waitFor(() => expect(save.mock.calls).toEqual([['player', '{"volume":38}'], ['player', '{"volume":31}']]))
+    expect(drained).toBe(false)
+    finishSecond()
+    await closing
+    expect(drained).toBe(true)
+  } finally {
+    finishFirst()
+    finishSecond()
+    await waitForWindowWrites()
+    vi.unstubAllGlobals()
+  }
+})
+
+
+it('replays the latest cached player setting when the desktop write fails before restart', async () => {
+  let stored = '{"volume":18}'
+  const save = vi.fn()
+    .mockRejectedValueOnce(new Error('database busy'))
+    .mockImplementation(async (_key: string, value: string) => { stored = value })
+  vi.stubGlobal('go', { app: { App: {
+    ...fake,
+    GetSetting: async (key: string) => key === 'player' ? stored : '',
+    SaveSetting: save,
+  } } })
+  try {
+    saveSetting(LS.player, { volume: 27 })
+    await waitForWindowWrites()
+    expect(stored).toBe('{"volume":18}')
+    await prime()
+    expect(localStorage.getItem(LS.player)).toBe('{"volume":27}')
+    await waitForWindowWrites()
+    expect(stored).toBe('{"volume":27}')
+    await prime()
+    await waitForWindowWrites()
+    expect(save.mock.calls).toEqual([['player', '{"volume":27}'], ['player', '{"volume":27}']])
+  } finally {
+    await waitForWindowWrites()
+    localStorage.removeItem('jindi.player.pending.v1')
+    localStorage.removeItem(LS.player)
+    vi.unstubAllGlobals()
+  }
 })

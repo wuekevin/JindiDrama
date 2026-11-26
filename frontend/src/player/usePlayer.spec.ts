@@ -89,3 +89,22 @@ it('selects the quality from the desktop ticket and ignores a superseded quality
     vi.useRealTimers()
   }
 })
+
+it.each([
+  [null, 70],
+  ['broken', 70],
+  [-20, 0],
+  [140, 100],
+  [0, 0],
+  [42, 42],
+])('normalizes the stored player volume %j to %d', (stored, expected) => {
+  const key = 'jindi.player.v1'
+  const previous = localStorage.getItem(key)
+  try {
+    localStorage.setItem(key, JSON.stringify({ volume: stored }))
+    expect(useSettingsStore(createPinia()).volume).toBe(expected)
+  } finally {
+    if (previous === null) localStorage.removeItem(key)
+    else localStorage.setItem(key, previous)
+  }
+})

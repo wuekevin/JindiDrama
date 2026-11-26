@@ -5,7 +5,7 @@ import { BookOpen, Download, Film, Heart, PictureInPicture2, Search } from 'luci
 import { usePictureInPicture } from '@/player/pictureInPicture'
 import { exportLicensedEpisode, hasLicensedExport, loadProviderEpisodes, resolvePlayback } from '@/bindings'
 import { BEFORE_WINDOW_CLOSE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
-import { isPlaybackSpeed, playbackEndAction } from '@/player/preferences'
+import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { useAppSettings } from '@/stores/appSettings'
 import { useSettingsStore } from '@/stores/player'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
@@ -55,7 +55,7 @@ const results = computed(() => {
 const video = ref<HTMLVideoElement | null>(null)
 const { active: pipActive, busy: pipBusy, toggle: togglePip } = usePictureInPicture(video)
 type EpisodeRef = { id: string; index: number }
-type AutoNext = EpisodeRef & { previous: number; muted: boolean; volume: number }
+type AutoNext = EpisodeRef & { previous: number; muted: boolean }
 type ActivePlayback = EpisodeRef & {
   episodeCountAtWatch: number
   checkpoint?: HistoryEntry
@@ -187,7 +187,6 @@ function onPlayable(event: Event) {
   if (automatic) {
     playback.autoStart = undefined
     video.value.muted = automatic.muted
-    video.value.volume = automatic.volume
     startMedia('已切换到下一集，请点击播放。')
   } else if (playback.startOnOpen) {
     playback.startOnOpen = false
@@ -209,6 +208,17 @@ watch([video, () => settings.speed], ([media, speed]) => {
   media.defaultPlaybackRate = speed
   media.playbackRate = speed
 }, { flush: 'post' })
+
+watch([video, () => settings.volume], ([media, volume]) => {
+  if (media && media.volume !== volume / 100) media.volume = volume / 100
+}, { flush: 'post' })
+
+function onVolumeChange(event: Event) {
+  const media = video.value
+  if (!media || !currentMedia(event)) return
+  const volume = normalizePlaybackVolume(media.volume * 100)
+  if (volume !== settings.volume) settings.volume = volume
+}
 
 function onRateChange(event: Event) {
   const media = video.value
@@ -289,7 +299,7 @@ function onEnded(event: Event) {
 
 function advanceEpisode(current: ActivePlayback, media: HTMLVideoElement) {
   const next = current.index + 1
-  const automatic = { id: current.id, index: next, previous: current.index, muted: media.muted, volume: media.volume }
+  const automatic = { id: current.id, index: next, previous: current.index, muted: media.muted }
   nextToStart = automatic
   void router.replace(playbackRoute(current.id, next)).then(() => {
     if (nextToStart === automatic) nextToStart = undefined
@@ -461,7 +471,7 @@ watch([selected, () => route.query.ep, () => route.query.autoplay, playbackAttem
         <video
           v-if="sources.length" ref="video" :key="sources[0].src + ':' + playbackAttempt" controls controlslist="nodownload" playsinline preload="auto"
           @loadedmetadata="restoreProgress" @canplay="onPlayable" @playing="onPlaying"
-          @timeupdate="onTimeUpdate" @seeked="onSeeked" @pause="onPause" @ended="onEnded" @ratechange="onRateChange"
+          @timeupdate="onTimeUpdate" @seeked="onSeeked" @pause="onPause" @ended="onEnded" @ratechange="onRateChange" @volumechange="onVolumeChange"
           :aria-label="`第 ${episode} 集播放器`" @error="onMediaFailure"
         >
           <source v-for="(source, i) in sources" :key="source.src" :src="source.src" :type="source.type"
