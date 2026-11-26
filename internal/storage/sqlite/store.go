@@ -127,6 +127,14 @@ func openDatabase(path, mode string) (*sql.DB, error) {
 			absolute = resolved
 		} else if mode != "rwc" || !errors.Is(err, os.ErrNotExist) {
 			return nil, err
+		} else {
+			// A new file has no canonical spelling yet. Resolve its existing
+			// directory so the opened path matches the path on later opens.
+			parent, err := filepath.EvalSymlinks(filepath.Dir(absolute))
+			if err != nil {
+				return nil, err
+			}
+			absolute = filepath.Join(parent, filepath.Base(absolute))
 		}
 		uri := url.URL{Scheme: "file", RawQuery: "mode=" + mode}
 		if mode != "ro" {

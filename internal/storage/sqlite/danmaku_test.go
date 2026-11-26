@@ -3,6 +3,7 @@ package sqlite
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 )
@@ -70,8 +71,22 @@ func TestDanmakuReceiptSurvivesConcurrentRetryAndPreservesLegacyRows(t *testing.
 
 func TestDanmakuProfileDistinguishesReplacementAtSamePath(t *testing.T) {
 	folder := t.TempDir()
-	path := filepath.Join(folder, "app.db")
-	openProfile := func(database string) string {
+	dir := filepath.Join(folder, "Profile")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		// Exercise the Windows spelling difference between a new file in an
+		// existing directory and the same file once EvalSymlinks can resolve it.
+		alias := filepath.Join(folder, "profile")
+		if _, err := os.Stat(alias); err == nil {
+			dir = alias
+		} else if !os.IsNotExist(err) {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(dir, "app.db")
+	openProfile := func(database string) (string, string) {
 		t.Helper()
 		db, err := Open(database)
 		if err != nil {
@@ -84,20 +99,20 @@ func TestDanmakuProfileDistinguishesReplacementAtSamePath(t *testing.T) {
 		if profileErr != nil || len(profile) != 64 {
 			t.Fatalf("profile unavailable: %v", profileErr)
 		}
-		return profile
+		return profile, db.canonicalPath
 	}
-	original := openProfile(path)
-	if got := openProfile(path); got != original {
-		t.Fatal("profile changed on reopen")
+	original, originalPath := openProfile(path)
+	if got, openedPath := openProfile(path); got != original {
+		t.Fatalf("profile changed on reopen (opened path %q, then %q)", originalPath, openedPath)
 	}
 	saved := filepath.Join(folder, "original.db")
 	if err := os.Rename(path, saved); err != nil {
 		t.Fatal(err)
 	}
-	if moved := openProfile(saved); moved == original {
+	if moved, _ := openProfile(saved); moved == original {
 		t.Fatal("the same database at a different path shared the profile")
 	}
-	if replacement := openProfile(path); replacement == original {
+	if replacement, _ := openProfile(path); replacement == original {
 		t.Fatal("an unrelated database at the same path shared the profile")
 	}
 	if err := os.Remove(path); err != nil {
@@ -106,7 +121,7 @@ func TestDanmakuProfileDistinguishesReplacementAtSamePath(t *testing.T) {
 	if err := os.Rename(saved, path); err != nil {
 		t.Fatal(err)
 	}
-	if restored := openProfile(path); restored != original {
+	if restored, _ := openProfile(path); restored != original {
 		t.Fatal("restoring the original database at the original path changed the profile")
 	}
 }
