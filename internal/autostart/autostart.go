@@ -10,9 +10,10 @@ import (
 )
 
 type Manager struct {
-	GOOS    string
-	Exe     string // 可执行文件绝对路径
-	HomeDir string
+	GOOS                string
+	Exe                 string // 可执行文件绝对路径
+	HomeDir             string
+	launchAgentDisabled func() (bool, error)
 }
 
 // New 使用当前进程的可执行文件与用户目录。

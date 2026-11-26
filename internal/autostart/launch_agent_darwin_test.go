@@ -13,9 +13,95 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func testLaunchAgentManager(home, exe string) *Manager {
+	return &Manager{
+		GOOS: "darwin", Exe: exe, HomeDir: home,
+		launchAgentDisabled: func() (bool, error) { return false, nil },
+	}
+}
+
+func TestParseLaunchAgentDisabled(t *testing.T) {
+	for _, tc := range []struct {
+		name, body        string
+		disabled, invalid bool
+	}{
+		{name: "not listed", body: `"com.example.other" => disabled`},
+		{name: "similar label only", body: `"com.jindidrama.app.beta" => disabled`},
+		{name: "system disabled", body: `"com.jindidrama.app" => disabled`, disabled: true},
+		{name: "system enabled", body: `"com.jindidrama.app" => enabled`},
+		{name: "legacy disabled", body: `"com.jindidrama.app" => true`, disabled: true},
+		{name: "legacy enabled", body: `"com.jindidrama.app" => false`},
+		{name: "unknown state", body: `"com.jindidrama.app" => unspecified`, invalid: true},
+		{name: "unknown format", body: `"com.jindidrama.app" = disabled`, invalid: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			disabled, err := parseLaunchAgentDisabled("\n\tdisabled services = {\n\t\t" + tc.body + "\n\t}\n")
+			if disabled != tc.disabled || (err != nil) != tc.invalid {
+				t.Fatalf("disabled=%v err=%v", disabled, err)
+			}
+		})
+	}
+	if _, err := parseLaunchAgentDisabled("unexpected launchctl response"); !errors.Is(err, errReadLaunchAgent) {
+		t.Fatalf("unknown launchctl result: %v", err)
+	}
+}
+
+func TestDarwinLaunchAgentHonorsSystemDisable(t *testing.T) {
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
+	dir := launchAgentsDirectory(m.HomeDir)
+	path := filepath.Join(dir, plistName)
+	checks := 0
+	disabled := true
+	var checkErr error
+	m.launchAgentDisabled = func() (bool, error) {
+		checks++
+		return disabled, checkErr
+	}
+	if on, err := m.Enabled(); on || err != nil || checks != 0 {
+		t.Fatalf("registration absent: enabled=%v checks=%d err=%v", on, checks, err)
+	}
+	if err := m.Set(true); !errors.Is(err, errLaunchAgentBlocked) {
+		t.Fatalf("disabled registration accepted: %v", err)
+	}
+	if _, err := os.Stat(dir); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("directory created when disabled: %v", err)
+	}
+	disabled = false
+	if err := m.Set(true); err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	disabled = true
+	if on, err := m.Enabled(); on || err != nil {
+		t.Fatalf("system disabled registration: enabled=%v err=%v", on, err)
+	}
+	if err := m.Set(true); !errors.Is(err, errLaunchAgentBlocked) {
+		t.Fatalf("disabled registration overridden: %v", err)
+	}
+	checkErr = errReadLaunchAgent
+	if on, err := m.Enabled(); on || !errors.Is(err, errReadLaunchAgent) {
+		t.Fatalf("unreadable system policy: enabled=%v err=%v", on, err)
+	}
+	if err := m.Set(true); !errors.Is(err, errReadLaunchAgent) {
+		t.Fatalf("registration changed without system confirmation: %v", err)
+	}
+	if got, err := os.ReadFile(path); err != nil || !bytes.Equal(original, got) {
+		t.Fatalf("existing registry file changed: %v", err)
+	}
+	if err := m.Set(false); err != nil {
+		t.Fatalf("cannot remove registration during a system query failure: %v", err)
+	}
+	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("registration was not removed: %v", err)
+	}
+}
+
 func TestDarwinLaunchAgent(t *testing.T) {
 	home := t.TempDir()
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/Jindi & Drama.app/Contents/MacOS/JindiDrama", HomeDir: home}
+	m := testLaunchAgentManager(home, "/Applications/Jindi & Drama.app/Contents/MacOS/JindiDrama")
 	if on, _ := m.Enabled(); on {
 		t.Fatal("初始应为关闭")
 	}
@@ -42,7 +128,7 @@ func TestDarwinLaunchAgent(t *testing.T) {
 
 func TestDarwinLaunchAgentRepairsMovedOrInvalidRegistration(t *testing.T) {
 	const exe = "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama"
-	m := &Manager{GOOS: "darwin", Exe: exe, HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), exe)
 	dir := launchAgentsDirectory(m.HomeDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -88,7 +174,7 @@ func TestDarwinLaunchAgentPreservesValidRegistration(t *testing.T) {
 			"<key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>", 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m := &Manager{GOOS: "darwin", Exe: exe, HomeDir: t.TempDir()}
+			m := testLaunchAgentManager(t.TempDir(), exe)
 			dir := launchAgentsDirectory(m.HomeDir)
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				t.Fatal(err)
@@ -122,7 +208,7 @@ func TestDarwinLaunchAgentPreservesValidRegistration(t *testing.T) {
 }
 
 func TestDarwinLaunchAgentRepairsUnsafePermissions(t *testing.T) {
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama", HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
 	if err := m.Set(true); err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +232,7 @@ func TestDarwinLaunchAgentRepairsUnsafePermissions(t *testing.T) {
 }
 
 func TestDarwinLaunchAgentDoesNotFollowFinalLink(t *testing.T) {
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama", HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
 	dir := launchAgentsDirectory(m.HomeDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -175,7 +261,7 @@ func TestDarwinLaunchAgentDoesNotFollowFinalLink(t *testing.T) {
 }
 
 func TestDarwinLaunchAgentRejectsNonregularEntries(t *testing.T) {
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama", HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
 	dir := launchAgentsDirectory(m.HomeDir)
 	path := filepath.Join(dir, plistName)
 	if err := os.MkdirAll(path, 0o700); err != nil {
@@ -216,7 +302,7 @@ func TestDarwinLaunchAgentRejectsNonregularEntries(t *testing.T) {
 }
 
 func TestDarwinLaunchAgentReportsUnreadableRegistration(t *testing.T) {
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama", HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
 	if err := m.Set(true); err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +328,7 @@ func TestDarwinLaunchAgentReportsUnreadableRegistration(t *testing.T) {
 }
 
 func TestDarwinLaunchAgentDoesNotOverwriteOversizedRegistration(t *testing.T) {
-	m := &Manager{GOOS: "darwin", Exe: "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama", HomeDir: t.TempDir()}
+	m := testLaunchAgentManager(t.TempDir(), "/Applications/JindiDrama.app/Contents/MacOS/JindiDrama")
 	if err := m.Set(true); err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +355,7 @@ func TestDarwinLaunchAgentPreservesAlternatePathToSameExecutable(t *testing.T) {
 	if err := os.Link(exe, alias); err != nil {
 		t.Fatal(err)
 	}
-	m := &Manager{GOOS: "darwin", Exe: exe, HomeDir: root}
+	m := testLaunchAgentManager(root, exe)
 	dir := launchAgentsDirectory(root)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)

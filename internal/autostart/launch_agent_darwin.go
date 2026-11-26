@@ -11,6 +11,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -21,7 +23,10 @@ const plistName = launchAgentLabel + ".plist"
 const maxLaunchAgentBytes = 64 << 10
 const maxLaunchAgentXMLBytes = 1 << 20
 
-var errReadLaunchAgent = errors.New("无法读取 macOS 开机启动设置")
+var (
+	errReadLaunchAgent    = errors.New("无法读取 macOS 开机启动设置")
+	errLaunchAgentBlocked = errors.New("macOS 已禁用此启动项，请在系统设置的登录项中检查后台运行权限")
+)
 
 func launchAgentsDirectory(home string) string {
 	return filepath.Join(home, "Library", "LaunchAgents")
@@ -53,7 +58,56 @@ func darwinAutostartEnabled(m *Manager) (bool, error) {
 		return false, errReadLaunchAgent
 	}
 	defer unix.Close(dir)
-	return readLaunchAgent(dir, m.Exe)
+	registered, err := readLaunchAgent(dir, m.Exe)
+	if err != nil || !registered {
+		return false, err
+	}
+	disabled, err := m.macOSLaunchAgentDisabled()
+	return err == nil && !disabled, err
+}
+
+func (m *Manager) macOSLaunchAgentDisabled() (bool, error) {
+	if m.launchAgentDisabled != nil {
+		return m.launchAgentDisabled()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "/bin/launchctl", "print-disabled", "gui/"+strconv.Itoa(os.Geteuid()))
+	cmd.Env = append(os.Environ(), "LC_ALL=C")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, errReadLaunchAgent
+	}
+	return parseLaunchAgentDisabled(string(output))
+}
+
+func parseLaunchAgentDisabled(output string) (bool, error) {
+	const header = "disabled services = {"
+	output = strings.TrimSpace(output)
+	if !strings.HasPrefix(output, header) || !strings.HasSuffix(output, "}") {
+		return false, errReadLaunchAgent
+	}
+	for line := range strings.Lines(output[len(header) : len(output)-1]) {
+		label, status, ok := strings.Cut(strings.TrimSpace(line), "=>")
+		if !ok {
+			if label == "" {
+				continue
+			}
+			return false, errReadLaunchAgent
+		}
+		if strings.TrimSpace(label) != strconv.Quote(launchAgentLabel) {
+			continue
+		}
+		switch strings.TrimSpace(status) {
+		case "disabled", "true":
+			return true, nil
+		case "enabled", "false":
+			return false, nil
+		default:
+			return false, errReadLaunchAgent
+		}
+	}
+	return false, nil
 }
 
 func readLaunchAgent(dir int, exe string) (bool, error) {
@@ -197,6 +251,13 @@ func launchAgentExecutable(data []byte) string {
 func setDarwinAutostart(m *Manager, on bool) error {
 	directory := launchAgentsDirectory(m.HomeDir)
 	if on {
+		disabled, err := m.macOSLaunchAgentDisabled()
+		if err != nil {
+			return err
+		}
+		if disabled {
+			return errLaunchAgentBlocked
+		}
 		if err := os.MkdirAll(directory, 0o755); err != nil {
 			return errors.New("无法创建 macOS 开机启动目录")
 		}

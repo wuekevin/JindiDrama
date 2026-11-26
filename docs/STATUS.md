@@ -651,3 +651,8 @@
 - 设置页在更新包校验并保存后滚动到本机保存路径，支持复制完整路径，安装仍由用户手动进行。路径仅保存于当前会话。取消和失败时不产生新回执，重新检查或切换渠道时清除旧路径。旧桌面布尔型桥接仍受支持。
 - 使用 Chromium 桌面桥夹具核对取消、重新保存、中文和空格路径、键盘复制、重新检查与切换渠道。对照设置设计稿复验默认窗口及 1280×860、220% 缩放下的长路径换行和操作。[默认截图](../build/bin/qa-update-save-location/update-saved-default.png) · [220% 截图](../build/bin/qa-update-save-location/update-saved-220.png)
 - 前端类型检查、生产构建、122 项 Vitest、44 项设置 Playwright 和回执关键用例复跑通过。Go App/更新模块测试及 vet、Windows x64 生产交叉编译通过。真实签名 Release 下载与原生剪贴板联调仍待验收。[BMad 记录](../_bmad-output/plan-e13-update-save-location.md)
+
+## E11 macOS 开机启动识别系统禁用状态（2026-11-27）
+
+- 设置页读取已验证的 LaunchAgent 后再查询当前 GUI 会话的 launchd 状态。系统显式禁用金帝启动项时显示关闭，尝试开启会提示检查系统登录项。查询失败使用现有错误状态。应用保留系统禁用设置及原登记。[Apple launchd 说明](https://support.apple.com/guide/terminal/script-management-with-launchd-apdc6c1077b-5d5d-4d35-9c19-60f2397b2369/mac)
+- Apple Silicon 只读核对本机 `launchctl` 实际响应。夹具覆盖显式禁用、查询失败、无登记和已有登记保留。Go vet、全量 Go、开机启动竞态和 Windows amd64 开机启动测试程序交叉编译通过。系统设置实际审批和注销重登仍待验收。[BMad 记录](../_bmad-output/plan-e11-macos-autostart-system-policy.md)
