@@ -33,6 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: ${{ inputs.mode == 'release' && '0' || '1' }}
       - name: verify distribution source history
         if: inputs.mode == 'release'
@@ -52,8 +53,8 @@ jobs:
           if [[ "$PACKAGE_MODE" != smoke && "$PACKAGE_MODE" != release ]]; then exit 1; fi
           core=$(go run ./cmd/validate-package-version -wails-config wails.json "$PACKAGE_VERSION")
           echo "PACKAGE_CORE_VERSION=$core" >> "$GITHUB_ENV"
-      - name: validate release credentials
-        if: inputs.mode == 'release'
+      - name: validate macOS release credentials
+        if: runner.os == 'macOS' && inputs.mode == 'release'
         shell: bash
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
@@ -62,16 +63,24 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          missing=()
+          for key in MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD; do
+            if [[ -z "${!key}" ]]; then missing+=("$key"); fi
+          done
+          if (( ${#missing[@]} )); then
+            echo "Missing release credentials: ${missing[*]}"
+            exit 1
+          fi
+      - name: validate Windows release credentials
+        if: runner.os == 'Windows' && inputs.mode == 'release'
+        shell: bash
+        env:
           WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
           WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
-          if [[ "$RUNNER_OS" == macOS ]]; then
-            required=(MACOS_CERT_P12 MACOS_CERT_PASSWORD MACOS_SIGN_IDENTITY APPLE_ID APPLE_TEAM_ID APPLE_APP_PASSWORD)
-          else
-            required=(WINDOWS_CERT_PFX WINDOWS_CERT_PASSWORD)
-          fi
           missing=()
-          for key in "${required[@]}"; do
+          for key in WINDOWS_CERT_PFX WINDOWS_CERT_PASSWORD; do
             if [[ -z "${!key}" ]]; then missing+=("$key"); fi
           done
           if (( ${#missing[@]} )); then
@@ -410,6 +419,8 @@ jobs:
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -429,6 +440,8 @@ jobs:
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -463,6 +476,8 @@ jobs:
       PACKAGE_VERSION: ${{ inputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22

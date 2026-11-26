@@ -356,3 +356,10 @@
 - 失败输入在当前应用会话内按分集保留，关闭设置面板或切集后仍可回到原分集重试。输入法候选确认不发出弹幕。关窗等待正在发送的操作，达到期限时仍可提示用户继续编辑。WebView 无响应时沿用 2.25 秒关窗兜底。
 - Apple Silicon 原生用 v8 SQLite 迁移到 v9，验证旧弹幕保留、新弹幕真实写入。向数据库注入写锁，发送后关窗，在原生确认中选择继续编辑，解锁后写入只生成一行，正常退出且 SQLite 完整性为 `ok`。[关窗确认截图](../design/rendered/06-弹幕保存退出确认.png)
 - Node 22 生产构建、117 项 Vitest、297 项 Playwright、Go 全量、vet、App 与 SQLite 竞态、Go 漏洞扫描及 Windows amd64 交叉编译通过。.31 GitHub 包的验收见上方记录，当前变更已纳入独立发行源码，等待下一候选的托管打包。
+
+
+## E13 正式签名工作流凭据隔离（2026-11-26）
+
+- macOS 正式预检仅接收本平台签名和公证所需的 6 个变量。Windows 正式预检仅接收 2 个 PFX 变量。预检缺失时只报告变量名称，每份工作流只读 checkout 都关闭本地凭据持久化。[GitHub Actions 安全说明](https://docs.github.com/en/actions/reference/security/secure-use)
+- 两份工作流 actionlint、14 个合成凭据预检、macOS 单测 10 项、Windows 签名夹具、发行历史及 Node 打包校验和组装 12 项通过。GitHub 的 Intel 运行器标签已对照官方文档。同一 .32 源码另以 Windows 和 macOS 生产标签执行 Go 漏洞扫描，未发现可达已知漏洞。npm 生产依赖审计为 0 项。
+- 仓库级 Actions secrets 数量为 0，本机未找到 Developer ID Application 签名身份。目前持有的 Windows、macOS 安装包用于 smoke。正式签名、公证和红果上游联调待验收。
