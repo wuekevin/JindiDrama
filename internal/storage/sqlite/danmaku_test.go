@@ -92,7 +92,7 @@ func TestDanmakuProfileDistinguishesReplacementAtSamePath(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		profile, profileErr := db.DanmakuProfile()
+		profile, profileErr := db.DataProfile()
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}

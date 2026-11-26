@@ -1,8 +1,8 @@
 import { localId } from '@/localId'
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, toRaw } from 'vue'
-import { discardConflictedComments, type CommentSaveIssue } from '@/bindings/commentRecovery'
-import { loadLocalComments, saveLocalComments } from '@/bindings'
+import { discardConflictedComments, type CommentSaveIssue, type LegacyCommentBackup } from '@/bindings/commentRecovery'
+import { loadLocalComments, recoverLocalCommentBackup, saveLocalComments } from '@/bindings'
 
 export interface Reply {
   id: string
@@ -76,12 +76,19 @@ export const useCommentStore = defineStore('comments', () => {
   const pending = ref<Record<string, boolean>>({})
   const readErrors = ref<Record<string, boolean>>({})
   const saveIssues = ref<Partial<Record<string, CommentSaveIssue>>>({})
+  const backups = ref<Record<string, LegacyCommentBackup[]>>({})
+  const attemptedBackups = ref<Partial<Record<string, string>>>({})
+  const backupTargets = ref<Record<string, boolean>>({})
   const all = computed(() => byEp.value[key.value] ?? [])
   const loading = computed(() => !!pending.value[key.value])
   const readError = computed(() => !!readErrors.value[key.value])
   const saveError = computed(() => saveIssues.value[key.value] === 'failed' || saveIssues.value[key.value] === 'not-durable')
   const saveNotDurable = computed(() => saveIssues.value[key.value] === 'not-durable')
   const saveConflict = computed(() => saveIssues.value[key.value] === 'conflict')
+  const legacyBackups = computed(() => backups.value[key.value] ?? [])
+  const backupError = computed(() => !loading.value &&
+    legacyBackups.value.some((backup) => backup.key === attemptedBackups.value[key.value]))
+  const canRestoreBackup = computed(() => backupTargets.value[key.value] === true)
   const canEdit = () => !loading.value && !readError.value && !saveConflict.value && !!byEp.value[key.value]
   function load() {
     const current = key.value
@@ -93,8 +100,10 @@ export const useCommentStore = defineStore('comments', () => {
       return
     }
     pending.value[current] = true
-    return request.then(({ snapshot, issue }) => {
+    return request.then(({ snapshot, issue, backups: savedBackups, canRestoreBackup }) => {
       saveIssues.value[current] = issue
+      backups.value[current] = savedBackups ?? []
+      backupTargets.value[current] = canRestoreBackup === true
       byEp.value[current] = snapshot ? restoreComments(snapshot) : gen(current)
     }).catch(() => {
       readErrors.value[current] = true
@@ -114,6 +123,20 @@ export const useCommentStore = defineStore('comments', () => {
     delete byEp.value[current]
     return load()
   }
+  async function restoreBackup(backupKey: string) {
+    if (loading.value || !canRestoreBackup.value) return
+    const current = key.value
+    const { dramaId, index } = episode.value
+    pending.value[current] = true
+    attemptedBackups.value[current] = backupKey
+    try {
+      await recoverLocalCommentBackup(dramaId, index, backupKey)
+    } finally {
+      pending.value[current] = false
+      delete byEp.value[current]
+      if (current === key.value) await load()
+    }
+  }
   async function persist() {
     if (!canEdit()) return
     const current = key.value
@@ -122,6 +145,7 @@ export const useCommentStore = defineStore('comments', () => {
     try {
       const issue = await saveLocalComments(dramaId, index, snapshot)
       saveIssues.value[current] = issue
+      if (!issue) backupTargets.value[current] = false
       if (issue === 'conflict') {
         delete byEp.value[current]
         if (current === key.value) await load()
@@ -165,5 +189,5 @@ export const useCommentStore = defineStore('comments', () => {
   }
 
   const toggleReplies = (id: string) => { const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s }
-  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, removeReply, validate, open, loading, readError, saveError, saveConflict, saveNotDurable, load, persist, discardPending, expanded, toggleReplies }
+  return { draftForEpisode, sort, visible, total, hasMore, loadMore, post, like, remove, reply, removeReply, validate, open, loading, readError, saveError, saveConflict, saveNotDurable, legacyBackups, backupError, canRestoreBackup, load, persist, discardPending, restoreBackup, expanded, toggleReplies }
 })

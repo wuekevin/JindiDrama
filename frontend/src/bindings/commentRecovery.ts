@@ -1,13 +1,20 @@
 import { localId } from '@/localId'
 
 export type CommentSaveIssue = 'failed' | 'not-durable' | 'conflict'
-export type CommentLoad = { snapshot: string; issue?: CommentSaveIssue }
+export type LegacyCommentBackup = { key: string; snapshot: string }
+export type CommentLoad = {
+  snapshot: string
+  issue?: CommentSaveIssue
+  backups?: LegacyCommentBackup[]
+  canRestoreBackup?: boolean
+}
 
 export interface CommentState {
   snapshot: string
   revision: string
   writeId: string
   profile: string
+  legacyProfile?: string
 }
 
 interface CommentBridge {
@@ -19,6 +26,7 @@ interface Journal {
   base: string
   attempt?: { writeId: string; snapshot: string }
   snapshot: string
+  legacy?: { id: string; stored: string }
 }
 
 interface Entry {
@@ -33,10 +41,13 @@ interface EpisodeState {
   revision: string
   pending?: Entry
   conflicts?: Entry[]
+  legacy: Entry[]
+  legacyPrefix?: string
 }
 
 const namespace = 'jindi.comments.pending.v1.'
 const maxSnapshotBytes = 256 * 1024
+const maxLegacyJournalLength = 12 * maxSnapshotBytes
 const digest = /^[a-f0-9]{64}$/
 const writeToken = /^[a-f0-9]{32}$/
 const encoder = new TextEncoder()
@@ -57,13 +68,20 @@ function validSnapshot(snapshot: unknown): snapshot is string {
 function loadEntry(key: string): Entry | undefined {
   try {
     const stored = localStorage.getItem(key)
-    if (!stored || stored.length > 12 * maxSnapshotBytes) return
+    if (!stored || stored.length > 3 * maxLegacyJournalLength) return
     const record: Partial<Journal> | null = JSON.parse(stored)
     if (!record || !validSnapshot(record.snapshot) || typeof record.base !== 'string' ||
         (record.base !== '' && !digest.test(record.base))) return
     if (record.attempt !== undefined && (!record.attempt || typeof record.attempt.writeId !== 'string' ||
         !writeToken.test(record.attempt.writeId) || !validSnapshot(record.attempt.snapshot))) return
-    return { key, stored, journal: { base: record.base, attempt: record.attempt, snapshot: record.snapshot } }
+    if (record.legacy !== undefined && (!record.legacy || typeof record.legacy.id !== 'string' ||
+        !writeToken.test(record.legacy.id) || typeof record.legacy.stored !== 'string' ||
+        !record.legacy.stored || record.legacy.stored.length > maxLegacyJournalLength)) return
+    return {
+      key,
+      stored,
+      journal: { base: record.base, attempt: record.attempt, snapshot: record.snapshot, legacy: record.legacy },
+    }
   } catch {
     return
   }
@@ -103,6 +121,24 @@ function confirmsAttempt(journal: Journal, current: CommentState) {
   return current.writeId === journal.attempt?.writeId && current.snapshot === journal.attempt.snapshot
 }
 
+function promoteLegacy(state: EpisodeState, source: Entry, journal: Pick<Journal, 'base' | 'attempt' | 'snapshot'>) {
+  if (!state.legacyPrefix || !source.stored || source.stored.length > maxLegacyJournalLength ||
+      loadEntry(source.key)?.stored !== source.stored) return
+  const id = source.key.slice(state.legacyPrefix.length)
+  // Leave the original bytes available to older clients until SQLite confirms the copy.
+  const copy = { key: state.prefix + id, stored: null, journal: { ...journal, legacy: { id, stored: source.stored } } }
+  return publish(copy) ? copy : undefined
+}
+
+function clearCommitted(state: EpisodeState, entry: Entry) {
+  const link = entry.journal.legacy
+  if (state.legacyPrefix && link) {
+    const source = loadEntry(state.legacyPrefix + link.id)
+    if (source?.stored === link.stored && !publish(source, true)) return false
+  }
+  return publish(entry, true)
+}
+
 function episodeKey(id: string, episode: number) {
   return JSON.stringify([id, episode])
 }
@@ -117,24 +153,80 @@ export async function loadRecoverableComments(
   if (!digest.test(current.profile)) throw new Error('Invalid comment profile')
   const scope = episodeKey(id, episode)
   const prefix = namespace + current.profile + '.' + scope + '.'
-  const state: EpisodeState = { prefix, profile: current.profile, revision: current.revision }
+  const state: EpisodeState = { prefix, profile: current.profile, revision: current.revision, legacy: [] }
   states.set(scope, state)
+  if (current.legacyProfile && current.legacyProfile !== current.profile && digest.test(current.legacyProfile)) {
+    state.legacyPrefix = namespace + current.legacyProfile + '.' + scope + '.'
+  }
 
-  const pending = storedEntries(prefix).filter((entry) => {
+  const unconfirmed = (entry: Entry) => {
     if (!confirmsAttempt(entry.journal, current) || entry.journal.snapshot !== current.snapshot) return true
-    publish(entry, true)
+    clearCommitted(state, entry)
     return false
-  })
+  }
+  const pending = storedEntries(prefix).filter(unconfirmed)
+  if (state.legacyPrefix) {
+    const proven: Entry[] = []
+    for (const entry of storedEntries(state.legacyPrefix)) {
+      const id = entry.key.slice(state.legacyPrefix.length)
+      if (confirmsAttempt(entry.journal, current) && entry.journal.snapshot === current.snapshot) {
+        publish(entry, true)
+        continue
+      }
+      if (!pending.some(({ journal }) => journal.legacy?.id === id) &&
+          (confirmsAttempt(entry.journal, current) || (current.revision && entry.journal.base === current.revision))) {
+        proven.push(entry)
+      }
+      state.legacy.push(entry)
+    }
+    if (!pending.length && proven.length === 1) {
+      const entry = proven[0]!
+      const { base, attempt, snapshot } = entry.journal
+      const copy = promoteLegacy(state, entry, { base, attempt, snapshot })
+      if (copy) pending.push(copy)
+    }
+  }
+  const loadBackups = () => {
+    state.legacy = state.legacy.flatMap(({ key }) => {
+      const entry = loadEntry(key)
+      return entry ? [entry] : []
+    })
+    return state.legacy.map((entry) => ({ key: entry.key, snapshot: entry.journal.snapshot }))
+  }
   if (pending.length > 1) {
     state.conflicts = pending
-    return { snapshot: current.snapshot, issue: 'conflict' }
+    return { snapshot: current.snapshot, issue: 'conflict', backups: loadBackups() }
   }
   const entry = pending[0]
-  if (!entry) return { snapshot: current.snapshot }
+  if (!entry) return { snapshot: current.snapshot, backups: loadBackups(), canRestoreBackup: current.revision === '' }
   state.pending = entry
   const snapshot = entry.journal.snapshot
   const issue = await queue(() => flush(bridge, id, episode, state, snapshot))
-  return { snapshot: issue === 'conflict' ? (await bridge.LocalCommentsState(id, episode)).snapshot : snapshot, issue }
+  return {
+    snapshot: issue === 'conflict' ? (await bridge.LocalCommentsState(id, episode)).snapshot : snapshot,
+    issue,
+    backups: loadBackups(),
+  }
+}
+
+export async function restoreLegacyCommentBackup(
+  bridge: CommentBridge, id: string, episode: number, key: string,
+): Promise<CommentSaveIssue | undefined> {
+  const state = states.get(episodeKey(id, episode))
+  const entry = state?.legacy.find((backup) => backup.key === key)
+  if (!state || !entry || state.pending || state.conflicts) return 'conflict'
+  try {
+    const current = await bridge.LocalCommentsState(id, episode)
+    if (current.profile !== state.profile || current.revision !== '' || state.pending ||
+        loadEntry(key)?.stored !== entry.stored) return 'conflict'
+    const snapshot = entry.journal.snapshot
+    const copy = promoteLegacy(state, entry, { base: '', snapshot })
+    if (!copy) return 'not-durable'
+    state.pending = copy
+    return await flush(bridge, id, episode, state, snapshot)
+  } catch {
+    return 'failed'
+  }
 }
 
 export function stageRecoverableComments(
@@ -146,9 +238,8 @@ export function stageRecoverableComments(
   const state = states.get(episodeKey(id, episode))
   if (!state || !validSnapshot(snapshot)) return async () => 'not-durable'
   if (state.conflicts) return async () => 'conflict'
-  const journal = state.pending?.journal
   const entry = state.pending ?? { key: state.prefix + localId(), stored: null, journal: { base: state.revision, snapshot } }
-  entry.journal = { base: journal?.base ?? state.revision, attempt: journal?.attempt, snapshot }
+  entry.journal = { ...entry.journal, snapshot }
   state.pending = entry
   publish(entry)
   return () => flush(bridge, id, episode, state, snapshot)
@@ -173,7 +264,7 @@ async function flush(
     let revision = current.revision
     if (!committed || current.snapshot !== snapshot) {
       const attempt = { writeId: localId(), snapshot }
-      entry.journal = { base: current.revision, attempt, snapshot: latest.snapshot }
+      entry.journal = { ...latest, base: current.revision, attempt }
       publish(entry)
       revision = await bridge.CompareAndSaveLocalComments(id, episode, current.revision, snapshot, attempt.writeId)
       if (!revision) {
@@ -184,11 +275,11 @@ async function flush(
 
     state.revision = revision
     if (entry.journal.snapshot !== snapshot) {
-      entry.journal = { base: revision, snapshot: entry.journal.snapshot }
+      entry.journal = { ...entry.journal, base: revision, attempt: undefined }
       publish(entry)
     } else {
       state.pending = undefined
-      publish(entry, true)
+      clearCommitted(state, entry)
     }
   } catch {
     return publish(entry) ? 'failed' : 'not-durable'

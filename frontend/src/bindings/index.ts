@@ -1,5 +1,5 @@
 import { localId } from '@/localId'
-import { loadRecoverableComments, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
+import { loadRecoverableComments, restoreLegacyCommentBackup, stageRecoverableComments, type CommentLoad, type CommentSaveIssue, type CommentState } from './commentRecovery'
 // Wails Go 绑定桥：桌面端数据写入本地 SQLite；浏览器预览（无 Go 运行时）退回 localStorage。
 import type { DanmakuSubmission } from '@/player/danmakuDraft'
 import { acknowledgeDanmaku, pendingDanmaku, retainDanmaku, UndurableDanmakuError } from './danmakuRecovery'
@@ -195,6 +195,13 @@ export function saveLocalComments(dramaId: string, episode: number, snapshot: st
     await app.SaveLocalComments(dramaId, episode, snapshot)
     return undefined
   })
+}
+
+export function recoverLocalCommentBackup(dramaId: string, episode: number, key: string) {
+  const app = api()
+  const recovery = app && commentRecoveryBridge(app)
+  if (!recovery) return Promise.resolve('failed' as const)
+  return queueCommentWrite(() => restoreLegacyCommentBackup(recovery, dramaId, episode, key))
 }
 
 export const loadLocalDanmaku = (dramaId: string, episode: number) => api()?.LocalDanmaku(dramaId, episode)

@@ -71,7 +71,8 @@ func (a *App) SaveLocalComments(dramaID string, episode int, snapshot string) er
 
 type localCommentState struct {
 	sqlite.LocalCommentState
-	Profile string `json:"profile"`
+	Profile       string `json:"profile"`
+	LegacyProfile string `json:"legacyProfile"`
 }
 
 // LocalCommentsState identifies the open database without disclosing its path.
@@ -80,9 +81,9 @@ func (a *App) LocalCommentsState(dramaID string, episode int) (localCommentState
 	if a.store == nil {
 		return localCommentState{}, ErrNoStore
 	}
-	profile := a.store.CommentProfile()
-	if profile == "" {
-		return localCommentState{}, ErrNoStore
+	profile, err := a.store.DataProfile()
+	if err != nil {
+		return localCommentState{}, err
 	}
 	current, err := a.store.LocalCommentsState(dramaID, episode)
 	if err != nil {
@@ -93,7 +94,11 @@ func (a *App) LocalCommentsState(dramaID string, episode int) (localCommentState
 			return localCommentState{}, err
 		}
 	}
-	return localCommentState{LocalCommentState: current, Profile: profile}, nil
+	return localCommentState{
+		LocalCommentState: current,
+		Profile:           profile,
+		LegacyProfile:     a.store.CommentProfile(),
+	}, nil
 }
 
 func (a *App) CompareAndSaveLocalComments(dramaID string, episode int, expected, snapshot, writeID string) (string, error) {

@@ -2,10 +2,48 @@ package app
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLocalCommentsProfileBelongsToOpenedDatabase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jindi.db")
+	read := func() localCommentState {
+		t.Helper()
+		a := New()
+		if err := a.openStore(path); err != nil {
+			t.Fatal(err)
+		}
+		defer a.close()
+		state, err := a.LocalCommentsState("d1", 32)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+
+	original := read()
+	saved := filepath.Join(dir, "original.db")
+	if err := os.Rename(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	replacement := read()
+	if replacement.Profile == original.Profile || replacement.LegacyProfile != original.LegacyProfile {
+		t.Fatal("replacement database must have a new identity at the same path")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(saved, path); err != nil {
+		t.Fatal(err)
+	}
+	if restored := read(); restored.Profile != original.Profile {
+		t.Fatal("restoring the original file must retain its identity")
+	}
+}
 
 func TestLocalCommentsPersistPerEpisode(t *testing.T) {
 	a := New()

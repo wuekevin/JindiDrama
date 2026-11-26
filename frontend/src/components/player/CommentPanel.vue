@@ -118,6 +118,15 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
     <p v-if="c.saveConflict" class="err" role="alert">本集评论已在其他位置更新，暂缓补写本机未确认的编辑。 <button @click="c.discardPending()">放弃待补写编辑</button></p>
     <p v-if="c.saveError" class="err" role="alert">本地评论保存失败{{ c.saveNotDurable ? '，更改只保留在当前窗口，退出会丢失。' : '' }} <button @click="c.persist()">重试</button></p>
     <div class="list">
+      <details v-if="c.legacyBackups.length" class="comment-backups">
+        <summary>查看旧版待保存评论</summary>
+        <p>这些暂存的数据库归属无法确认。可复制内容，或在确认归属后恢复到尚未保存评论的数据库。</p>
+        <div v-for="backup in c.legacyBackups" :key="backup.key">
+          <textarea :value="backup.snapshot" rows="3" readonly aria-label="旧版暂存评论内容" />
+          <button v-if="c.canRestoreBackup" type="button" :disabled="c.loading" @click="c.restoreBackup(backup.key)">确认恢复到当前数据库</button>
+        </div>
+        <p v-if="c.backupError" role="alert">恢复尚未确认，或原暂存已有更新。剩余内容仍保留在本机。</p>
+      </details>
       <p v-if="c.loading" role="status">正在载入本集评论</p>
       <p v-else-if="c.readError" role="alert">本地评论读取失败 <button @click="c.load()">重试</button></p>
       <EmptyState v-else-if="!c.visible.length" title="暂无评论" hint="来发表第一条评论吧" />
@@ -176,6 +185,15 @@ header { display: flex; justify-content: space-between; align-items: center; pad
 }
 .err { padding: 0 22px 6px 76px; color: var(--c-danger); font-size: 13px; }
 .list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 0; border-top: 1px solid var(--c-border); margin-top: 10px; }
+.comment-backups {
+  padding: 8px 0;
+  font-size: 13px;
+  color: var(--c-text-2);
+  summary { cursor: pointer; color: var(--c-text); }
+  p { margin: 8px 0; }
+  textarea { display: block; width: 100%; color: var(--c-text); background: var(--c-surface); }
+  button { padding: 6px 0; text-align: left; color: var(--c-text); text-decoration: underline; }
+}
 .cm { display: flex; gap: 14px; padding: 16px 0 10px; border-bottom: 1px solid var(--c-border); }
 .body { flex: 1; min-width: 0; position: relative; time { display: block; font-size: 12.5px; color: var(--c-text-2); margin: 3px 0 6px; } p { font-size: 15.5px; line-height: 1.6; } }
 .who { display: flex; align-items: center; gap: 8px; b { font-size: 15px; color: var(--c-text-2); font-weight: 600; } .au { font-style: normal; font-size: 11px; padding: 0 6px; border-radius: 4px; background: var(--c-accent-soft); color: var(--c-accent-2); } }

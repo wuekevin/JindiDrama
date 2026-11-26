@@ -65,7 +65,7 @@ func (a *App) LocalDataProfile() (string, error) {
 	if a.store == nil {
 		return "", ErrNoStore
 	}
-	return a.store.DanmakuProfile()
+	return a.store.DataProfile()
 }
 
 func (a *App) Favorites() ([]string, error) {

@@ -170,11 +170,16 @@ test('desktop close waits for queued comment snapshots, including edits queued d
 async function installCommentRecoveryBridge(page: import('@playwright/test').Page) {
   await page.addInitScript(() => {
     const profile = () => sessionStorage.getItem('comment-profile') ?? 'a'.repeat(64)
-    const snapshotKey = (id: string, episode: number) => `comment-fixture-${profile()}-${id}-${episode}`
+    const snapshotKey = (id: string, episode: number) => `comment-fixture-${sessionStorage.getItem("comment-database") ?? profile()}-${id}-${episode}`
     const load = (id: string, episode: number) => {
       const record = localStorage.getItem(snapshotKey(id, episode))
       const state = record ? JSON.parse(record) : { snapshot: '', revision: '', writeId: '' }
-      return { ...state, profile: profile() }
+      const replacement = sessionStorage.getItem('comment-database')
+      return {
+        ...state,
+        profile: replacement ? 'b'.repeat(64) : profile(),
+        legacyProfile: sessionStorage.getItem('comment-legacy-profile') ?? undefined,
+      }
     }
     const setItem = Storage.prototype.setItem
     Storage.prototype.setItem = function (key, value) {
@@ -691,4 +696,143 @@ test('comment read failures can retry and edit older snapshots without losing re
   await expect(panel.getByText('重试前的草稿')).toBeVisible()
   await legacy.getByTestId('toggle-replies').click()
   await expect(legacy.getByText('旧版回复')).toBeVisible()
+})
+
+test('a fresh SQLite database at the same path never receives pending comments from the older file', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.evaluate(() => sessionStorage.setItem('comment-failure', 'locked'))
+  await page.getByTestId('comment-input').fill('仅原数据库恢复')
+  await page.getByTestId('comment-post').click()
+  await expect(page.getByTestId('comment-panel').getByRole('alert')).toContainText('本地评论保存失败')
+  await page.evaluate(() => {
+    sessionStorage.setItem('comment-database', 'empty-replacement')
+    sessionStorage.removeItem('comment-failure')
+  })
+  await page.reload()
+  await expect(page.getByTestId('comment').first()).toBeVisible()
+  await expect(page.getByText('仅原数据库恢复')).toHaveCount(0)
+  expect(await page.evaluate(() => localStorage.getItem('comment-fixture-empty-replacement-d1-32'))).toBeNull()
+  await page.evaluate(() => sessionStorage.removeItem('comment-database'))
+  await page.reload()
+  await expect(page.getByText('仅原数据库恢复')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => localStorage.getItem(`comment-fixture-${'a'.repeat(64)}-d1-32`)))
+    .toContain('仅原数据库恢复')
+})
+
+test('legacy comments with no database proof require an explicit restore to an empty database', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  const key = `jindi.comments.pending.v1.${'c'.repeat(64)}.["d1",32].${'f'.repeat(32)}`
+  const text = '人工确认归属的旧暂存'
+  await page.evaluate(({ key, text }) => {
+    sessionStorage.setItem('comment-legacy-profile', 'c'.repeat(64))
+    localStorage.setItem(key, JSON.stringify({ base: '', snapshot: JSON.stringify([{ id: 'legacy', text }]) }))
+  }, { key, text })
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.getByText('查看旧版待保存评论').click()
+  await expect(page.getByRole('textbox', { name: '旧版暂存评论内容' })).toHaveValue(JSON.stringify([{ id: 'legacy', text }]))
+  await expect(page.getByTestId('comment').filter({ hasText: text })).toHaveCount(0)
+  expect(await page.evaluate((key) => localStorage.getItem(key), key)).not.toBeNull()
+  await page.getByRole('button', { name: '确认恢复到当前数据库' }).click()
+  await expect(page.getByTestId('comment').filter({ hasText: text })).toBeVisible()
+  expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBeNull()
+})
+
+test('a matching legacy revision resumes automatically without claiming another database', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  await page.evaluate(() => {
+    const revision = 'd'.repeat(64)
+    sessionStorage.setItem('comment-legacy-profile', 'c'.repeat(64))
+    localStorage.setItem(`comment-fixture-${'a'.repeat(64)}-d1-32`, JSON.stringify({
+      revision, writeId: 'a'.repeat(32), snapshot: '[]',
+    }))
+    const key = `jindi.comments.pending.v1.${'c'.repeat(64)}.["d1",32].${'f'.repeat(32)}`
+    localStorage.setItem(key, JSON.stringify({
+      base: revision,
+      snapshot: JSON.stringify([{ id: 'legacy', text: '有版本依据的旧暂存' }]),
+    }))
+  })
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await expect(page.getByTestId('comment').filter({ hasText: '有版本依据的旧暂存' })).toBeVisible()
+  await expect(page.getByText('查看旧版待保存评论')).toHaveCount(0)
+})
+
+test('acknowledgement lost during explicit legacy restore still clears the confirmed original', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  const key = `jindi.comments.pending.v1.${'c'.repeat(64)}.["d1",32].${'f'.repeat(32)}`
+  await page.evaluate((key) => {
+    sessionStorage.setItem('comment-legacy-profile', 'c'.repeat(64))
+    sessionStorage.setItem('comment-failure', 'unacknowledged')
+    localStorage.setItem(key, JSON.stringify({
+      base: '', snapshot: JSON.stringify([{ id: 'legacy', text: '已落库的旧暂存' }]),
+    }))
+  }, key)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.getByText('查看旧版待保存评论').click()
+  await page.getByRole('button', { name: '确认恢复到当前数据库' }).click()
+  await expect(page.getByText('已落库的旧暂存')).toBeVisible()
+  await expect(page.getByText('查看旧版待保存评论')).toHaveCount(0)
+  expect(await page.evaluate((key) => localStorage.getItem(key), key)).toBeNull()
+})
+
+test('the legacy restore keeps a newer original draft written by an older client', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  const key = `jindi.comments.pending.v1.${'c'.repeat(64)}.["d1",32].${'f'.repeat(32)}`
+  await page.evaluate((key) => {
+    sessionStorage.setItem('comment-legacy-profile', 'c'.repeat(64))
+    sessionStorage.setItem('comment-failure', 'waiting')
+    localStorage.setItem(key, JSON.stringify({
+      base: '', snapshot: JSON.stringify([{ id: 'legacy', text: '本次确认恢复的版本' }]),
+    }))
+  }, key)
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.getByText('查看旧版待保存评论').click()
+  const original = await page.evaluate((key) => localStorage.getItem(key), key)
+  await page.getByRole('button', { name: '确认恢复到当前数据库' }).click()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('comment-waiting'))).toBe('yes')
+  const newer = JSON.stringify([{ id: 'legacy', text: '旧客户端写入的较新版本' }])
+  const updated = await page.evaluate(({ key, newer, original }) => {
+    if (localStorage.getItem(key) !== original) return false
+    localStorage.setItem(key, JSON.stringify({ base: '', snapshot: newer }))
+    window.dispatchEvent(new Event('comment-release'))
+    return true
+  }, { key, newer, original })
+  expect(updated).toBe(true)
+  await expect(page.getByText('本次确认恢复的版本')).toBeVisible()
+  await expect(page.getByText('恢复尚未确认，或原暂存已有更新。')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '旧版暂存评论内容' })).toHaveValue(newer)
+  await expect(page.getByRole('button', { name: '确认恢复到当前数据库' })).toHaveCount(0)
+})
+
+test('dismissal after restore conflict keeps the unmigrated legacy backup', async ({ page }) => {
+  await installCommentRecoveryBridge(page)
+  await page.goto('/#/')
+  const key = `jindi.comments.pending.v1.${'c'.repeat(64)}.["d1",32].${'f'.repeat(32)}`
+  const snapshot = JSON.stringify([{ id: 'legacy', text: '恢复冲突后仍可读取的原暂存' }])
+  await page.evaluate(({ key, snapshot }) => {
+    sessionStorage.setItem('comment-legacy-profile', 'c'.repeat(64))
+    sessionStorage.setItem('comment-failure', 'waiting')
+    localStorage.setItem(key, JSON.stringify({ base: '', snapshot }))
+  }, { key, snapshot })
+  await page.goto('/#/watch/d1/32?panel=comments&paused')
+  await page.getByText('查看旧版待保存评论').click()
+  await page.getByRole('button', { name: '确认恢复到当前数据库' }).click()
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('comment-waiting'))).toBe('yes')
+  await page.evaluate(() => {
+    localStorage.setItem(`comment-fixture-${'a'.repeat(64)}-d1-32`, JSON.stringify({
+      revision: 'd'.repeat(64), writeId: 'a'.repeat(32),
+      snapshot: JSON.stringify([{ id: 'new', text: '当前数据库另行保存的评论' }]),
+    }))
+    window.dispatchEvent(new Event('comment-release'))
+  })
+  await expect(page.getByText('当前数据库另行保存的评论')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: '旧版暂存评论内容' })).toHaveValue(snapshot)
+  await page.getByRole('button', { name: '放弃待补写编辑' }).click()
+  await expect(page.getByRole('button', { name: '放弃待补写编辑' })).toHaveCount(0)
+  await expect(page.getByRole('textbox', { name: '旧版暂存评论内容' })).toHaveValue(snapshot)
+  expect(await page.evaluate((key) => localStorage.getItem(key), key)).toContain('恢复冲突后仍可读取的原暂存')
 })
