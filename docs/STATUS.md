@@ -1189,3 +1189,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 苹果 CMS 授权 HLS 主清单按组校验成员名称，仅允许一个默认音轨。同组重名或多默认成员会返回 502，该清单的子资源不会公开。不同组仍可复用音轨名称。URI 继续改写为本机中继地址。[RFC 8216 音轨组规则](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.4.1.1)
 - Go 中继夹具验证普通话和粤语分别取得对应点播分段。中继返回的两条合成 MPEG-TS 与各自输入逐字节一致，FFmpeg 独立解码结果为 440 Hz 和 660 Hz。两种歧义清单均可在原版复现。Go 全量及 vet、HLS/媒体中继竞态、Windows amd64 交叉编译和 Chromium HLS 2 项通过。本次改动晚于 .62。证据位于 JindiDrama 主工作区的 `build/bin/qa-cms-hls-audio-groups/`。[BMad](../_bmad-output/plan-e12-hls-audio-groups.md)
+
+## E12 授权 HLS 点播时间戳兼容（2026-11-28）
+
+- 苹果 CMS 点播中继接受每段一个节目时间戳，接受分钟或秒精度，保留日期、时区与小数秒。将小数逗号转换为浏览器可读的小数点。错误日历日期、超范围偏移、重复、悬空或混入主清单的节目时间戳返回 502，子资源不会公开。[RFC 8216](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.2.6)
+- 原版用相同回归测试复现 502。修复版的 FFmpeg 点播清单含两段节目时间戳，经 Go 中继后仅改写分段地址。两个 TS 分段与上游合成素材字节一致，各完整解码 30 帧。Go 全量、vet、HLS 和媒体中继竞态检查，以及 Chromium HLS 5 项通过。Chromium 与 WebKit 的日期解析实测确认小数分隔符和分钟精度的兼容性。 证据存于主工作区 `build/bin/qa-cms-hls-program-date/`。
+- 本轮使用本机合成素材，源码晚于 .62 成品。实际授权公网联调和最新跨平台成品待验收。[BMad](../_bmad-output/plan-e12-hls-program-date-time.md)

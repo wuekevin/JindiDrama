@@ -4,8 +4,10 @@ import (
 	"errors"
 	"math"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -16,9 +18,12 @@ const (
 	maxCatalogHLSURL        = 4096
 	maxCatalogHLSReferences = 2048
 	maxCatalogHLSResources  = 4096
+	hlsProgramMinuteLayout  = "2006-01-02T15:04"
 )
 
 var errCatalogHLSManifest = errors.New("无效的授权播放清单")
+
+var hlsProgramDateTime = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}([.,]\d+)?)?(Z|[+-]([01]\d|2[0-3]):?[0-5]\d)?$`)
 
 type hlsResource struct {
 	url      string
@@ -90,6 +95,7 @@ type hlsManifestState struct {
 	master, media     bool
 	pendingVariant    bool
 	pendingSegment    bool
+	pendingDate       bool
 	ended             bool
 	discontinuitySeen bool
 	variants          int
@@ -128,7 +134,7 @@ func parseCatalogHLSManifest(body []byte, base *url.URL, allowMaster bool) (hlsM
 			return hlsManifest{}, errCatalogHLSManifest
 		}
 	}
-	if s.pendingVariant || s.pendingSegment || s.pendingRange.length != 0 || s.version < s.minVersion {
+	if s.pendingVariant || s.pendingSegment || s.pendingDate || s.pendingRange.length != 0 || s.version < s.minVersion {
 		return hlsManifest{}, errCatalogHLSManifest
 	}
 	if s.master {
@@ -176,7 +182,7 @@ func (s *hlsManifestState) accept(line string) bool {
 		s.master = true
 		return true
 	case "#EXTINF", "#EXT-X-BYTERANGE", "#EXT-X-MAP", "#EXT-X-KEY", "#EXT-X-DISCONTINUITY",
-		"#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE", "#EXT-X-DISCONTINUITY-SEQUENCE",
+		"#EXT-X-TARGETDURATION", "#EXT-X-MEDIA-SEQUENCE", "#EXT-X-DISCONTINUITY-SEQUENCE", "#EXT-X-PROGRAM-DATE-TIME",
 		"#EXT-X-PLAYLIST-TYPE", "#EXT-X-ENDLIST":
 		if s.master || !s.acceptMediaTag(tag, value, hasValue) {
 			return false
@@ -237,6 +243,7 @@ func (s *hlsManifestState) acceptSegment(raw string) bool {
 	s.previousURL = resource.url
 	s.manifest.reference("", "", resource)
 	s.pendingSegment = false
+	s.pendingDate = false
 	s.segments++
 	return true
 }
@@ -280,6 +287,23 @@ func (s *hlsManifestState) acceptMediaTag(tag, value string, hasValue bool) bool
 		}
 		s.discontinuitySeen = true
 		s.manifest.literal(tag)
+		return true
+	case "#EXT-X-PROGRAM-DATE-TIME":
+		if s.pendingDate || !hlsProgramDateTime.MatchString(value) {
+			return false
+		}
+		// The shape check covers fractional seconds and the offset. Parse the
+		// calendar fields independently so timezone-free tags stay timezone-free.
+		layout := hlsProgramMinuteLayout
+		if len(value) > len(layout) && value[len(layout)] == ':' {
+			layout += ":05"
+		}
+		if _, err := time.Parse(layout, value[:len(layout)]); err != nil {
+			return false
+		}
+		s.pendingDate = true
+		// hls.js reads these timestamps with Date.parse, which requires a dot.
+		s.manifest.literal(tag + ":" + strings.Replace(value, ",", ".", 1))
 		return true
 	case "#EXT-X-ENDLIST":
 		if hasValue || s.ended {

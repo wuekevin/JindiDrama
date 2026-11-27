@@ -180,6 +180,12 @@ func TestCatalogHLSRejectsUnsafeManifestWithoutPublishingResources(t *testing.T)
 		{"URI attribute in map", hlsVODStart + validSegment + "#EXT-X-MAP:URI=\"init.mp4\",X-URI=\"tracker\"\n" + hlsVODEnd},
 		{"duplicate URI", hlsVODStart + validSegment + "#EXT-X-MAP:URI=\"init.mp4\",URI=\"tracker\"\n" + hlsVODEnd},
 		{"network metadata", hlsVODStart + validSegment + "#EXT-X-DATERANGE:ID=\"ad\",X-ASSET-URI=\"tracking.m3u8\"\n" + hlsVODEnd},
+		{"invalid program date", hlsVODStart + "#EXT-X-PROGRAM-DATE-TIME:2026-02-30T10:20:30Z\n" + validSegment + hlsVODEnd},
+		{"invalid program date offset", hlsVODStart + "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30+24:00\n" + validSegment + hlsVODEnd},
+		{"program date with URL", hlsVODStart + "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30Z,URI=\"https://tracker.example.test\"\n" + validSegment + hlsVODEnd},
+		{"duplicate program date for segment", hlsVODStart + "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30Z\n#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:21:30Z\n" + validSegment + hlsVODEnd},
+		{"program date without segment", hlsVODStart + validSegment + "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30Z\n" + hlsVODEnd},
+		{"program date in master", "#EXTM3U\n#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30Z\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nvideo.m3u8\n"},
 		{"credentials", hlsVODStart + validSegment + "#EXTINF:1,\nhttps://user:pass@media.example.test/bad.ts\n" + hlsVODEnd},
 		{"HTTP", hlsVODStart + validSegment + "#EXTINF:1,\nhttp://media.example.test/bad.ts\n" + hlsVODEnd},
 		{"private IP", hlsVODStart + validSegment + "#EXTINF:1,\n//127.0.0.1/bad.ts\n" + hlsVODEnd},
@@ -212,6 +218,43 @@ func TestCatalogHLSRejectsUnsafeManifestWithoutPublishingResources(t *testing.T)
 				}
 			}
 		})
+	}
+}
+
+func TestCatalogHLSPreservesProgramDateTimeForEachSegment(t *testing.T) {
+	const first = "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T10:20:30.625+08:00\n"
+	const second = "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T02:20:32.625+0000\n"
+	const third = "#EXT-X-PROGRAM-DATE-TIME:2026-11-28T02:20:34,625\n"
+	const fourth = "#EXT-X-DISCONTINUITY\n#EXT-X-PROGRAM-DATE-TIME:2026-11-28T02:21Z\n"
+	const playlist = hlsVODStart + first + "#EXTINF:2,\nfirst.ts?private=one\n" +
+		"#EXT-X-DISCONTINUITY\n#EXTINF:2,\n" + second + "second.ts?private=two\n" +
+		third + "#EXTINF:2,\nthird.ts?private=three\n" + fourth + "#EXTINF:2,\nfourth.ts\n" + hlsVODEnd
+	relay := testCatalogRelay(t, func(req *http.Request) (*http.Response, error) {
+		switch req.URL.RequestURI() {
+		case "/catalog/main.m3u8?signature=main-only-in-go":
+			return hlsTestResponse(http.StatusOK, catalogHLSType, playlist), nil
+		case "/catalog/first.ts?private=one", "/catalog/second.ts?private=two", "/catalog/third.ts?private=three", "/catalog/fourth.ts":
+			return hlsTestResponse(http.StatusOK, "video/mp2t", hlsTestTS), nil
+		default:
+			t.Errorf("unexpected upstream request: %s", req.URL)
+			return hlsTestResponse(http.StatusNotFound, "text/plain", ""), nil
+		}
+	})
+	ticket := issueTestHLS(t, relay, time.Now().Add(time.Minute))
+	local := catalogMediaPath + ticket.LeaseID + "/hls/"
+	res, body := hlsTestRequest(t, http.MethodGet, ticket.Sources[0].Src, nil)
+	want := hlsVODStart + first + "#EXTINF:2,\n" + local + "0\n" +
+		"#EXT-X-DISCONTINUITY\n#EXTINF:2,\n" + second + local + "1\n" +
+		strings.Replace(third, ",", ".", 1) + "#EXTINF:2,\n" + local + "2\n" +
+		fourth + "#EXTINF:2,\n" + local + "3\n" + hlsVODEnd
+	if res.StatusCode != http.StatusOK || body != want {
+		t.Fatalf("unexpected program date rewrite: %d %q", res.StatusCode, body)
+	}
+	for i := range 4 {
+		res, body = hlsTestRequest(t, http.MethodGet, "http://"+relay.host+local+strconv.Itoa(i), nil)
+		if res.StatusCode != http.StatusOK || body != hlsTestTS {
+			t.Fatalf("segment %d: status %d, size %d", i, res.StatusCode, len(body))
+		}
 	}
 }
 
