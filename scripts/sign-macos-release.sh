@@ -65,6 +65,16 @@ run_interruptible() {
   return "$status"
 }
 
+run_notary_step() {
+  local step=$1 status=0
+  shift
+  run_interruptible "$@" >/dev/null 2>&1 || status=$?
+  if (( status != 0 )); then
+    printf 'macOS notarization %s failed (exit %d)\n' "$step" "$status" >&2
+  fi
+  return "$status"
+}
+
 read_notary_string() {
   # Preserve invalid control bytes as '?' before command substitution can strip them.
   /usr/bin/plutil -extract "$1" raw -expect string -n -o - "$2" 2>/dev/null |
@@ -92,16 +102,18 @@ if [[ $1 == sign ]]; then
   run_interruptible security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
   unset keychain_password
   run_interruptible codesign --force --deep --options runtime --timestamp --keychain "$keychain" --sign "$identity" "$app"
+  run_interruptible codesign --verify --deep --strict "$app"
 else
   requirement='anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists'
   requirement+=' and certificate leaf[field.1.2.840.113635.100.6.1.13] exists'
   requirement+=" and certificate leaf[subject.OU] = \"$team_id\""
-  run_interruptible codesign --verify --deep --strict -R="$requirement" "$app"
-  run_interruptible ditto -c -k --keepParent "$app" "$archive"
+  run_notary_step 'Developer ID check' codesign --verify --deep --strict -R="$requirement" "$app"
+  run_notary_step 'archive creation' ditto -c -k --keepParent "$app" "$archive"
   response="$work/notary-response.json"
   submit_status=0
+  # The hosted log only gets the validated response fields and the exit status below.
   run_interruptible xcrun notarytool submit "$archive" --apple-id "$apple_id" --team-id "$team_id" \
-    --password "$apple_password" --wait --output-format json > "$response" || submit_status=$?
+    --password "$apple_password" --wait --output-format json > "$response" 2>/dev/null || submit_status=$?
   unset apple_password
   if submission_id=$(read_notary_string id "$response") &&
      [[ $submission_id =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
@@ -120,8 +132,7 @@ else
     exit 1
   fi
   echo "Apple accepted this notarization submission"
-  run_interruptible xcrun stapler staple "$app"
-  run_interruptible xcrun stapler validate "$app"
+  run_notary_step 'ticket stapling' xcrun stapler staple "$app"
+  run_notary_step 'ticket validation' xcrun stapler validate "$app"
+  run_notary_step 'final signature verification' codesign --verify --deep --strict "$app"
 fi
-
-run_interruptible codesign --verify --deep --strict "$app"

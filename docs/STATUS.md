@@ -1200,3 +1200,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 从源码 `2fc7ebca07f1a88b98f696d6372622ca2d982f04` 构建隔离 Apple Silicon 测试应用。普通话上游清单含小数逗号，Go 中继将其转换为小数点。原生 WKWebView 的音轨菜单显示「普通话」和「粤语」，默认普通话。实际鼠标点选粤语后，原生 AudioTrack 状态随之切换，同一 384×216 视频从 4.563 秒推进到 6.600 秒，累计 146 帧。本轮验收保持静音。
 - Go 中继实际读取主清单、视频和两路音频清单、初始化文件及各路分段。退出前保存的第 1 集进度为 5012 ms，正常退出后更新为 6747 ms，总长 24000 ms。独立 SQLite 完整性为 ok，活动会话标记和数据库临时文件已清理。应用使用合成 CMS 传输和观察探针，实际授权公网片源、正式签名成品及 Windows 和 Intel Mac 待验收。测试证据位于主工作区 `build/bin/qa-native-hls-audio-date/`。[BMad](../_bmad-output/plan-e12-native-hls-audio-date.md)
+
+## E13 macOS 公证日志输出边界（2026-11-28）
+
+- 正式 macOS 公证步骤记录已校验的 Apple 提交编号、已知状态及发生错误的阶段和退出码。工具原始输出不直达工作流日志。原版可在提交成功、失败和取消时复现合成标准错误文本进入日志。修复后覆盖公证成功、拒绝、取消、身份检查失败、归档失败和票据装订失败。票据装订、验签和临时文件清理逻辑继续通过回归。
+- 系统 Bash 语法校验、macOS 公证与桌面冒烟 19 项、Node 交付与 SHA-256 校验 18 项、发行源码检测夹具通过。系统 codesign 对临时签名应用按预期拒绝正式公证，退出码为 3，清理临时目录。使用合成凭据，实际 Developer ID 与 Apple 公证待验收。测试证据位于主工作区 `build/bin/qa-notary-stderr/`。[Apple 公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow) · [BMad](../_bmad-output/plan-e13-notary-stderr.md)

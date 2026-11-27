@@ -20,6 +20,7 @@ TOOL = """#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import time
 
@@ -30,6 +31,11 @@ if any(key in os.environ for key in json.loads(os.environ["RELEASE_CREDENTIAL_KE
 key = name + " " + args[0]
 with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log:
     log.write(json.dumps([key, args]) + "\\n")
+
+if diagnostic := os.environ.get("NOTARY_STDERR"):
+    print(diagnostic + " " + key, file=sys.stderr, flush=True)
+    if key != "xcrun notarytool":
+        print(diagnostic + " " + key, flush=True)
 
 if key == "security create-keychain":
     Path(args[-1]).touch()
@@ -52,6 +58,8 @@ if key == os.environ.get("CANCEL_TOOL"):
     time.sleep(30)
 if key == os.environ.get("FAIL_TOOL"):
     sys.exit(19)
+if key == "ditto -c":
+    sys.exit(subprocess.run(["/usr/bin/ditto", *args], check=False).returncode)
 """
 
 
@@ -68,7 +76,7 @@ class MacOSReleaseSigningTest(unittest.TestCase):
         fixture = tools / "tool"
         fixture.write_text(TOOL)
         fixture.chmod(0o700)
-        for name in ("security", "codesign", "xcrun"):
+        for name in ("security", "codesign", "ditto", "xcrun"):
             (tools / name).symlink_to(fixture)
         self.temporary = self.root / "temporary"
         self.temporary.mkdir()
@@ -78,7 +86,7 @@ class MacOSReleaseSigningTest(unittest.TestCase):
 
     def run_operation(self, operation, fail_tool="", cancel_tool="", cancel_signal=15,
                       expected_status=None, error_message=None, notary_response=None, team_id=None,
-                      output_contains=(), output_excludes=()):
+                      output_contains=(), output_excludes=(), notary_stderr=None):
         self.log.unlink(missing_ok=True)
         prefix = "MACOS_" if operation == "sign" else "APPLE_"
         credentials = {key: value for key, value in CREDENTIALS.items() if key.startswith(prefix)}
@@ -87,6 +95,8 @@ class MacOSReleaseSigningTest(unittest.TestCase):
                    RELEASE_CREDENTIAL_KEYS=json.dumps(list(CREDENTIALS)))
         if notary_response is not None:
             env["NOTARY_RESPONSE"] = notary_response
+        if notary_stderr is not None:
+            env["NOTARY_STDERR"] = notary_stderr
         if team_id is not None:
             env["APPLE_TEAM_ID"] = team_id
         result = subprocess.run(["bash", SCRIPT, operation, self.app], env=env, capture_output=True, text=True, timeout=10)
@@ -131,18 +141,18 @@ class MacOSReleaseSigningTest(unittest.TestCase):
                                    notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Accepted"}),
                                    output_contains=(SUBMISSION_ID,))
         self.assertEqual([args[:2] for key, args in calls], [
-            ["--verify", "--deep"], ["notarytool", "submit"], ["stapler", "staple"],
+            ["--verify", "--deep"], ["-c", "-k"], ["notarytool", "submit"], ["stapler", "staple"],
             ["stapler", "validate"], ["--verify", "--deep"],
         ])
         requirement = next(arg for arg in calls[0][1] if arg.startswith("-R="))
         self.assertIn('certificate leaf[subject.OU] = "TESTTEAM01"', requirement)
         self.assertIn('certificate leaf[field.1.2.840.113635.100.6.1.13] exists', requirement)
-        args = calls[1][1]
+        args = calls[2][1]
         self.assertEqual(args[args.index("--output-format") + 1], "json")
 
     def test_cancellation_interrupts_waiting_for_notary_service(self):
         calls = self.run_operation("notarize", cancel_tool="xcrun notarytool", cancel_signal=2)
-        self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+        self.assertEqual([key for key, args in calls], ["codesign --verify", "ditto -c", "xcrun notarytool"])
 
     def test_notary_failure_cleans_archive_and_skips_staple(self):
         calls = self.run_operation(
@@ -150,7 +160,7 @@ class MacOSReleaseSigningTest(unittest.TestCase):
             notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Accepted"}),
             output_contains=(SUBMISSION_ID, "notarytool exit 19"),
         )
-        self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+        self.assertEqual([key for key, args in calls], ["codesign --verify", "ditto -c", "xcrun notarytool"])
 
     def test_notary_rejection_reports_valid_submission_id_even_on_command_failure(self):
         for fail_tool in ("", "xcrun notarytool"):
@@ -161,7 +171,23 @@ class MacOSReleaseSigningTest(unittest.TestCase):
                     output_contains=(SUBMISSION_ID, "Invalid"),
                     output_excludes=("private service response",),
                 )
-                self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+                self.assertEqual([key for key, args in calls], ["codesign --verify", "ditto -c", "xcrun notarytool"])
+
+    def test_notary_does_not_log_raw_tool_output(self):
+        diagnostic = "untrusted fixture diagnostic with account=example.test and temporary URL"
+        for case, kwargs, allowed in (
+            ("success", {}, (SUBMISSION_ID, "Apple accepted this notarization submission")),
+            ("identity failure", {"fail_tool": "codesign --verify"}, ("Developer ID check failed (exit 19)",)),
+            ("archive failure", {"fail_tool": "ditto -c"}, ("archive creation failed (exit 19)",)),
+            ("submission failure", {"fail_tool": "xcrun notarytool"}, (SUBMISSION_ID, "notarytool exit 19")),
+            ("stapling failure", {"fail_tool": "xcrun stapler"}, (SUBMISSION_ID, "ticket stapling failed (exit 19)")),
+            ("cancellation", {"cancel_tool": "xcrun notarytool"}, ()),
+        ):
+            with self.subTest(case=case):
+                self.run_operation(
+                    "notarize", notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Accepted"}),
+                    notary_stderr=diagnostic, output_contains=allowed, output_excludes=(diagnostic,), **kwargs
+                )
 
     def test_does_not_log_unrecognized_submission_id_or_status(self):
         for id_value, status_value, excluded in (
@@ -174,7 +200,7 @@ class MacOSReleaseSigningTest(unittest.TestCase):
                     notary_response=json.dumps({"id": id_value, "status": status_value}),
                     output_excludes=excluded,
                 )
-                self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+                self.assertEqual([key for key, args in calls], ["codesign --verify", "ditto -c", "xcrun notarytool"])
 
     def test_does_not_submit_an_app_outside_the_expected_developer_team(self):
         calls = self.run_operation("notarize", "codesign --verify")
@@ -190,7 +216,7 @@ class MacOSReleaseSigningTest(unittest.TestCase):
             with self.subTest(response=response):
                 calls = self.run_operation("notarize", notary_response=response, expected_status=1,
                                            error_message="Apple did not accept this notarization submission")
-                self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+                self.assertEqual([key for key, args in calls], ["codesign --verify", "ditto -c", "xcrun notarytool"])
 
 
 if __name__ == "__main__":
