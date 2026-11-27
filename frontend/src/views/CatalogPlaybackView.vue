@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
-import { ChevronLeft } from 'lucide-vue-next'
+import { ChevronLeft, PictureInPicture2 } from 'lucide-vue-next'
 import type Hls from 'hls.js'
 import { isAppleCMSDramaId } from '@/catalogIdentity'
 import { releaseCatalogPlayback, resolveCatalogPlayback } from '@/bindings'
 import { BEFORE_WINDOW_CLOSE, BEFORE_WINDOW_HIDE, WINDOW_CLOSE_CANCELED } from '@/bindings/windowClose'
-import { ErrorState } from '@/components/ui'
+import { BaseButton, ErrorState } from '@/components/ui'
 import CommentPanel from '@/components/player/CommentPanel.vue'
 import DanmakuLayer from '@/components/player/DanmakuLayer.vue'
 import DanmakuSettings from '@/components/player/DanmakuSettings.vue'
@@ -14,6 +14,7 @@ import Skeleton from '@/components/ui/Skeleton.vue'
 import { useLocalEpisodeDanmaku } from '@/composables/useLocalEpisodeDanmaku'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
 import { demoQualityId } from '@/player/demoMedia'
+import { usePictureInPicture } from '@/player/pictureInPicture'
 import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { usePlaybackShortcuts } from '@/player/usePlaybackShortcuts'
@@ -53,7 +54,8 @@ const commentTrigger = ref<HTMLButtonElement>()
 const danmakuTrigger = ref<HTMLButtonElement>()
 const panelRegion = ref<HTMLElement>()
 const stage = ref<HTMLElement>()
-const video = ref<HTMLVideoElement>()
+const video = ref<HTMLVideoElement | null>(null)
+const { active: pipActive, busy: pipBusy, toggle: togglePip, reset: resetPip } = usePictureInPicture(video)
 const { mine, danmakuDraft, sendDm, recoveringDanmaku, pendingDanmakuRecovery, retryDanmakuRecovery } =
   useLocalEpisodeDanmaku(id, episode, () => canInteract.value)
 const mediaTime = ref(0)
@@ -401,6 +403,7 @@ usePlaybackShortcuts({
 })
 
 function stopMedia(failed = false) {
+  resetPip()
   cancelAnimationFrame(danmakuFrame)
   clearTimeout(stallTimer)
   stallTimer = undefined
@@ -688,11 +691,17 @@ onBeforeUnmount(() => {
       <DanmakuLayer v-if="canInteract && video && mine.length && state === 'ready'" :items="mine" :time="mediaTime" :duration="mediaDuration" />
     </div>
     <p v-if="playbackNotice" role="status">{{ playbackNotice }}</p>
-    <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
-      <button v-for="item in detail.episodes" :key="item.index" type="button" :disabled="!item.available"
-        :aria-current="item.index === episode ? 'page' : undefined"
-        @click="selectEpisode(item.index)">第{{ item.index }}集</button>
-    </nav>
+    <div v-if="video || (detail?.catalogPlayback && detail.episodes.length)" class="playback-actions">
+      <nav v-if="detail?.catalogPlayback && detail.episodes.length" class="episode-nav" aria-label="选集">
+        <button v-for="item in detail.episodes" :key="item.index" type="button" :disabled="!item.available"
+          :aria-current="item.index === episode ? 'page' : undefined"
+          @click="selectEpisode(item.index)">第{{ item.index }}集</button>
+      </nav>
+      <BaseButton v-if="state === 'ready' && video" variant="ghost" type="button" data-testid="catalog-pip"
+        :aria-pressed="pipActive" :disabled="pipBusy" @click="togglePip">
+        <PictureInPicture2 :size="16" aria-hidden="true" />{{ pipActive ? '退出画中画' : '画中画' }}
+      </BaseButton>
+    </div>
     <div v-if="canInteract" class="local-interactions">
       <div class="local-actions">
         <button ref="commentTrigger" type="button" :aria-expanded="localPanel === 'comments'" @click="toggleLocalPanel('comments')">本机评论</button>
@@ -723,7 +732,7 @@ video { display: block; width: 100%; max-width: 960px; max-height: calc(65vh / v
   position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain;
 }
 .loading { width: 100%; min-height: 360px; }
-.episode-nav, .local-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.playback-actions, .episode-nav, .local-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .episode-nav button, .local-actions button {
   border-radius: var(--r-pill); min-height: 38px; padding: 0 16px; background: var(--c-surface-hover);
   &[aria-current='page'] { background: var(--g-accent); color: #fff; }

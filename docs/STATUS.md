@@ -975,3 +975,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 已有草稿、公开元数据和公开下载复验均核对同一 GitHub 构建、提交和轮次的五个发行任务及 17 项关键步骤。正式 Windows 构建、签名与 WebView2 验收、macOS 双架构最低系统校验、签名、公证、ZIP 完整性和原生启动、Intel 归档验证、下载校验等均须实际完成并成功。拒绝步骤缺失、重复、跳过或顺序异常的记录。[发布说明](../README.md#生成并核对交付包)
 - 已复现旧版校验器接受整体成功但公证步骤跳过的夹具。修复后发行脚本 16 项通过，17 个必需步骤的名字和顺序均与当前工作流定义匹配。[原版复现](../build/bin/qa-release-executed-steps/baseline.log) · [回归](../build/bin/qa-release-executed-steps/tests.log) · [工作流比对](../build/bin/qa-release-executed-steps/workflow-compatibility.log)
 - 只读查询 .52 实际 GitHub 任务记录，Windows 和 macOS 测试任务成功，正式签名与公证步骤标为跳过。当前项目的正式签名任务仍待配置凭据并运行，本次未触发打包。[.52 GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [任务记录](../build/bin/qa-release-executed-steps/archived-smoke-jobs.json) · [BMad](../_bmad-output/plan-e13-verify-release-executed-steps.md)
+
+## E04 苹果 CMS 播放画中画（2026-11-27）
+
+- CMS 播放器在选集旁显示画中画控制，复用演示和本地片库的标准 API、WebKit 路径和能力提示。切集、换源和退出关闭旧画面。预先复现过共享 WebKit 请求超时后，已替换的视频仍迟到进入画中画。修复继续处理该完成事件，同时保护同一视频上的新请求。[元数据已就绪但无入口的原版](../build/bin/qa-cms-picture-in-picture/baseline.log) · [超时复现](../build/bin/qa-cms-picture-in-picture/timeout-baseline.log)
+- 生产构建、125 项 Vitest、148 项 Chromium 播放相关回归及 WebKit 两项专项通过。验证标准 API、系统退出状态、环境不支持提示、换源、键盘激活、离页及超时后切集。初次 Chromium 合跑因磁盘空间不足中断，清理完毕后按套件复跑通过。[播放套件汇总](../build/bin/qa-cms-picture-in-picture/chromium-verified.log) · [WebKit](../build/bin/qa-cms-picture-in-picture/webkit-retry.log)
+- 对照现有 CMS 播放布局，1448×1086 与 1280×860、220% 下按钮完整，未覆盖选集及本机评论和弹幕。使用实际样片和模拟浏览器画中画接口，系统真实浮窗与授权公网片源待原生验收。[默认窗口](../build/bin/qa-cms-picture-in-picture/cms-pip-default.png) · [220% 窗口](../build/bin/qa-cms-picture-in-picture/cms-pip-220.png) · [BMad](../_bmad-output/plan-e04-cms-picture-in-picture.md)

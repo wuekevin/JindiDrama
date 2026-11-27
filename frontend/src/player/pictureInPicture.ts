@@ -13,8 +13,11 @@ function isActive(video: VideoWithWebKitPresentation) {
   return document.pictureInPictureElement === video || video.webkitPresentationMode === 'picture-in-picture'
 }
 
-function webKitTransition(video: VideoWithWebKitPresentation, mode: 'inline' | 'picture-in-picture') {
+function webKitTransition(
+  video: VideoWithWebKitPresentation, mode: 'inline' | 'picture-in-picture', afterLateEntry?: () => void,
+) {
   return new Promise<void>((resolve, reject) => {
+    let timedOut = false
     function cleanup() {
       window.clearTimeout(timeout)
       video.removeEventListener('webkitpresentationmodechanged', sync)
@@ -22,10 +25,13 @@ function webKitTransition(video: VideoWithWebKitPresentation, mode: 'inline' | '
     function sync() {
       if (video.webkitPresentationMode !== mode) return
       cleanup()
-      resolve()
+      if (timedOut) afterLateEntry?.()
+      else resolve()
     }
     const timeout = window.setTimeout(() => {
-      cleanup()
+      timedOut = true
+      // A timed-out entry can still complete after the source or page has changed.
+      if (!afterLateEntry) cleanup()
       reject(new Error('Picture-in-picture transition timed out'))
     }, 3000)
     video.addEventListener('webkitpresentationmodechanged', sync)
@@ -91,6 +97,9 @@ export function usePictureInPicture(videoRef: Ref<HTMLVideoElement | null>, simu
     const current = generation
     pending.set(video, current)
     busy.value = true
+    const dismissStaleEntry = () => {
+      if (generation !== current && pending.get(video) !== generation) void close(video).catch(() => {})
+    }
     try {
       const legacy = video.webkitSetPresentationMode && video.webkitSupportsPresentationMode?.('picture-in-picture')
       if (isActive(video)) {
@@ -100,10 +109,10 @@ export function usePictureInPicture(videoRef: Ref<HTMLVideoElement | null>, simu
           await video.requestPictureInPicture()
         } catch (error) {
           if (generation !== current || !legacy || !(error instanceof DOMException) || error.name !== 'NotSupportedError') throw error
-          await webKitTransition(video, 'picture-in-picture')
+          await webKitTransition(video, 'picture-in-picture', dismissStaleEntry)
         }
       } else if (legacy) {
-        await webKitTransition(video, 'picture-in-picture')
+        await webKitTransition(video, 'picture-in-picture', dismissStaleEntry)
       } else {
         toast.push('当前环境不支持画中画')
       }

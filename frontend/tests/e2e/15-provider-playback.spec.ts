@@ -1279,6 +1279,105 @@ for (const scenario of ['playing', 'paused', 'blocked'] as const) {
   })
 }
 
+test('CMS picture-in-picture follows source changes and returns inline on navigation', async ({ page }, testInfo) => {
+  await page.addInitScript(() => {
+    let active: HTMLVideoElement | null = null
+    Object.defineProperties(document, {
+      pictureInPictureEnabled: { configurable: true, value: true },
+      pictureInPictureElement: { get: () => active },
+      exitPictureInPicture: { value: async () => {
+        const previous = active
+        active = null
+        previous?.dispatchEvent(new Event('leavepictureinpicture'))
+      } },
+    })
+    Object.defineProperties(HTMLVideoElement.prototype, {
+      webkitSupportsPresentationMode: { configurable: true, value: () => false },
+      requestPictureInPicture: { configurable: true, value: async function (this: HTMLVideoElement) {
+        active = this
+        this.dispatchEvent(new Event('enterpictureinpicture'))
+      } },
+    })
+  })
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  const pip = page.getByTestId('catalog-pip')
+  await pip.click()
+  await expect(pip).toHaveAttribute('aria-pressed', 'true')
+  expect(await first.evaluate((media) => document.pictureInPictureElement === media)).toBe(true)
+  await pip.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('cms-pip-default.png') })
+
+  await page.evaluate(() => document.exitPictureInPicture())
+  await expect(pip).toHaveAttribute('aria-pressed', 'false')
+  await page.evaluate(() => Object.defineProperty(document, 'pictureInPictureEnabled', { value: false }))
+  await pip.click()
+  await expect(page.getByText('当前环境不支持画中画', { exact: true })).toBeVisible()
+  await expect(pip).toHaveAttribute('aria-pressed', 'false')
+  await page.evaluate(() => Object.defineProperty(document, 'pictureInPictureEnabled', { value: true }))
+  await pip.click()
+  await expect(pip).toHaveAttribute('aria-pressed', 'true')
+  await first.dispatchEvent('error')
+  await expect(first).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await expect(pip).toHaveAttribute('aria-pressed', 'false')
+  expect(await page.evaluate(() => document.pictureInPictureElement)).toBeNull()
+
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((html) => html.style.setProperty('--user-zoom', '2.2'))
+  await pip.focus()
+  await expect(pip).toBeInViewport()
+  await expect(pip).toBeFocused()
+  await expect(page.getByText('当前环境不支持画中画', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('cms-pip-220.png') })
+  await pip.press('Enter')
+  await expect(pip).toHaveAttribute('aria-pressed', 'true')
+  await page.getByRole('link', { name: '返回详情' }).click()
+  await expect(pip).toHaveCount(0)
+  expect(await page.evaluate(() => document.pictureInPictureElement)).toBeNull()
+})
+
+test('CMS picture-in-picture closes a timed-out WebKit transition for an old episode', async ({ page }) => {
+  await page.addInitScript(() => {
+    const modes = new WeakMap<HTMLVideoElement, string>()
+    Object.defineProperty(document, 'pictureInPictureEnabled', { value: false })
+    Object.defineProperties(HTMLVideoElement.prototype, {
+      webkitPresentationMode: { configurable: true, get(this: HTMLVideoElement) { return modes.get(this) ?? 'inline' } },
+      webkitSupportsPresentationMode: { configurable: true, value: () => true },
+      webkitSetPresentationMode: { configurable: true, value(this: HTMLVideoElement, mode: string) {
+        const change = () => {
+          modes.set(this, mode)
+          this.dispatchEvent(new Event('webkitpresentationmodechanged'))
+        }
+        if (mode === 'picture-in-picture') {
+          document.body.dataset.pipPending = 'true'
+          window.addEventListener('finish-cms-pip', change, { once: true })
+        } else {
+          change()
+          document.body.dataset.pipClosed = 'true'
+        }
+      } },
+    })
+  })
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  await expect.poll(() => durationMs(historyVideo(page, 1))).toBeGreaterThan(1000)
+  const pip = page.getByTestId('catalog-pip')
+  await pip.click()
+  await expect(pip).toBeDisabled()
+  await expect(page.locator('body')).toHaveAttribute('data-pip-pending', 'true')
+  await expect(page.getByText('无法切换画中画，请稍后重试', { exact: true })).toBeVisible()
+  await expect(pip).toBeEnabled()
+  await page.getByRole('button', { name: '第2集' }).click()
+  await expect.poll(() => durationMs(historyVideo(page, 2))).toBeGreaterThan(1000)
+  await page.evaluate(() => window.dispatchEvent(new Event('finish-cms-pip')))
+  await expect(page.locator('body')).toHaveAttribute('data-pip-closed', 'true')
+  await expect(pip).toBeEnabled()
+  await expect(pip).toHaveAttribute('aria-pressed', 'false')
+})
+
 test('CMS native volume carries across a fallback and a manual episode change', async ({ page }) => {
   await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
