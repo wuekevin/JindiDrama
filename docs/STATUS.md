@@ -760,3 +760,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 在 1280×860、220% 缩放时，Tab 到「继续观看」曾使首页主滚动区水平偏移，焦点卡片只剩约 5% 可见。首页现在按实际内容宽度调整上新、榜单和继续观看的列数，窄布局允许区块标题与操作换行。Tab 到卡片时主区无横向溢出，按 Enter 可进入对应分集。[修复前](../build/bin/qa-home-zoom-keyboard/resume-focused-before.png) · [修复后](../build/bin/qa-home-zoom-keyboard/resume-focused-after.png)
 - Chromium 首页 21 项、最小窗口十个主要页面与面板的真实键盘焦点抽查、macOS WebKit 的 Option+Tab 专项和 122 项 Vitest 通过。1448×1086 默认首页截图逐字节一致。修复已纳入本地源码候选，晚于 .50 安装包。[十项焦点验证](../build/bin/qa-home-zoom-keyboard/keyboard-fixed.log) · [默认截图校验](../build/bin/qa-home-zoom-keyboard/baseline-sha256.log) · [Safari 键盘说明](https://support.apple.com/guide/safari/keyboard-shortcuts-and-gestures-cpsh003/mac) · [BMad 记录](../_bmad-output/plan-e01-home-zoom-keyboard.md)
+
+## E13 最新发行源码集中回归（2026-11-27）
+
+- 从发行源码 `a2b442ff0e1cd80ad5a3cb5a4a3fd61cedf0647b` 独立检出，包含 .50 的三项修复和之后的首页键盘焦点修复。Node 22 锁文件重装、类型检查和生产构建通过。393 项 Chromium、122 项 Vitest 与 macOS WebKit 首页键盘专项通过。被测前端的逐项摘要与构建输出一致。同环境下 1448×1086 首页截图按像素匹配修改前基线。[浏览器回归](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log)
+- Go 依赖校验、vet、全量测试和 App/诊断/CMS/更新竞态通过。Go 生产标签扫描及 npm 生产依赖审计未报告已知漏洞。macOS 13 对应的 Safari 支持首页使用的尺寸容器查询。最低公开支持系统的真实 WKWebView 环境仍需实机验证。[WebKit 支持记录](https://webkit.org/blog/13399/webkit-features-in-safari-16-1/) · [BMad 记录](../_bmad-output/plan-e13-current-local-regression51.md)
+- 本轮验证源码，现有可下载安装包仍为 .50。GitHub `package.yml` 已启用，最新已完成托管包仍为 .44，.51 独立分支待确认。仓库正式发行和签名环境均为 0，正式签名及授权片源联调的前置条件仍待满足。[工作流状态](../build/bin/qa-release-source-51/hosted-status.log)
