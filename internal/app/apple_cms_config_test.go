@@ -60,7 +60,12 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
-	var thirdEpisodeRemoved, trialRestricted, withdrawn, invalidStatus atomic.Bool
+	var thirdEpisodeRemoved, trialRestricted, withdrawn atomic.Bool
+	const (
+		malformedStatus = iota + 1
+		duplicateStatus
+	)
+	var statusFixture atomic.Int32
 	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Scheme != "https" {
 			t.Errorf("invalid scheme: %s", req.URL.Scheme)
@@ -90,8 +95,11 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			if withdrawn.Load() {
 				status = "0"
 			}
-			if invalidStatus.Load() {
+			switch statusFixture.Load() {
+			case malformedStatus:
 				status = "{}"
+			case duplicateStatus:
+				status = `1,"VOD_STATUS":1`
 			}
 			malformed := ""
 			if !q.Has("ids") {
@@ -196,15 +204,17 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	}
 	withdrawn.Store(false)
 
-	invalidStatus.Store(true)
-	if detail, err := a.CatalogDetail(id); err == nil || err.Error() != "苹果 CMS 目录暂不可用" || detail.Drama.ID != "" {
-		t.Errorf("invalid CMS publication status should be retryable: %+v, %v", detail, err)
+	for _, fixture := range []int32{malformedStatus, duplicateStatus} {
+		statusFixture.Store(fixture)
+		if detail, err := a.CatalogDetail(id); err == nil || err.Error() != "苹果 CMS 目录暂不可用" || detail.Drama.ID != "" {
+			t.Errorf("publication fixture %d should be retryable: %+v, %v", fixture, detail, err)
+		}
+		if ticket, err := a.CatalogPlayback(id, 3); !errors.Is(err, errCatalogPlaybackUnavailable) ||
+			ticket.LeaseID != "" || len(ticket.Sources) != 0 || mediaCalls.Load() != 0 {
+			t.Errorf("publication fixture %d returned playback: %+v, %v", fixture, ticket, err)
+		}
 	}
-	if ticket, err := a.CatalogPlayback(id, 3); !errors.Is(err, errCatalogPlaybackUnavailable) ||
-		ticket.LeaseID != "" || len(ticket.Sources) != 0 || mediaCalls.Load() != 0 {
-		t.Errorf("invalid CMS publication status returned playback: %+v, %v", ticket, err)
-	}
-	invalidStatus.Store(false)
+	statusFixture.Store(0)
 
 	for _, attempt := range []struct {
 		id    string

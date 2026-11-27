@@ -212,7 +212,7 @@ func TestCMSAllowsPlaybackWithoutATrialLimit(t *testing.T) {
 func TestCatalogShowsOnlyPublishedTitles(t *testing.T) {
 	const current = `{"vod_id":42,"vod_name":"海岛来信","type_id":7,"vod_status":1}`
 	const legacy = `{"vod_id":43,"vod_name":"旧版目录","type_id":7}`
-	const stringStatus = `{"vod_id":44,"vod_name":"旧版状态","type_id":7,"vod_status":"1"}`
+	const stringStatus = `{"vod_id":44,"vod_name":"旧版状态","type_id":7,"VOD_STATUS":"1"}`
 	const unavailable = `{"vod_id":41,"vod_name":"不可见剧目","type_id":8,"vod_status":0,"vod_play_url":"1$https://media.example.test/private.mp4"}`
 	const invalid = `{"vod_id":40,"vod_name":"无效状态","type_id":7,"vod_status":null}`
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -278,6 +278,10 @@ func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 		{"object publication status", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","vod_status":{}}]}`, errUpstream},
 		{"unknown publication status", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","vod_status":2}]}`, errUpstream},
 		{"withdrawn string status", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","vod_status":" 0 "}]}`, provider.ErrNotFound},
+		{"duplicate envelope field", http.StatusOK, `{"code":1,"CoDe":1,"list":[{"vod_id":42,"vod_name":"同一剧"}]}`, errUpstream},
+		{"duplicate list field", http.StatusOK, `{"code":1,"list":[],"liſt":[]}`, errUpstream},
+		{"duplicate publication field", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","vod_status":1,"VOD_STATUS":1}]}`, errUpstream},
+		{"duplicate restriction field", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","locked":false,"\u006cocked":false}]}`, errUpstream},
 		{"other title", http.StatusOK, `{"code":1,"list":[{"vod_id":43,"vod_name":"其他剧"}]}`, provider.ErrNotFound},
 		{"multiple titles", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧"},{"vod_id":43,"vod_name":"其他剧"}]}`, provider.ErrNotFound},
 		{"oversize streamed body", http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), errUpstream},
@@ -295,7 +299,7 @@ func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 			if drama, err := p.Drama(t.Context(), p.idPrefix+"42"); err != tt.err || drama.ID != "" {
 				t.Fatalf("unexpected failure result: %+v, %v", drama, err)
 			}
-			if tt.name == "valid detail mixed with invalid" {
+			if tt.name == "valid detail mixed with invalid" || strings.HasPrefix(tt.name, "duplicate ") {
 				if ticket, err := p.ResolvePlayback(t.Context(), p.idPrefix+"42", 1); err != errUpstream || len(ticket.Sources) != 0 {
 					t.Fatalf("unexpected playback result: %+v, %v", ticket, err)
 				}
@@ -326,7 +330,7 @@ func TestCatalogPageMetadata(t *testing.T) {
 		{"unusable page count", 1, `"page":1,"pagecount":"2 pages",`, valid, false, nil},
 		{"empty page", 2, `"page":2,"pagecount":5,`, "", false, nil},
 		{"invalid records", 2, `"page":2,"pagecount":5,`, `{"vod_id":"a","vod_name":"无效"}`, false, nil},
-		{"valid and malformed rows", 2, `"page":2,"pagecount":5,`, `null,{"vod_id":41,"vod_name":[]},` + valid + `,7`, true, nil},
+		{"valid and malformed rows", 2, `"page":2,"pagecount":5,`, `null,{"vod_id":41,"vod_name":[]},{"vod_id":43,"vod_name":"重复字段","VOD_NAME":"重复字段"},` + valid + `,7`, true, nil},
 		{"all rows malformed", 2, `"page":2,"pagecount":5,`, `null,{"vod_id":41,"vod_name":[]},7`, false, errUpstream},
 		{"record cap counts malformed rows", 2, `"page":2,"pagecount":5,`, strings.Repeat("null,", maxRecords) + valid, false, errUpstream},
 		{"bounded final page", maxPage, `"page":100000,"pagecount":100001,`, valid, false, nil},
@@ -401,6 +405,7 @@ func TestCatalogGenres(t *testing.T) {
 		{"type_id":{},"type_name":"对象"},
 		{"type_id":8,"type_name":true},
 		{"type_id":8,"type_name":"https://catalog.example.test/?secret"},
+		{"type_id":8,"TYPE_ID":8,"type_name":"重复字段"},
 		null, "非对象", {}
 	]`
 	wantGenres := []CatalogGenre{{ID: maxID, Name: "悬疑"}, {ID: "7", Name: "悬疑"}}

@@ -1076,3 +1076,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 片源返回有效剧目 ID 且上架状态为 null、对象或其他未识别值时，详情报告片源错误，收藏和历史提供「重试核验」。明确下架仍报告未找到，省略状态的兼容片源可继续使用。异常和下架均不签发新票据，Go 夹具确认没有向媒体地址发起请求。[原版复现](../build/bin/qa-cms-publication/baseline.log) · [Go 专项](../build/bin/qa-cms-publication/targeted.log)
 - Go 全量、vet、CMS 与 App 竞态通过。前端生产构建后 Chromium 和 WebKit 各通过 4 项回归。Apple Silicon 两个隔离 Wails 会话分别验证收藏和历史原地恢复，保留 25% 进度及 6000 ms 断点，正常退出和 SQLite 完整性检查通过。原生测试使用合成网络响应。[Chromium](../build/bin/qa-cms-publication/chromium.log) · [WebKit](../build/bin/qa-cms-publication/webkit.log) · [原生](../build/bin/qa-cms-publication/native.log)
 - 本次修改晚于 .59 本地打包。验收日志位于本机 JindiDrama 主工作区的 `build/bin/`，授权公网片源和跨平台原生待验收。[BMad](../_bmad-output/plan-e12-cms-unknown-publication-status.md)
+
+## E12 苹果 CMS 拒绝重复 JSON 字段（2026-11-27）
+
+- 在 Go 适配器的响应、剧目和分类对象上检查重复字段。大小写变体和 JSON 转义后同名也算重复。响应本身有歧义时返回片源错误。单条目录或分类记录有歧义时跳过该行，精确详情和播放申请拒绝异常记录。当字段只出现一次时，保留已有的大小写兼容。[原版复现](../build/bin/qa-cms-unique-fields/baseline.log) · [专项回归](../build/bin/qa-cms-unique-fields/targeted.log)
+- Go 全量、vet、App/CMS 竞态和 Windows amd64 交叉 vet 均通过。App 夹具包含有效的媒体地址，碰到重复上架字段仍无票据和媒体请求。Apple Silicon 隔离 Wails 构建用合成响应验证收藏和历史，歧义字段使条目进入「重试核验」。片源恢复后原页继续观看，25% 和 6000 ms 断点保持原值，正常退出和 SQLite 完整性均通过。[原生](../build/bin/qa-cms-unique-fields/native.log)
+- 本次修改晚于 .59 本地打包。验收证据位于本机 JindiDrama 主工作区的 `build/bin/`。公网授权联调和跨平台成品仍待验收。[BMad](../_bmad-output/plan-e12-cms-unique-json-fields.md)

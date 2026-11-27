@@ -2,9 +2,11 @@
 package applecms
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"html"
@@ -17,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"jindi-drama/internal/provider"
@@ -159,7 +162,7 @@ func (p *Provider) refreshCatalogGenres(ctx context.Context) ([]CatalogGenre, er
 			ID   json.RawMessage `json:"type_id"`
 			Name string          `json:"type_name"`
 		}
-		if json.Unmarshal(raw, &item) != nil {
+		if unmarshalUniqueObject(raw, &item) != nil {
 			continue
 		}
 		id := genreID(scalar(item.ID).text())
@@ -478,7 +481,7 @@ func (p *Provider) request(ctx context.Context, params url.Values) (response, er
 		response
 		List json.RawMessage `json:"list"`
 	}
-	if err := json.Unmarshal(body, &wire); err != nil || scalar(wire.Code).decimal(1) != "1" {
+	if err := unmarshalUniqueObject(body, &wire); err != nil || scalar(wire.Code).decimal(1) != "1" {
 		return response{}, errUpstream
 	}
 	if params.Get("ac") == "list" {
@@ -492,9 +495,9 @@ func (p *Provider) request(ctx context.Context, params url.Values) (response, er
 	wire.response.List = make([]record, 0, len(rows))
 	detail := params.Has("ids")
 	for _, row := range rows {
-		var item *record
-		if json.Unmarshal(row, &item) == nil && item != nil {
-			wire.response.List = append(wire.response.List, *item)
+		var item record
+		if unmarshalUniqueObject(row, &item) == nil {
+			wire.response.List = append(wire.response.List, item)
 		} else if detail {
 			return response{}, errUpstream
 		}
@@ -503,6 +506,38 @@ func (p *Provider) request(ctx context.Context, params url.Values) (response, er
 		return response{}, errUpstream
 	}
 	return wire.response, nil
+}
+
+// Check only this object's fields so each catalog row can be validated and
+// discarded independently of the envelope and its siblings.
+func unmarshalUniqueObject(data []byte, target any) error {
+	decoder := jsontext.NewDecoder(bytes.NewReader(data), jsontext.AllowDuplicateNames(true), jsontext.AllowInvalidUTF8(true))
+	open, err := decoder.ReadToken()
+	if err != nil || open.Kind() != jsontext.KindBeginObject {
+		return errUpstream
+	}
+	seen := make(map[string]bool)
+	for decoder.PeekKind() != jsontext.KindEndObject {
+		key, err := decoder.ReadToken()
+		if err != nil || key.Kind() != jsontext.KindString {
+			return errUpstream
+		}
+		// encoding/json matches struct fields using Unicode simple case folding.
+		name := strings.Map(func(r rune) rune {
+			for {
+				next := unicode.SimpleFold(r)
+				if next <= r {
+					return next
+				}
+				r = next
+			}
+		}, key.String())
+		if seen[name] || decoder.SkipValue() != nil {
+			return errUpstream
+		}
+		seen[name] = true
+	}
+	return json.Unmarshal(data, target)
 }
 
 func plainText(value string) string {
