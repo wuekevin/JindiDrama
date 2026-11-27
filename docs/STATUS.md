@@ -2,15 +2,15 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，`v0.1.0-smoke.20261127.49` 是最新本地候选，打包源提交为 `9208b80b42e77f4d00e87e77090a5ce59d5566a2`。下方记录包含历史验收，各版本的证据按对应提交使用。
+截至 2026-11-27，`v0.1.0-smoke.20261127.50` 是最新本地候选，打包源提交为 `33a7600d68d1951e4c8ecaea6b8fffeb35d75454`。下方记录包含历史验收，各版本的证据按对应提交使用。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
-| .49 本地构建 | 两平台 13 项 SHA-256、391 项浏览器测试和 Apple Silicon 成品启动及回滚通过 | [Windows 校验清单](../build/bin/smoke-20261127.49/windows/SHA256SUMS.txt) · [macOS 校验清单](../build/bin/smoke-20261127.49/macos/SHA256SUMS.txt) |
-| .49 GitHub 原生验收 | 等待独立测试分支推送授权。上一轮 .44 的 Windows、Apple Silicon、Intel Mac 通过 | 当前候选的四项冒烟任务全部成功，并下载复验两份归档和内部清单。[GitHub .44 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269) |
+| .50 本地构建 | 两平台 13 项 SHA-256、392 项浏览器测试和 Apple Silicon 成品启动及回滚通过 | [Windows 校验清单](../build/bin/smoke-20261127.50/windows/SHA256SUMS.txt) · [macOS 校验清单](../build/bin/smoke-20261127.50/macos/SHA256SUMS.txt) |
+| .50 GitHub 原生验收 | 等待独立测试分支推送授权。上一轮 .44 的 Windows、Apple Silicon、Intel Mac 通过 | 当前候选的四项冒烟任务全部成功，并下载复验两份归档和内部清单。[GitHub .44 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269) |
 | Windows 正式签名 | 托管打包要求签名 PFX。证书库脚本可使用 Windows 上的硬件密钥，已通过本地夹具 | 确认维护者实际可用的签名路径；正式成品的便携程序、安装器和卸载器通过原生验签及时间戳检查。[签名说明](../README.md#windows-证书库签名) |
 | macOS 正式签名与公证 | 本地成品为临时签名 | 为 `release-macos` 配置 Developer ID Application 和公证凭据；双架构归档通过票据验证与分发策略检查。[签名环境](../README.md#签名环境) |
-| 正式发布版在线更新 | Apple Silicon 的系统保存、校验、重试与剪贴板已通过隔离验收 | 发布签名安装包后，用旧版实际验证 GitHub 版本发现与下载校验。[原生更新日志](../build/bin/qa-native-update-download-49/verify.log) |
+| 正式发布版在线更新 | .49 的 Apple Silicon 系统保存、校验、重试与剪贴板已通过隔离验收 | 发布签名安装包后，用旧版实际验证 GitHub 版本发现与下载校验。[原生更新日志](../build/bin/qa-native-update-download-49/verify.log) |
 | 苹果 CMS 公网联调 | Go 直连已用合成授权片源验证目录及播放 | 使用可供项目联调的授权 HTTPS 端点和测试剧目，验证目录、搜索、详情、播放与授权限制。 |
 | 红果官方接口 | 等待第三方桌面接入授权、接口文档和测试环境 | 按[上游授权规定](UPSTREAM-AUTHORIZATION.md)验证目录、播放、登录、互动和同步。 |
 
@@ -743,3 +743,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 授权 MP4、WebM 直链及 HLS 分段在发送媒体响应前检查最多 512 个正文前缀字节。可识别的 HTML、XML 错误页面返回空正文的 502。校验 MPEG-TS 和 fMP4 分段格式的现有规则继续生效。上游错误正文不进入播放器，同票据备用源可继续请求。
 - 回归复现旧版转发带视频类型的整份 HTML、分块 XML 和恶意标记的 Range 正文。修复后以自制 MP4 和 WebM 样片验证全文、起始 Range 与中段 Range 都逐字节等于原件。Go 媒体专项、vet、全量及 App 竞态通过。本地源码候选已包含修复，现有 .49 包早于此提交。[实样字节验证](../build/bin/qa-cms-direct-media-markup/real-bytes.log) · [BMad 记录](../_bmad-output/plan-e12-cms-direct-media-markup.md)
+
+## E13 .50 累计候选本地打包（2026-11-27）
+
+- 从发行源码 `33a7600d68d1951e4c8ecaea6b8fffeb35d75454` 构建 `v0.1.0-smoke.20261127.50`，纳入带引号凭据脱敏、苹果 CMS 下架检查和授权媒体错误页拦截。用 Node 22 依赖锁文件生成前端。浏览器与两平台打包使用的前端文件逐项摘要一致。392 项 Playwright、122 项 Vitest、Go vet、Go 全量和 App/CMS/更新/开机启动/诊断竞态通过。[浏览器回归](../build/bin/smoke-20261127.50/evidence/e2e.log)
+- Windows x64 安装器 22.54 MiB、便携版 32.34 MiB。Windows PE 版本正确，NSIS 内嵌主程序和 WebView2 引导程序与输入逐字节一致。macOS Universal ZIP 40.88 MiB，两个切片最低系统版本均为 13.0。两平台 13 项 SHA-256 通过项目校验器、系统命令、随包命令和归档复验。[Windows 清单](../build/bin/smoke-20261127.50/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.50/macos/SHA256SUMS.txt)
+- Apple Silicon 从最终 ZIP 启动，正常退出并通过 SQLite 完整性与回滚。签名脚本夹具和 Go 源码、三个二进制切片及 npm 生产依赖扫描通过。macOS 随包说明首次生成时找不到中间应用，补齐路径后以同一份 ZIP 完成校验。Wails 改写配置格式，已核实 JSON 内容一致并恢复隔离检出的原文件。[原生验收](../build/bin/smoke-20261127.50/evidence/macos-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate50-packages.md)
+- .50 是本地 smoke。Windows 测试包未签名，macOS 为临时签名。GitHub 当前 Release、签名环境和仓库级 Actions secrets 均为 0。本批 Windows 与 Intel Mac 原生、正式签名与公证、签名版在线更新和授权公网片源仍待验收。[发行前置条件](../build/bin/smoke-20261127.50/evidence/release-prerequisites.log)
