@@ -849,3 +849,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 从发行源码 `2a46e7b46f86728ccc1a455bd3a00f20ed725f34` 构建 Apple Silicon 测试应用，以独立临时签名和隔离数据目录在 macOS 26.6.2 运行。通过设置页和系统文件选择器补回 1 项收藏及 1 条观看历史，重复导入显示记录已存在。损坏文件与时间戳越界文件均显示读取失败。取消选择后正常返回。每步复核 SQLite 字段，原有记录及新增记录均与预期一致。[原生交互](../build/bin/qa-native-library-restore/native-ui.log) · [构建身份](../build/bin/qa-native-library-restore/native-build-identity.log)
 - 三份源文件 SHA-256 一致，源目录文件集合一致。应用正常退出后重启，收藏和历史页各显示两条预期记录。再退出后 SQLite `quick_check` 通过，WAL 已检查点同步，会话标记已清理。本轮为 Apple Silicon 本地验收，Windows 与 Intel Mac 的当前源码验收仍待完成。[源文件校验](../build/bin/qa-native-library-restore/backup-source-integrity.log) · [重启界面](../build/bin/qa-native-library-restore/restart-ui.log) · [重启数据库](../build/bin/qa-native-library-restore/restart-sqlite.log) · [BMad 记录](../_bmad-output/plan-e11-native-library-restore.md)
+
+## E11 媒体保存兼容 ExFAT（2026-11-27）
+
+- 在 macOS 挂载的真实可写 ExFAT 隔离卷上复现旧版行为。演示视频可以保存，本地片库视频和 PNG 截图在原子发布时失败。现在三者在原子发布不可用时共用目录句柄与独占创建。本地片库回退从同一已授权句柄的开头复制，并复核源文件大小和修改时间。更新包和数据库备份继续使用严格发布。[卷信息](../build/bin/qa-media-volume/volume.log) · [原版复现](../build/bin/qa-media-volume/before.log)
+- 用合成素材和指定测试路径验证三个保存入口。核对视频与 PNG 的完整字节、拒绝同名覆盖、仅播放片源拒绝保存，以及暂存清理。回退期间源文件变化的回归确认操作报错，已打开的目标文件被清空。直接写入中断时可能留下空文件。隔离 ExFAT 卷已卸载。[ExFAT 验收](../build/bin/qa-media-volume/exfat.log) · [卸载](../build/bin/qa-media-volume/volume-detach.log)
+- Go 全量、vet、App 竞态及 Windows amd64 App 交叉编译通过。首次并行测试遇到磁盘空间不足，清理已归档候选的重复暂存后串行通过。Windows 原生 ExFAT 待验收，本次源码晚于 .52。[Go 全量](../build/bin/qa-media-volume/go-test.log) · [App 竞态](../build/bin/qa-media-volume/go-race.log) · [BMad 记录](../_bmad-output/plan-e11-media-export-volume.md)

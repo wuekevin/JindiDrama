@@ -294,7 +294,7 @@ func TestDemoExportFallbackFailureClearsOnlyOpenFile(t *testing.T) {
 		useFallback = true
 		return errors.ErrUnsupported
 	})
-	if !errors.Is(err, errDemoDirectCopy) {
+	if !errors.Is(err, errMediaDirectCopy) {
 		t.Fatalf("fallback failure: %v", err)
 	}
 	if data, err := os.ReadFile(target); err != nil || len(data) != 0 {
@@ -470,6 +470,52 @@ func TestLicensedExportFallsBackToAvailableFormat(t *testing.T) {
 			})
 			if err == nil || saved {
 				t.Fatalf("all formats unavailable: saved=%t err=%v", saved, err)
+			}
+		})
+	}
+}
+
+func TestLicensedExportFallbackReplaysAndRechecksSource(t *testing.T) {
+	for _, changed := range []bool{false, true} {
+		t.Run(fmt.Sprintf("source-changed=%v", changed), func(t *testing.T) {
+			dir := t.TempDir()
+			sourcePath := filepath.Join(dir, "source.mp4")
+			target := filepath.Join(dir, "destination.mp4")
+			const original = "licensed source"
+			if err := os.WriteFile(sourcePath, []byte(original), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			source, err := os.Open(sourcePath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer source.Close()
+			info, err := source.Stat()
+			if err != nil {
+				t.Fatal(err)
+			}
+			passes := 0
+			err = stageMediaExport(target, func(output io.Writer) error {
+				passes++
+				return copyLicensedExport(source, info, output)
+			}, func(*stagedOutput, string) error {
+				if changed {
+					if err := os.WriteFile(sourcePath, []byte(original+" extra"), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return errors.ErrUnsupported
+			})
+			if passes != 2 {
+				t.Fatalf("copy passes: %d", passes)
+			}
+			data, readErr := os.ReadFile(target)
+			if changed {
+				if !errors.Is(err, errMediaDirectCopy) || readErr != nil || len(data) != 0 {
+					t.Fatalf("changed source: %q, %v, %v", data, readErr, err)
+				}
+			} else if err != nil || readErr != nil || string(data) != original {
+				t.Fatalf("direct copy: %q, %v, %v", data, readErr, err)
 			}
 		})
 	}

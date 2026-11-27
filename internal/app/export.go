@@ -12,7 +12,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-var errDemoDirectCopy = errors.New("当前保存位置仅支持直接写入，演示视频保存中断")
+var errMediaDirectCopy = errors.New("当前保存位置仅支持直接写入，媒体保存中断")
 var errExportCleanup = errors.New("文件已保存，但暂存目录清理失败")
 
 func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bool, error) {
@@ -23,6 +23,12 @@ func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bo
 		return false, errors.New("已有保存操作进行中，或窗口正在关闭")
 	}
 	defer a.endMediaExport()
+	return a.exportDemoEpisode(dramaID, episode, quality, func(options runtime.SaveDialogOptions) (string, error) {
+		return runtime.SaveFileDialog(a.ctx, options)
+	})
+}
+
+func (a *App) exportDemoEpisode(dramaID string, episode int, quality string, pick func(runtime.SaveDialogOptions) (string, error)) (bool, error) {
 	asset, err := a.demoExportAsset(dramaID, episode, quality)
 	if err != nil {
 		return false, err
@@ -31,7 +37,7 @@ func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bo
 	if quality == "sd" {
 		filename += "-sd"
 	}
-	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+	path, err := pick(runtime.SaveDialogOptions{
 		Title:                "保存演示视频",
 		DefaultFilename:      filename + ".mp4",
 		Filters:              []runtime.FileFilter{{DisplayName: "MP4 视频", Pattern: "*.mp4"}},
@@ -46,9 +52,6 @@ func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bo
 		}
 		if destinationErr := exportDestinationError(err); destinationErr != nil {
 			return false, destinationErr
-		}
-		if errors.Is(err, errDemoDirectCopy) {
-			return false, errDemoDirectCopy
 		}
 		return false, errors.New("演示视频保存失败")
 	}
@@ -153,24 +156,46 @@ func exportDestinationError(err error) error {
 		return errors.New("保存目录已移动或替换，请在原目录查找已保存的文件")
 	case errors.Is(err, errExportCleanup):
 		return errExportCleanup
+	case errors.Is(err, errMediaDirectCopy):
+		return errMediaDirectCopy
 	default:
 		return nil
 	}
 }
 
 func exportLicensedFile(source *os.File, expected os.FileInfo, target string) error {
-	return writeStagedExport(target, func(staged io.Writer) error {
-		if _, err := io.CopyN(staged, source, expected.Size()); err != nil {
-			return err
+	return writeMediaExport(target, func(output io.Writer) error {
+		return copyLicensedExport(source, expected, output)
+	})
+}
+
+func copyLicensedExport(source *os.File, expected os.FileInfo, output io.Writer) error {
+	// Publication may need to replay the copy from the same open source.
+	input := io.NewSectionReader(source, 0, expected.Size())
+	if _, err := io.CopyN(output, input, expected.Size()); err != nil {
+		return err
+	}
+	actual, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	if actual.Size() != expected.Size() || !actual.ModTime().Equal(expected.ModTime()) {
+		return errors.New("源文件在导出期间发生变化")
+	}
+	return nil
+}
+
+func writeMediaExport(target string, write func(io.Writer) error) error {
+	return stageMediaExport(target, write, func(stage *stagedOutput, target string) error { return stage.publish(target) })
+}
+
+func stageMediaExport(target string, write func(io.Writer) error, publish func(*stagedOutput, string) error) error {
+	return stageExport(target, write, func(stage *stagedOutput, target string) error {
+		err := publish(stage, target)
+		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
+			return stage.copyDirect(target, write)
 		}
-		actual, err := source.Stat()
-		if err != nil {
-			return err
-		}
-		if actual.Size() != expected.Size() || !actual.ModTime().Equal(expected.ModTime()) {
-			return errors.New("源文件在导出期间发生变化")
-		}
-		return nil
+		return err
 	})
 }
 
@@ -225,22 +250,16 @@ func exportDemoAsset(assets fs.FS, path, target string, publish func(*stagedOutp
 		return err
 	}
 
-	return stageExport(target, copyAsset, func(stage *stagedOutput, target string) error {
-		err := publish(stage, target)
-		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
-			return stage.copyDirect(target, copyAsset)
-		}
-		return err
-	})
+	return stageMediaExport(target, copyAsset, publish)
 }
 
 func completeDirectExport(file *os.File, write func(io.Writer) error) error {
 	if err := write(file); err != nil {
 		// Acting on the open file keeps any replacement at the same path intact.
-		return errors.Join(errDemoDirectCopy, err, file.Truncate(0), file.Close())
+		return errors.Join(errMediaDirectCopy, err, file.Truncate(0), file.Close())
 	}
 	if err := file.Close(); err != nil {
-		return errors.Join(errDemoDirectCopy, err)
+		return errors.Join(errMediaDirectCopy, err)
 	}
 	return nil
 }

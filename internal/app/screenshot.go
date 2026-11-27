@@ -57,7 +57,7 @@ func (a *App) exportDemoScreenshot(dramaID string, episode int, quality string, 
 	if !strings.HasSuffix(strings.ToLower(target), ".png") {
 		return false, errors.New("请选择以 .png 结尾的文件名")
 	}
-	if err := writeStagedExport(target, func(output io.Writer) error {
+	if err := writeMediaExport(target, func(output io.Writer) error {
 		return png.Encode(output, frame)
 	}); err != nil {
 		if errors.Is(err, fs.ErrExist) {

@@ -69,7 +69,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if info.Uid != uint32(os.Geteuid()) || info.Mode&0077 != 0 {
 		if kind == mediaOutputStage {
 			// A volume without private directory permissions can still create a
-			// demo's final file exclusively inside the opened destination.
+			// media file exclusively inside the opened destination.
 			if err := closeStageDirectory(); err != nil {
 				_ = unix.Close(destFD)
 				return nil, err
