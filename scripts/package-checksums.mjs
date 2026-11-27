@@ -146,30 +146,37 @@ async function verifyReleaseTag(tag, directory) {
   return { checksums, manifestFile, repository, revision, notes, run, attempt }
 }
 
-function remoteReleaseRevision(repository, tag) {
-  const ref = 'refs/tags/' + tag
-  const peeled = ref + '^{}'
-  let output
+async function readReleaseTagObject(url, tag, signal) {
   try {
-    output = execFileSync('git', ['ls-remote', '--exit-code', '--tags',
-      'https://github.com/' + repository + '.git', ref, peeled], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 20_000, maxBuffer: 64 * 1024,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    const response = await fetch(url, {
+      redirect: 'error', credentials: 'omit', cache: 'no-store', signal,
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'JindiDrama-release-verification' },
     })
+    if (response.status === 200) return await response.json()
+    await response.body?.cancel()
   } catch {
-    throw new Error('Cannot resolve GitHub release tag ' + tag)
+    // Keep transport and response details out of release verification logs.
   }
-  const refs = new Map()
-  for (const line of output.trimEnd().split(/\r?\n/)) {
-    const [sha, name, extra] = line.split('\t')
-    if (name !== ref && name !== peeled) continue
-    if (!/^[0-9a-f]{40}$/.test(sha) || extra !== undefined || refs.has(name)) {
-      throw new Error('Unexpected GitHub release tag result: ' + tag)
-    }
-    refs.set(name, sha)
+  throw new Error('Cannot resolve GitHub release tag ' + tag)
+}
+
+async function remoteReleaseRevision(repository, tag) {
+  const api = 'https://api.github.com/repos/' + repository + '/git'
+  const signal = AbortSignal.timeout(20_000)
+  // Query GitHub directly because a local Git URL rewrite can select a mirror.
+  const reference = await readReleaseTagObject(api + '/ref/tags/' + encodeURIComponent(tag), tag, signal)
+  if (reference?.ref !== 'refs/tags/' + tag) throw new Error('Unexpected GitHub release tag reference: ' + tag)
+  const visited = new Set()
+  let object = reference.object
+  while (typeof object?.sha === 'string' && /^[0-9a-f]{40}$/.test(object.sha)) {
+    if (object.type === 'commit') return object.sha
+    if (object.type !== 'tag' || visited.has(object.sha)) break
+    visited.add(object.sha)
+    const annotation = await readReleaseTagObject(api + '/tags/' + object.sha, tag, signal)
+    if (annotation?.sha !== object.sha) break
+    object = annotation.object
   }
-  if (!refs.has(ref)) throw new Error('Cannot resolve exact GitHub release tag ' + tag)
-  return refs.get(peeled) ?? refs.get(ref)
+  throw new Error('Unexpected GitHub release tag object: ' + tag)
 }
 
 function normalizedReleaseBody(body) {
@@ -406,7 +413,7 @@ async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile
   await verifyReleaseJobs(jobsFile, handoff)
   await verifyActionsArchive(`release-handoff-${tag}-attempt-${handoff.attempt}`, archiveFile, artifactFile, handoff,
     Object.fromEntries(files), 'handoff files')
-  if (remoteReleaseRevision(repository, tag) !== revision) {
+  if (await remoteReleaseRevision(repository, tag) !== revision) {
     throw new Error('GitHub release tag does not match the handoff build commit')
   }
   console.log('GitHub release tag ' + tag + ' matches build commit ' + revision)

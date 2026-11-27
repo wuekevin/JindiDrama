@@ -1213,3 +1213,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 从最终归档目录分别校验 Windows 7 项、macOS 6 项 SHA-256。Windows 安装器 22.58 MiB，便携版 32.45 MiB，macOS 通用 ZIP 40.97 MiB。Apple Silicon 从最终 ZIP 启动实际窗口、正常退出，数据库完整性、活动 WAL 回滚及原库不变均通过。实际成品上的更新页通过断网恢复、旧失败提示撤下与重启恢复预发布渠道。Windows 成品未签名，macOS 成品使用独立 bundle ID 和本机临时签名。
 - Chromium 全量 406 项、WebKit 专项 5 项、Vitest 125 项、Go 全量与 vet、App 和更新模块竞态、公证和 macOS 冒烟脚本 19 项、Node 交付脚本 18 项及源码历史夹具通过。Go 生产源码、三种架构二进制和 npm 锁文件依赖扫描均未报告已知漏洞。测试证据位于主工作区 `build/bin/qa-release-source-63/`。
 - GitHub 只读查询显示最新托管候选仍为 .52，当前仓库可见签名环境、仓库级 Actions secrets 和 Release 均为 0。Windows 与 Intel Mac 原生、正式签名公证、签名版在线升级和真实授权公网片源待验收。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [BMad](../_bmad-output/plan-e13-local-candidate63-packages.md)
+
+## E13 正式交付核对 GitHub 实际发布标签（2026-11-28）
+
+- 草稿、发布后验证和公开附件核对统一从 GitHub 的公开 Git 数据库查询准确标签。本地 Git 标签继续校验，远端查询独立于本机 URL 重写配置。轻量标签和附注标签均解析到实际提交。远端标签缺失、移动、引用类型错误或对象异常会中止核验。[GitHub 引用接口](https://docs.github.com/en/rest/git/refs#get-a-reference) · [GitHub 附注标签接口](https://docs.github.com/en/rest/git/tags#get-a-tag)
+- 本机镜像一致、模拟公开端缺失时，原版仍通过，修复后停止。Node 22 发行校验 18 项通过。真实 GitHub 的 Node.js 附注标签和 Vite 轻量标签分别与独立提交接口匹配。现存 .52 两份 GitHub 原始 ZIP 及内部 13 项 SHA-256 重新通过。真实签名 Release 的整条发布验收待运行。测试证据位于主工作区 `build/bin/qa-release-tag-origin/`。[BMad](../_bmad-output/plan-e13-release-tag-origin.md)

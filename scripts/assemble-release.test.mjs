@@ -121,6 +121,39 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const jobsFile = join(cwd, 'release-jobs.json')
   const artifactFile = join(cwd, 'github-artifact.json')
   const archiveFile = join(cwd, 'release-handoff.zip')
+  const tagResponsesFile = join(cwd, 'github-tag-responses.json')
+  const githubFetchFixture = join(cwd, 'github-fetch-fixture.mjs')
+  const api = 'https://api.github.com/repos/' + repository
+  const ref = 'refs/tags/' + version
+  const refURL = api + '/git/ref/tags/' + encodeURIComponent(version)
+  const annotationSHA = git(cwd, 'rev-parse', ref)
+  const annotationURL = api + '/git/tags/' + annotationSHA
+  const annotatedReference = { ref, object: { type: 'tag', sha: annotationSHA } }
+  const commitObject = { type: 'commit', sha }
+  const lightweightReference = { ref, object: commitObject }
+  const annotatedResponses = {
+    [refURL]: { body: annotatedReference },
+    [annotationURL]: { body: { sha: annotationSHA, object: commitObject } },
+  }
+  const assetPaths = Object.fromEntries(assets.map(({ id, name }) => [api + '/releases/assets/' + id, join(output, name)]))
+  await writeFile(githubFetchFixture, `
+    import { readFile } from 'node:fs/promises'
+    const paths = ${JSON.stringify(assetPaths)}
+    const tagResponses = JSON.parse(await readFile(${JSON.stringify(tagResponsesFile)}, 'utf8'))
+    globalThis.fetch = async (url, { headers, redirect, credentials }) => {
+      const address = String(url)
+      const path = paths[address]
+      if (path && headers.Accept === 'application/octet-stream') {
+        const bytes = await readFile(path)
+        if (process.env.JINDI_CORRUPT_PUBLIC && path.endsWith('SHA256SUMS.txt')) bytes[0] ^= 1
+        return new Response(bytes, { headers: { 'Content-Length': bytes.length } })
+      }
+      if (!Object.hasOwn(tagResponses, address) || headers.Accept !== 'application/vnd.github+json' ||
+          redirect !== 'error' || credentials !== 'omit') throw new Error('unexpected GitHub request')
+      const { body, status = 200 } = tagResponses[address]
+      return new Response(body === undefined ? null : JSON.stringify(body), { status })
+    }
+  `)
   const python = process.platform === 'win32' ? 'python' : 'python3'
   const entries = await readdir(output)
   async function createArchive(names = entries) {
@@ -171,13 +204,19 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     status: 'completed', conclusion: 'success',
     steps: names.map((name, index) => ({ name, status: 'completed', conclusion: 'success', number: index * 2 + 5 })),
   }))
-  async function checkRelease(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false, downloadEnv } = {}) {
+  async function checkRelease(data, {
+    releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false,
+    downloadPublic = false, corruptPublic = false, tagResponses = annotatedResponses,
+  } = {}) {
     await writeFile(draftFile, JSON.stringify(data))
     await writeFile(jobsFile, JSON.stringify({ total_count: total, jobs: releaseJobs }))
     await writeFile(artifactFile, JSON.stringify(releaseArtifact))
-    const option = downloadEnv ? '--verify-release-public-downloads' : published ? '--verify-release-published' : '--verify-release-draft'
+    await writeFile(tagResponsesFile, JSON.stringify(tagResponses))
+    const option = downloadPublic ? '--verify-release-public-downloads' : published ? '--verify-release-published' : '--verify-release-draft'
+    const requestEnv = { ...process.env, NODE_OPTIONS: '--import=' + pathToFileURL(githubFetchFixture).href,
+      JINDI_CORRUPT_PUBLIC: corruptPublic ? '1' : '' }
     return run(checksums, [option, version, output, draftFile, jobsFile, archiveFile, artifactFile],
-      { cwd, env: downloadEnv ?? process.env })
+      { cwd, env: requestEnv })
   }
   const checkDraft = checkRelease
   const checkPublished = (data) => checkRelease(data, { published: true })
@@ -186,6 +225,9 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
   assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs and 21 required steps/)
   assert.match(validDraft.stdout, /artifact 321 matches the original ZIP and all 11 handoff files/)
+  const missingOrigin = await checkDraft(draft, { tagResponses: { [refURL]: { status: 404 } } })
+  assert.equal(missingOrigin.status, 1, 'The local mirror must not stand in for GitHub')
+  assert.match(missingOrigin.stderr, /Cannot resolve GitHub release tag/)
   const withChangedJob = (name, update) => jobs.map((job) => job.name === name ? update(job) : job)
   const macSigning = 'package-release (macos-latest)'
   const notarization = 'notarize application (macos release)'
@@ -293,15 +335,32 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     assert.match(rejected.stderr, /draft body does not match RELEASE-NOTES.md/)
   }
 
-  git(remote, 'update-ref', 'refs/tags/' + version, wrongSHA)
-  const moved = await checkDraft(draft)
+  const moved = await checkDraft(draft, { tagResponses: { [refURL]: { body: { ref, object: { ...commitObject, sha: wrongSHA } } } } })
   assert.equal(moved.status, 1)
   assert.match(moved.stderr, /GitHub release tag does not match the handoff build commit/)
-  git(remote, 'update-ref', '-d', 'refs/tags/' + version)
-  assert.match((await checkDraft(draft)).stderr, /Cannot resolve GitHub release tag/)
-  git(remote, 'update-ref', 'refs/tags/' + version, sha)
-  const remoteLightweight = await checkDraft(draft)
+  git(remote, 'update-ref', ref, wrongSHA)
+  const remoteLightweight = await checkDraft(draft, { tagResponses: { [refURL]: { body: lightweightReference } } })
   assert.equal(remoteLightweight.status, 0, remoteLightweight.stderr)
+  const nestedSHA = 'b'.repeat(40)
+  const nestedURL = api + '/git/tags/' + nestedSHA
+  const nestedResponses = {
+    ...annotatedResponses,
+    [annotationURL]: { body: { sha: annotationSHA, object: { type: 'tag', sha: nestedSHA } } },
+    [nestedURL]: { body: { sha: nestedSHA, object: commitObject } },
+  }
+  const remoteNested = await checkDraft(draft, { tagResponses: nestedResponses })
+  assert.equal(remoteNested.status, 0, remoteNested.stderr)
+  for (const [tagResponses, message] of [
+    [{ [refURL]: { body: { ...lightweightReference, ref: 'refs/heads/' + version } } }, /Unexpected GitHub release tag reference/],
+    [{ ...annotatedResponses, [annotationURL]: { status: 404 } }, /Cannot resolve GitHub release tag/],
+    [{ ...annotatedResponses, [annotationURL]: { body: { sha: nestedSHA, object: commitObject } } }, /Unexpected GitHub release tag object/],
+    [{ [refURL]: { body: { ref, object: { ...commitObject, type: 'tree' } } } }, /Unexpected GitHub release tag object/],
+    [{ ...nestedResponses, [nestedURL]: { body: { sha: nestedSHA, object: { type: 'tag', sha: annotationSHA } } } }, /Unexpected GitHub release tag object/],
+  ]) {
+    const result = await checkDraft(draft, { tagResponses })
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, message)
+  }
 
   for (const wrong of [{ draft: false }, { prerelease: false }, { tag_name: 'v0.2.0' },
     { url: 'https://api.github.com/repos/example/Other/releases/123' }]) {
@@ -338,25 +397,17 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const validPublished = await checkPublished(published)
   assert.equal(validPublished.status, 0, validPublished.stderr)
   assert.match(validPublished.stdout, /GitHub published release 123 matches all 11 handoff files/)
-  const publicFetchFixture = join(cwd, 'public-fetch-fixture.mjs')
-  const assetPaths = Object.fromEntries(published.assets.map(({ url, name }) => [url, join(output, name)]))
-  await writeFile(publicFetchFixture, `
-    import { readFile } from 'node:fs/promises'
-    const paths = ${JSON.stringify(assetPaths)}
-    globalThis.fetch = async (url, { headers }) => {
-      const path = paths[url.href]
-      if (!path || headers.Accept !== 'application/octet-stream') throw new Error('unexpected request')
-      const bytes = await readFile(path)
-      if (process.env.JINDI_CORRUPT_PUBLIC && path.endsWith('SHA256SUMS.txt')) bytes[0] ^= 1
-      return new Response(bytes, { headers: { 'Content-Length': bytes.length } })
-    }
-  `)
-  const downloadEnv = { ...process.env, NODE_OPTIONS: '--import=' + pathToFileURL(publicFetchFixture).href }
-  const publicDownloads = await checkRelease(published, { downloadEnv })
+  const publicDownloads = await checkRelease(published, { downloadPublic: true })
   assert.equal(publicDownloads.status, 0, publicDownloads.stderr)
   assert.match(publicDownloads.stdout, /All 11 public downloads match the handoff/)
   assert.match(publicDownloads.stdout, /Public download SHA256SUMS.txt: SHA-256 OK/)
-  const wrongPublicBytes = await checkRelease(published, { downloadEnv: { ...downloadEnv, JINDI_CORRUPT_PUBLIC: '1' } })
+  for (const mode of [{ published: true }, { downloadPublic: true }]) {
+    const missingTag = await checkRelease(published, { ...mode, tagResponses: { [refURL]: { status: 404 } } })
+    assert.equal(missingTag.status, 1)
+    assert.match(missingTag.stderr, /Cannot resolve GitHub release tag/)
+    assert.doesNotMatch(missingTag.stdout, /Public download |matches all 11 handoff files/)
+  }
+  const wrongPublicBytes = await checkRelease(published, { downloadPublic: true, corruptPublic: true })
   assert.equal(wrongPublicBytes.status, 1)
   assert.match(wrongPublicBytes.stderr, /Public asset SHA-256 mismatch: SHA256SUMS.txt/)
   assert.doesNotMatch(wrongPublicBytes.stdout, /All 11 public downloads/)
