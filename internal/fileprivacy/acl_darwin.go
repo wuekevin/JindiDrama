@@ -1,4 +1,4 @@
-package app
+package fileprivacy
 
 /*
 #include <errno.h>
@@ -17,7 +17,7 @@ import "C"
 
 import "syscall"
 
-func clearUpdateStageACL(fd int) error {
+func ClearDirectoryACL(fd int) error {
 	if code := C.clear_acl(C.int(fd)); code != 0 {
 		return syscall.Errno(code)
 	}

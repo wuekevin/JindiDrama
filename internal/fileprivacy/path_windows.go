@@ -1,4 +1,4 @@
-package app
+package fileprivacy
 
 import (
 	"path/filepath"
@@ -7,7 +7,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func exportWindowsPath(path string) (*uint16, error) {
+func WindowsPath(path string) (*uint16, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err

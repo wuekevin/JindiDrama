@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+
+	"jindi-drama/internal/fileprivacy"
 )
 
 func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
@@ -83,7 +85,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		closeDirectory()
 		return nil, errors.New("update staging directory is not private")
 	}
-	if err := clearUpdateStageACL(dirFD); err != nil {
+	if err := fileprivacy.ClearDirectoryACL(dirFD); err != nil {
 		closeDirectory()
 		return nil, err
 	}

@@ -861,3 +861,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 旧版桌面校验打开无写入方的 Unix 命名管道会阻塞，通过符号链接选择含有效 WAL 的数据库时也可能漏读 WAL。现在桌面校验、恢复和回滚共用快照读取。Unix 先以非阻塞方式打开并拒绝非常规文件。复制与摘要核对使用同一源句柄，SQLite 只打开私有副本。[原版复现](../build/bin/qa-snapshot-source/before.log)
 - 复制前打开主库和持久辅助文件，记录已打开的文件身份。完成前复核所选路径、源身份、文件大小、修改时间、辅助文件集合和摘要。回归覆盖同大小同修改时间的文件替换、符号链接改指、大小变化、新增 WAL、稳定 WAL 与旧备份恢复。[专项](../build/bin/qa-snapshot-source/targeted.log)
 - Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 SQLite 交叉编译通过。首次 App 专项因磁盘空间不足失败，清理重复临时产物后用精简符号的测试二进制串行通过。Windows 原生待验收。普通文件读取仍受操作系统控制，本轮验证范围为文件类型、路径和身份变化。[竞态](../build/bin/qa-snapshot-source/go-race.log) · [Windows](../build/bin/qa-snapshot-source/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e11-snapshot-source-handles.md)
+
+## E13 回滚副本的私有访问权限（2026-11-27）
+
+- macOS 复现旧命令在父目录存在继承 ACL 时，最终 `0600` 回滚副本仍带有 `everyone` 读取项。现在先验证暂存目录为空，再清理 macOS ACL 或设置 Windows 仅当前用户与 SYSTEM 可继承的受保护 DACL，之后才写入 SQLite 文件。使用应用已有的平台权限定义，保留独占硬链接发布。[原版复现](../build/bin/qa-rollback-acl/before.log)
+- macOS 原生夹具验证对照文件会继承权限，受保护暂存目录、辅助文件样本和实际回滚副本不会继承，v2 副本完整性通过。另验收已有同名内容及被替换目录的内容保留。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 两套测试交叉编译通过。Windows 原生 DACL 验收待执行。[专项](../build/bin/qa-rollback-acl/targeted.log) · [Windows 编译](../build/bin/qa-rollback-acl/windows-crosscompile.log)
+- macOS 源码回滚工具需要 CGO。关闭 CGO 时已实测在写入前明确失败，输出目录无残留。回滚过程中的路径重解析仍需句柄级发布验收，尤其是能被第三方并发改名的输出目录。本次源码晚于 .52。[无 CGO 验收](../build/bin/qa-rollback-acl/no-cgo.log) · [BMad 记录](../_bmad-output/plan-e13-rollback-private-acl.md)

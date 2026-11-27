@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"jindi-drama/internal/fileprivacy"
 )
 
 // PrepareRollbackCopy exports a standalone database at target without modifying
@@ -38,22 +40,38 @@ func PrepareRollbackCopy(source, output string, target int) error {
 	if err != nil {
 		return err
 	}
-	defer os.RemoveAll(dir)
 	const stagedName = "rollback.db"
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	defer root.Close()
+	cleanupName := ""
+	defer func() { cleanRollbackStage(root, cleanupName) }()
+	if err := checkEmptyRollbackStage(root); err != nil {
+		return err
+	}
+	if err := fileprivacy.ProtectDirectory(root); err != nil {
+		return fmt.Errorf("无法保护回滚暂存目录: %w", err)
+	}
+	if err := checkEmptyRollbackStage(root); err != nil {
+		return err
+	}
+	cleanupName = stagedName
 	staged := filepath.Join(dir, stagedName)
 	if err := snapshotDatabase(source, root, stagedName); err != nil {
 		return fmt.Errorf("读取源数据库快照失败: %w", err)
 	}
+	if !sameRollbackStage(root) {
+		return errors.New("回滚暂存目录已更换")
+	}
 	if err := downgradeSnapshot(staged, target); err != nil {
 		return err
 	}
-	if err := os.Chmod(staged, 0o600); err != nil {
+	if err := root.Chmod(stagedName, 0o600); err != nil {
 		return err
+	}
+	if !sameRollbackStage(root) {
+		return errors.New("回滚暂存目录已更换")
 	}
 	// Link publishes the completed file without replacing a concurrently created
 	// destination. Keeping the staging directory beside it ensures the same volume.
@@ -61,6 +79,48 @@ func PrepareRollbackCopy(source, output string, target int) error {
 		return fmt.Errorf("发布回滚副本失败: %w", err)
 	}
 	return nil
+}
+
+func sameRollbackStage(root *os.Root) bool {
+	expected, err := root.Stat(".")
+	if err != nil {
+		return false
+	}
+	current, err := os.Lstat(root.Name())
+	return err == nil && current.IsDir() && os.SameFile(expected, current)
+}
+
+func checkEmptyRollbackStage(root *os.Root) error {
+	if !sameRollbackStage(root) {
+		return errors.New("回滚暂存目录已更换")
+	}
+	dir, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	entries, err := dir.Readdirnames(1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if len(entries) != 0 {
+		return errors.New("回滚暂存目录已有其他文件")
+	}
+	return nil
+}
+
+func cleanRollbackStage(root *os.Root, name string) {
+	if name != "" {
+		for _, suffix := range [...]string{"", "-wal", "-journal", "-shm"} {
+			_ = root.Remove(name + suffix)
+		}
+	}
+	removeDirectory := sameRollbackStage(root)
+	_ = root.Close()
+	if removeDirectory {
+		// A directory that acquired other entries will remain in place.
+		_ = fileprivacy.RemoveEmptyDirectory(root.Name())
+	}
 }
 
 func snapshotDatabase(source string, root *os.Root, staged string) error {

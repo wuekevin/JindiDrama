@@ -31,6 +31,8 @@ Get-Item -LiteralPath $output
 go run ./cmd/prepare-rollback -source "/path/to/JindiDrama/jindi.db" -output "/path/to/jindi-v2.db" -target 2
 ```
 
+macOS 从源码运行时，请使用启用了 CGO 的 Go 工具链。工具需要系统 ACL 支持来保护暂存目录。也可直接用当前版桌面应用执行回滚。
+
 3. 仍在退出状态时，将原 `jindi.db` 及其辅助文件一起移到单独目录。随后将验证过的副本复制到原位置并命名为 `jindi.db`。确认该文件名下没有遗留的辅助文件，再启动旧版。
 4. 打开收藏、观看历史和设置，核对收藏排序、精确进度和关键设置。清点成功后保留原库直到回滚结束。如果恢复到新版，先退出并单独保留回滚期间使用的数据库，再将原库及属于它的辅助文件作为一组恢复。
 

@@ -9,6 +9,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"jindi-drama/internal/fileprivacy"
 )
 
 const updateFileShares = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
@@ -16,11 +18,8 @@ const updateFileShares = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | wi
 func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
 	var descriptor *windows.SECURITY_DESCRIPTOR
 	if kind != mediaOutputStage {
-		user, err := windows.GetCurrentProcessToken().GetTokenUser()
-		if err != nil {
-			return nil, err
-		}
-		descriptor, err = windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")")
+		var err error
+		descriptor, err = fileprivacy.WindowsDirectoryDescriptor()
 		if err != nil {
 			return nil, err
 		}
@@ -113,7 +112,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 }
 
 func openUpdateDirectory(path string, access uint32) (windows.Handle, error) {
-	name, err := exportWindowsPath(path)
+	name, err := fileprivacy.WindowsPath(path)
 	if err != nil {
 		return 0, err
 	}
