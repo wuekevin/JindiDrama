@@ -1195,3 +1195,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 苹果 CMS 点播中继接受每段一个节目时间戳，接受分钟或秒精度，保留日期、时区与小数秒。将小数逗号转换为浏览器可读的小数点。错误日历日期、超范围偏移、重复、悬空或混入主清单的节目时间戳返回 502，子资源不会公开。[RFC 8216](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.2.6)
 - 原版用相同回归测试复现 502。修复版的 FFmpeg 点播清单含两段节目时间戳，经 Go 中继后仅改写分段地址。两个 TS 分段与上游合成素材字节一致，各完整解码 30 帧。Go 全量、vet、HLS 和媒体中继竞态检查，以及 Chromium HLS 5 项通过。Chromium 与 WebKit 的日期解析实测确认小数分隔符和分钟精度的兼容性。 证据存于主工作区 `build/bin/qa-cms-hls-program-date/`。
 - 本轮使用本机合成素材，源码晚于 .62 成品。实际授权公网联调和最新跨平台成品待验收。[BMad](../_bmad-output/plan-e12-hls-program-date-time.md)
+
+## E12 Apple Silicon 原生 HLS 双音轨与节目时间戳（2026-11-28）
+
+- 从源码 `2fc7ebca07f1a88b98f696d6372622ca2d982f04` 构建隔离 Apple Silicon 测试应用。普通话上游清单含小数逗号，Go 中继将其转换为小数点。原生 WKWebView 的音轨菜单显示「普通话」和「粤语」，默认普通话。实际鼠标点选粤语后，原生 AudioTrack 状态随之切换，同一 384×216 视频从 4.563 秒推进到 6.600 秒，累计 146 帧。本轮验收保持静音。
+- Go 中继实际读取主清单、视频和两路音频清单、初始化文件及各路分段。退出前保存的第 1 集进度为 5012 ms，正常退出后更新为 6747 ms，总长 24000 ms。独立 SQLite 完整性为 ok，活动会话标记和数据库临时文件已清理。应用使用合成 CMS 传输和观察探针，实际授权公网片源、正式签名成品及 Windows 和 Intel Mac 待验收。测试证据位于主工作区 `build/bin/qa-native-hls-audio-date/`。[BMad](../_bmad-output/plan-e12-native-hls-audio-date.md)
