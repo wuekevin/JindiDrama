@@ -346,7 +346,7 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
           <label class="r">默认播放清晰度<span class="sel"><select v-model="st.defaultQuality" @change="pl.quality = st.defaultQuality" data-testid="default-quality"><option v-for="q in DEMO_QUALITIES" :key="q.id" :value="q.label">{{ q.label }} {{ q.detail }}</option></select><ChevronDown :size="14" /></span></label>
           <label class="r">播放源<span class="sel"><select v-model="st.mediaSource" data-testid="media-source"><option value="demo">演示媒体（自制片段）</option><option value="sim">模拟画面</option></select><ChevronDown :size="14" /></span></label>
           <label class="r">播放方式<span class="sel wide"><select v-model="st.playMode"><option v-for="mode in PLAY_MODES" :key="mode">{{ mode }}</option></select><ChevronDown :size="14" /></span></label>
-          <div class="r">解码模式<div class="radios"><label><input v-model="st.decode" type="radio" value="hw" data-testid="decode-hw" />硬件解码（推荐）</label><label><input v-model="st.decode" type="radio" value="sw" data-testid="decode-sw" />软件解码</label></div></div>
+          <div class="r">解码模式<span class="cs" data-testid="decode-mode">系统自动选择</span></div>
           <label class="r">播放倍速默认值<input v-model.number="st.defaultSpeed" @change="pl.speed = st.defaultSpeed" class="rg" type="range" min="0.5" max="2" step="0.25" aria-label="播放倍速默认值" data-testid="default-speed" :style="{ '--p': pct(st.defaultSpeed, 0.5, 2) }" /><em>{{ formatSpeed(st.defaultSpeed) }}x</em></label>
           <AppleCMSSettings v-if="canShowAppleCMSSettings" />
         </section>
@@ -433,12 +433,11 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
 .nav { position: sticky; top: 0; width: 196px; flex: none; padding: 8px; border-radius: 18px; background: rgba(255,255,255,.05); border: 1px solid var(--c-border); display: flex; flex-direction: column; gap: 2px; button { height: 50px; display: flex; align-items: center; gap: 14px; padding: 0 16px; border-radius: 12px; font-size: 16px; text-align: left; position: relative; &:hover { background: var(--c-surface-hover); } &.on { background: var(--g-nav-active); } .ch { margin-left: auto; } } }
 .panels { flex: 1; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 .pn { padding: 14px 18px 8px; border-radius: 18px; background: linear-gradient(180deg, rgba(255,255,255,.065), rgba(255,255,255,.03)); border: 1px solid var(--c-border); scroll-margin-top: 4px; h2 { display: flex; align-items: center; gap: 10px; font-size: 20px; margin-bottom: 4px; svg { color: var(--c-accent-2); } } &.about { grid-column: 1 / -1; } }
-.r { display: flex; align-items: center; gap: 12px; min-height: 42px; font-size: 14.5px; border-top: 1px solid var(--c-border); &:first-of-type { border-top: 0; } > div:first-child:not(.radios):not(.path) { flex: 1; } small { display: block; font-size: 12px; color: var(--c-text-2); } em { font-style: normal; width: 48px; text-align: right; color: var(--c-text-2); } }
-.r > .sel, .r > .rg, .r > .radios, .r > .path { margin-left: auto; }
+.r { display: flex; align-items: center; gap: 12px; min-height: 42px; font-size: 14.5px; border-top: 1px solid var(--c-border); &:first-of-type { border-top: 0; } > div:first-child:not(.path) { flex: 1; } small { display: block; font-size: 12px; color: var(--c-text-2); } em { font-style: normal; width: 48px; text-align: right; color: var(--c-text-2); } }
+.r > .sel, .r > .rg, .r > .path { margin-left: auto; }
 .sel { position: relative; display: inline-flex; align-items: center; select { appearance: none; height: 34px; min-width: 190px; padding: 0 34px 0 14px; border-radius: 10px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border-strong); color: var(--c-text); outline: none; font-size: 14px; option { background: #2a1719; } &:focus-visible { outline: 2px solid var(--c-accent-2); } } svg { position: absolute; right: 12px; pointer-events: none; } &.wide select { min-width: 240px; } }
 .tg { width: 46px; height: 26px; border-radius: 13px; background: var(--c-border-strong); box-shadow: inset 0 0 0 1px var(--c-border); position: relative; margin-left: auto; transition: background .2s; i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: transform .2s; } &.on { background: #ee4b39; i { transform: translateX(20px); } } }
 .rg { appearance: none; width: 190px; height: 5px; border-radius: 5px; outline: none; background: linear-gradient(90deg, #ff7a5c var(--p), rgba(255,255,255,.2) var(--p)); &::-webkit-slider-thumb { appearance: none; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(238,75,57,.35); cursor: pointer; } }
-.radios { display: flex; gap: 18px; label { display: inline-flex; align-items: center; gap: 6px; } input { accent-color: #ee4b39; } }
 .path { display: flex; gap: 8px; input { width: 200px; height: 34px; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,.07); border: 1px solid var(--c-border); color: var(--c-text); font-size: 13px; } button { display: inline-flex; align-items: center; gap: 5px; height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--c-border-strong); } }
 .cs { margin-left: auto; font-size: 13px; color: var(--c-text-2); } .clr { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 16px; border-radius: 17px; background: var(--g-accent); font-weight: 600; &:disabled { opacity: .45; } }
 .rs { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; font-weight: 400; color: var(--c-text-2); }
@@ -519,12 +518,12 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
 .set.stacked, .set.compact {
   .panels { grid-template-columns: minmax(0, 1fr); }
   .r { flex-wrap: wrap; padding-block: 6px; }
-  .r > .sel, .r > .radios, .r > .path, .themes { max-width: 100%; }
+  .r > .sel, .r > .path, .themes { max-width: 100%; }
   .sel select { max-width: 100%; min-width: min(190px, 100%); }
   .sel.wide select { min-width: min(240px, 100%); }
   .path input { min-width: 0; }
   .path button { flex: none; }
-  .radios, .themes { flex-wrap: wrap; }
+  .themes { flex-wrap: wrap; }
   .tm { white-space: normal; }
   .ab { gap: 16px; .chk { padding-inline: 24px; } }
 }
