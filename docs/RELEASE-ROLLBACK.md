@@ -2,7 +2,7 @@
 
 当旧版应用支持的数据库版本低于当前版本时，先为旧版生成兼容副本，再启动旧版。历史提交 `f97bd81afd803e530d91dbc7bc28fe4b88d99e39` 使用 SQLite v2，当前源码使用 v10。其他发行版的目标版本以对应源码或发行记录为准。
 
-1. 确认新版已补写待保存的离线记录，再退出应用。回滚工具转换 SQLite 中已提交的数据。从用户配置目录备份现有数据库和同名 `-wal`、`-shm`、`-journal` 文件（若存在）。保留这一组作为恢复新版的资料。
+1. 确认新版已补写待保存的离线记录，再退出应用。若关闭窗口后应用仍在托盘或菜单栏运行，请从该菜单选择「退出金帝短剧」。回滚工具转换 SQLite 中已提交的数据。从用户配置目录备份现有数据库和同名 `-wal`、`-shm`、`-journal` 文件（若存在）。保留这一组作为恢复新版的资料。
 2. 使用已支持回滚命令的**当前**桌面程序生成新的副本，再安装旧版。工具读取已提交的 SQLite 内容，在独立副本上降级并检查完整性。输出目录使用支持硬链接的本地文件系统，例如 APFS 或 NTFS。以下示例生成 v2 副本，其他发行版按实际目标版本修改。
 
 macOS 在终端运行。安装到其他位置时，替换程序路径。
@@ -13,16 +13,24 @@ macOS 在终端运行。安装到其他位置时，替换程序路径。
   -output "$HOME/jindi-v2.db" -target 2
 ```
 
-Windows 在 PowerShell 运行。按用户安装时，默认程序路径为 `$env:LOCALAPPDATA\Programs\JindiDrama\JindiDrama.exe`。使用便携版或自选安装目录时，将 `$application` 改为实际程序路径。[PowerShell 启动进程参数](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process#-argumentlist)
+Windows 在 PowerShell 运行。先从当前版本的快捷方式属性确认目标路径，或在文件资源管理器中找到当前版本的程序。第一行对应默认的系统级安装。按用户安装时，删除第一行并去掉第二行开头的 `#`。使用便携版、自选目录或同时装有多个版本时，把 `$application` 设为当前版本 `.exe` 的完整路径。若曾另外配置资料目录，同时修改 `$source`。[PowerShell 启动进程参数](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.management/start-process#-argumentlist)
 
 ```powershell
-$application = "$env:ProgramFiles\JindiDrama\JindiDrama.exe"
+$application = "$env:ProgramW6432\JindiDrama\JindiDrama.exe"
+# $application = "$env:LOCALAPPDATA\Programs\JindiDrama\JindiDrama.exe"
 $source = "$env:APPDATA\JindiDrama\jindi.db"
 $output = "$env:USERPROFILE\jindi-v2.db"
+if (-not (Test-Path -LiteralPath $application -PathType Leaf)) {
+    throw '找不到当前版程序，请将 $application 改为当前版 exe 的完整路径。'
+}
 $rollbackArgs = '--prepare-rollback -source "{0}" -output "{1}" -target 2' -f $source, $output
-$process = Start-Process -FilePath $application -ArgumentList $rollbackArgs -Wait -PassThru
+try {
+    $process = Start-Process -FilePath $application -ArgumentList $rollbackArgs -Wait -PassThru -ErrorAction Stop
+} catch {
+    throw "无法启动当前版程序，请核对 exe 路径和文件。$($_.Exception.Message)"
+}
 if ($process.ExitCode -ne 0) { throw "生成回滚副本失败，退出码 $($process.ExitCode)" }
-Get-Item -LiteralPath $output
+Get-Item -LiteralPath $output -ErrorAction Stop
 ```
 
 如果当前程序尚无此命令，可在当前版本的源码目录中使用 Go 工具。

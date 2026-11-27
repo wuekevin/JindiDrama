@@ -948,3 +948,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 旧版 macOS 归档 `v0.1.0-smoke.20261125.1` 的 6 项 SHA-256 通过。旧程序与 Apple Silicon 本地构建 `v0.1.0-smoke.20261127.55` 分别核对二进制和临时签名。新版构建源码为 `b999bfa70696689038ad98b93902abf709bf875d`。用同一隔离安装路径和资料目录运行旧包、新版、回滚后的旧包、还原后的新版。四次实际界面核对版本、2 项收藏及 2 条历史，均正常退出。[归档清单](../build/bin/qa-macos-upgrade-roundtrip/archive.log) · [程序身份](../build/bin/qa-macos-upgrade-roundtrip/programs.log) · [升级界面](../build/bin/qa-macos-upgrade-roundtrip/upgraded-settings.ax)
 - 旧包创建 v6 库，当前构建打开后迁移到 v10。两条精确断点、收藏顺序、搜索和关键设置均保留。新版 CLI 从 v10 生成权限 0600 的 v6 副本，源摘要一致，源和副本均未新增 WAL、SHM 或 journal。原归档打开该副本并通过核对。恢复新版还保留当前样例在 v10 库中的分集总数，旧包原库和回滚副本的 SHA-256 均未变。[往返记录](../build/bin/qa-macos-upgrade-roundtrip/roundtrip.log) · [回滚命令](../build/bin/qa-macos-upgrade-roundtrip/rollback-cli.log) · [BMad](../_bmad-output/plan-e13-macos-upgrade-roundtrip.md)
 - 这是 Apple Silicon 的本地应用替换和 SQLite 兼容验证。当前构建使用临时签名。Intel Mac、正式带签名归档安装和从 GitHub 实际下载升级待验收。
+
+## E13 Windows 回滚说明匹配安装路径（2026-11-27）
+
+- 修正回滚说明中系统级和按用户安装路径与示例混用的问题。默认路径与 NSIS 的 64 位 Program Files 一致，按用户使用 LocalAppData，便携版和自选目录改用当前程序完整路径。增加找不到可执行文件的提示，并说明从托盘或菜单栏退出后再操作。
+- macOS 上运行 PowerShell 提取出的示例，以三种模拟 Windows 路径调用本地真实回滚 CLI。含中文和空格的路径均生成完整的 SQLite v2，保留精确断点。缺程序时未启动进程，文件无法执行时提示核对程序路径，目标已存在时原副本和源文件保持一致。Windows 原生执行仍待核验。[PowerShell](../build/bin/qa-windows-rollback-paths/powershell.log) · [SQLite](../build/bin/qa-windows-rollback-paths/sqlite.log)
+- 使用既有 .54 程序文件在隔离暂存目录生成两平台说明，随包回滚文档与源码字节一致，临时清单共 13 项 SHA-256 通过，相关 Node 测试 13 项通过。旧归档继续对应原清单，本次文档待下一批累计打包。[随包验证](../build/bin/qa-windows-rollback-paths/package-docs.log) · [BMad](../_bmad-output/plan-e13-windows-rollback-paths.md)
