@@ -20,6 +20,7 @@ const (
 	trayNotify          = 0x8001
 	ninSelectByKeyboard = 0x0401
 	trayIconID          = 1
+	guiPopupMenuMode    = 0x10
 )
 
 var (
@@ -28,6 +29,7 @@ var (
 	isVisible   = user32.NewProc("IsWindowVisible")
 	isIconic    = user32.NewProc("IsIconic")
 	postMessage = user32.NewProc("PostMessageW")
+	guiThread   = user32.NewProc("GetGUIThreadInfo")
 )
 
 type windowState struct {
@@ -35,9 +37,24 @@ type windowState struct {
 	Tray      uintptr
 	Visible   bool
 	Minimized bool
+	TrayMenu  bool
+}
+
+type guiThreadInfo struct {
+	size, flags                                        uint32
+	active, focus, capture, menuOwner, moveSize, caret uintptr
+	caretRect                                          [4]int32
 }
 
 func runNative(args []string) error {
+	if len(args) == 1 && args[0] == "notification-owner" {
+		window := windowByClass("Shell_TrayWnd", 0)
+		var pid uint32
+		if window != 0 {
+			_, _ = windows.GetWindowThreadProcessId(windows.HWND(window), &pid)
+		}
+		return json.NewEncoder(os.Stdout).Encode(pid)
+	}
 	if len(args) == 1 && args[0] == "notification-available" {
 		ok, err := probeNotificationArea()
 		if err != nil {
@@ -46,7 +63,7 @@ func runNative(args []string) error {
 		return json.NewEncoder(os.Stdout).Encode(ok)
 	}
 	if len(args) != 2 {
-		return errors.New("usage: windows-desktop-smoke seed <fixture database> <Minimize|Tray>, notification-available, inspect <PID>, or activate-tray <PID>")
+		return errors.New("usage: windows-desktop-smoke seed <fixture database> <Minimize|Tray>, notification-available, notification-owner, inspect <PID>, or activate-tray <PID>")
 	}
 	pid, err := strconv.ParseUint(args[1], 10, 32)
 	if err != nil || pid == 0 {
@@ -80,7 +97,22 @@ func inspect(pid uint32) windowState {
 		state.Visible = visible != 0
 		state.Minimized = minimized != 0
 	}
+	state.TrayMenu = trayMenuOpen(state.Tray)
 	return state
+}
+
+func trayMenuOpen(tray uintptr) bool {
+	if tray == 0 {
+		return false
+	}
+	thread, err := windows.GetWindowThreadProcessId(windows.HWND(tray), nil)
+	if err != nil || thread == 0 {
+		return false
+	}
+	var info guiThreadInfo
+	info.size = uint32(unsafe.Sizeof(info))
+	read, _, _ := guiThread.Call(uintptr(thread), uintptr(unsafe.Pointer(&info)))
+	return read != 0 && info.flags&guiPopupMenuMode != 0 && info.menuOwner == tray
 }
 
 func windowByClass(class string, pid uint32) uintptr {

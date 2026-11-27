@@ -782,3 +782,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 解码模式显示「系统自动选择」。原有硬件/软件单选控件只有偏好写入，播放链路未读取该字段。旧版的解码偏好仍随设置保存。Chromium 设置页 45 项、WebKit 旧偏好专项、类型检查和生产构建通过。1448×1086 截图差异仅在解码行，1280×860、220% 下文字完整可见。[Chromium 验收](../build/bin/qa-decoder-mode/e2e.log) · [WebKit 验收](../build/bin/qa-decoder-mode/webkit.log) · [默认截图](../build/bin/qa-decoder-mode/settings-default.png) · [220% 截图](../build/bin/qa-decoder-mode/settings-decoder-220.png) · [BMad 记录](../_bmad-output/plan-e10-decoder-mode-status.md)
 - E10 真正切换软硬件解码仍待实现与验证，需要可显式配置并测量实际解码器的播放链路。分别验收 Windows 与 macOS 的真实解码方式、常用媒体格式和播放控制。本次源码改动晚于 .51 打包。
+
+## E11 Windows 通知区交互验收（2026-11-27）
+
+- 现有冒烟脚本增加 `-CloseScenario Tray -VerifyInteractiveTray`。测试者从 Windows 通知区显示窗口、重启 Explorer，再通过通知区退出。探针读取托盘线程拥有的弹出菜单，脚本核对恢复到原窗口、通知区进程已更换、应用退出码、SQLite 完整性、回滚副本及会话标记清理。[使用说明](../README.md) · [BMad 记录](../_bmad-output/plan-e11-windows-interactive-tray.md)
+- macOS 的 PowerShell 7.7 解析和模拟通过，覆盖菜单观察、原窗口、通知区进程变化和退出验收失败路径。Go App 与探针测试、Windows amd64 交叉 vet 和探针构建通过。真实交互仍需在未提升权限的 Windows 11 测试桌面运行 .51 成品。本次变更仅涉及验收脚本、探针和文档。[模拟验证](../build/bin/qa-windows-interactive-tray/powershell-interaction.log) · [Windows 探针](../build/bin/qa-windows-interactive-tray/windows-probe.log)

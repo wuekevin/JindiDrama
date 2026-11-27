@@ -7,6 +7,7 @@ param(
     [ValidateSet('Exit', 'Minimize', 'Tray')][string]$CloseScenario = 'Exit',
     [string]$NativeProbe,
     [switch]$RequireNotificationArea,
+    [switch]$VerifyInteractiveTray,
     [switch]$VerifyCMSProtocol
 )
 
@@ -60,9 +61,9 @@ function Invoke-DesktopProbe([string[]]$ProbeArguments) {
     return $result
 }
 
-function Wait-WindowState([Diagnostics.Process]$Process, [string]$Description, [scriptblock]$Expected) {
+function Wait-WindowState([Diagnostics.Process]$Process, [string]$Description, [scriptblock]$Expected, [int]$TimeoutSeconds = 15) {
     $timer = [Diagnostics.Stopwatch]::StartNew()
-    while ($timer.Elapsed.TotalSeconds -lt 15) {
+    while ($timer.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         if ($Process.HasExited) { throw "Application exited while waiting for $Description ($($Process.ExitCode))" }
         $state = Invoke-DesktopProbe @('inspect', [string]$Process.Id) | ConvertFrom-Json
         if (& $Expected $state) { return $state }
@@ -74,6 +75,57 @@ function Wait-WindowState([Diagnostics.Process]$Process, [string]$Description, [
 function Send-NativeClose([Diagnostics.Process]$Process) {
     $Process.Refresh()
     if (-not $Process.CloseMainWindow()) { throw 'Unable to send the native window-close request' }
+}
+
+function Confirm-CleanExit([Diagnostics.Process]$Process, [string]$Trigger, [int]$TimeoutMilliseconds = 15000) {
+    if (-not $Process.WaitForExit($TimeoutMilliseconds)) { throw "Application did not exit after $Trigger" }
+    if ($Process.ExitCode -ne 0) { throw "Application exit code: $($Process.ExitCode)" }
+    if (Get-ChildItem -LiteralPath $sessionDir -Filter 'run-*.session' -File) {
+        throw 'Normal exit left a running-session marker'
+    }
+
+    $database = Join-Path $dataDir 'jindi.db'
+    Invoke-DesktopProbe @('verify-db', $database)
+    Invoke-DesktopProbe @('verify-rollback', $exe, $database)
+    Write-Host "Packaged SQLite rollback and unchanged source verified: $exe"
+    Write-Host "Clean exit, SQLite integrity, and current application schema verified: $exe"
+}
+
+function Wait-TrayMenu([Diagnostics.Process]$Process, [UInt64]$MainWindow) {
+    Write-Host '请在通知区右键金帝短剧，打开菜单后等待脚本提示。'
+    [void](Wait-WindowState $Process 'popup menu owned by the application tray window' {
+        param($state) $state.Main -eq $MainWindow -and -not $state.Visible -and $state.Tray -ne 0 -and $state.TrayMenu
+    } 60)
+}
+
+function Test-InteractiveTray([Diagnostics.Process]$Process, [UInt64]$MainWindow) {
+    Send-NativeClose $Process
+    [void](Wait-WindowState $Process 'hidden window before manual tray menu restore' {
+        param($state) $state.Main -eq $MainWindow -and -not $state.Visible -and $state.Tray -ne 0
+    })
+    Wait-TrayMenu $Process $MainWindow
+    Write-Host '托盘菜单已打开。请选择「显示窗口」。'
+    [void](Wait-WindowState $Process 'same window restored via tray menu' {
+        param($state) $state.Main -eq $MainWindow -and $state.Visible -and -not $state.Minimized -and $state.Tray -eq 0
+    } 60)
+    Write-Host 'Original window restored via the interactive tray menu.'
+
+    Send-NativeClose $Process
+    [void](Wait-WindowState $Process 'hidden window before Explorer restart' {
+        param($state) $state.Main -eq $MainWindow -and -not $state.Visible -and $state.Tray -ne 0
+    })
+    $before = Invoke-DesktopProbe @('notification-owner') | ConvertFrom-Json
+    if ($before -eq 0) { throw 'The notification area no longer has a live owner' }
+    [void](Read-Host '在任务管理器重启 Windows 资源管理器，等任务栏恢复后按 Enter')
+    $after = Invoke-DesktopProbe @('notification-owner') | ConvertFrom-Json
+    if ($after -eq 0 -or $after -eq $before) { throw 'The notification area did not start under a new process' }
+    [void](Wait-WindowState $Process 'original window still hidden after Explorer restart' {
+        param($state) $state.Main -eq $MainWindow -and -not $state.Visible -and $state.Tray -ne 0
+    })
+    Wait-TrayMenu $Process $MainWindow
+    Write-Host '重启后的托盘菜单已打开。请选择「退出金帝短剧」。'
+    Confirm-CleanExit $Process 'the tray exit menu after Explorer restart' 60000
+    Write-Host 'Interactive tray restore, Explorer restart, and tray exit verified.'
 }
 
 function Start-CMSProtocol([Diagnostics.ProcessStartInfo]$AppStart) {
@@ -108,8 +160,8 @@ $probe = $null
 if ($NativeProbe) {
     $probe = (Resolve-Path -LiteralPath $NativeProbe).Path
 }
-if ($RequireNotificationArea -and $CloseScenario -ne 'Tray') {
-    throw '-RequireNotificationArea applies only to the Tray scenario'
+if (($RequireNotificationArea -or $VerifyInteractiveTray) -and $CloseScenario -ne 'Tray') {
+    throw '-RequireNotificationArea and -VerifyInteractiveTray apply only to the Tray scenario'
 }
 if ($VerifyCMSProtocol -and $CloseScenario -ne 'Minimize') {
     throw '-VerifyCMSProtocol applies only to the Minimize scenario'
@@ -181,17 +233,7 @@ try {
 
     if ($CloseScenario -eq 'Exit') {
         Send-NativeClose $app
-        if (-not $app.WaitForExit(15000)) { throw 'Application did not exit after the window-close request' }
-        if ($app.ExitCode -ne 0) { throw "Application exit code: $($app.ExitCode)" }
-        if (Get-ChildItem -LiteralPath $sessionDir -Filter 'run-*.session' -File) {
-            throw 'Normal exit left a running-session marker'
-        }
-
-        $database = Join-Path $dataDir 'jindi.db'
-        Invoke-DesktopProbe @('verify-db', $database)
-        Invoke-DesktopProbe @('verify-rollback', $exe, $database)
-        Write-Host "Packaged SQLite rollback and unchanged source verified: $exe"
-        Write-Host "Clean exit, SQLite integrity, and current application schema verified: $exe"
+        Confirm-CleanExit $app 'the window-close request'
     } else {
         $initial = Wait-WindowState $app 'visible main window' {
             param($state) $state.Main -ne 0 -and $state.Visible -and -not $state.Minimized
@@ -201,7 +243,7 @@ try {
         if ($CloseScenario -eq 'Tray') {
             $useTray = Invoke-DesktopProbe @('notification-available') | ConvertFrom-Json
         }
-        if ($RequireNotificationArea -and -not $useTray) {
+        if (($RequireNotificationArea -or $VerifyInteractiveTray) -and -not $useTray) {
             throw 'The Tray scenario requires a non-elevated Windows Explorer notification area'
         }
         if ($CloseScenario -eq 'Tray' -and -not $useTray) {
@@ -239,6 +281,9 @@ try {
         })
         Write-Host "Native window close and relaunch verified ($CloseScenario, tray callback exercised: $useTray)."
 
+        if ($VerifyInteractiveTray) {
+            Test-InteractiveTray $app $mainWindow
+        }
         if ($VerifyCMSProtocol) {
             $relaunch.Dispose()
             $relaunch = $null

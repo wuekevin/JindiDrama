@@ -84,6 +84,14 @@ Windows 打包会分别启动安装版和便携版，检查 WebView2 页面就�
 pwsh -NoProfile -File scripts/smoke-windows-desktop.ps1 -Application 'C:\Program Files\JindiDrama\JindiDrama.exe' -ExpectedVersion 'v0.1.0'
 ```
 
+在 Windows 11 测试桌面打开未以管理员身份运行的 PowerShell，验收实际托盘。将 `-Application` 指向已校验的安装版或便携版，并填写对应的 `-ExpectedVersion`。按提示从托盘菜单恢复窗口，在任务管理器重启 Windows 资源管理器，再从托盘菜单退出。通知区图标也可能位于任务栏的隐藏图标区。
+
+```powershell
+pwsh -NoProfile -File scripts/smoke-windows-desktop.ps1 -Application 'C:\qa\JindiDrama.exe' -ExpectedVersion 'v0.1.0-smoke.20261127.51' -CloseScenario Tray -VerifyInteractiveTray
+```
+
+验收通过时会输出 `Interactive tray restore, Explorer restart, and tray exit verified.`，并核对测试数据库完整性及正常退出后的会话记录。
+
 macOS 打包会解压最终 Universal ZIP，在 Apple Silicon 上启动归档中的应用，并确认实际运行的是 arm64。Intel runner 下载同一份产物、核验 SHA-256，再确认 amd64 启动。两边都核对应用版本。正式候选在启动前校验解包后的公证票据，并运行 macOS 分发策略检查。开发者用本机运行测试包时，使用独立的 `local.jindidrama.archiveqa.*` bundle ID。[Apple 代码签名技术说明](https://developer.apple.com/documentation/technotes/tn3161-inside-code-signing-certificates)
 
 GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-windows-latest-attempt-2` 和 `package-macos-latest-attempt-2`。下载复验会核对本轮的版本、提交和 SHA-256。遇到构建或验收失败时，选择「重新运行所有任务」或发起新运行，使两平台都能生成当前轮次的产物。
