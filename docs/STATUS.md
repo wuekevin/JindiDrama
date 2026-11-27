@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.56`，打包源提交为 `e6d89d582e078330d4cd426161b018b48be72465`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.58`，打包源提交为 `5a9181690e9356ba3003d49b5c147ec606a775b2`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .58 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.58/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.58/macos/SHA256SUMS.txt) |
 | .56 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.56/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.56/macos/SHA256SUMS.txt) |
 | .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 可见窗口、系统恢复选择器和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
 | .53 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.53/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.53/macos/SHA256SUMS.txt) |
@@ -1006,3 +1007,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 新增一个本地命令核对同一次 Windows 和 macOS 测试打包。校验解包文件与 SHA-256 清单，绑定预期的版本、仓库、提交、运行与轮次。将各原始 ZIP 的大小与 SHA-256 与 GitHub Artifact 元数据比对，再核对其中每项文件的字节摘要，包括清单本身。任一平台验证失败会以非零退出。[使用说明](../README.md#本地复验-github-双平台测试包)
 - 用留存的 .52 GitHub 原始 ZIP 与元数据实测，Windows 7 项、macOS 6 项清单及两个清单文件自身的 SHA-256 均匹配。把同一批归档指定为第 2 轮时被拒绝。Node 22 打包与正式发行脚本共 17 项通过，覆盖混用轮次、重复产物 ID 和原始 ZIP 被替换。首次运行遇到磁盘空间不足，磁盘空间恢复后串行重跑通过。[实际归档](../build/bin/qa-smoke-archive-verifier/actual.log) · [错误轮次](../build/bin/qa-smoke-archive-verifier/wrong-attempt.log) · [脚本测试](../build/bin/qa-smoke-archive-verifier/tests.log) · [BMad](../_bmad-output/plan-e13-verify-smoke-archives.md)
 - 当前证据对应 .52 的 GitHub 产物。本轮没有触发新的 GitHub 构建。
+
+## E13 .58 累计本地打包验收（2026-11-27）
+
+- Windows x64 和 macOS Universal 使用独立发行源提交 `5a9181690e9356ba3003d49b5c147ec606a775b2`。这批纳入苹果 CMS 播放画中画、手动切源和 .56 之后的 GitHub 发布复验改动。Windows 及 macOS 两个架构的程序均按 Go embed.FS 路径读取并比对了 69 个文件的 SHA-256，文件清单与同一份生产前端一致。[构建](../build/bin/qa-release-source-58/package-build.log) · [嵌入文件核对](../build/bin/qa-release-source-58/named-embedded-frontend.log)
+- 生产构建、Chromium 400 项、WebKit 切源 4 项、Vitest 125 项、Go 全量与 vet、发行脚本 17 项通过。Go 源码、三种构建架构和 npm 生产依赖扫描均未报告已知漏洞。[Chromium](../build/bin/qa-release-source-58/chromium.log) · [WebKit](../build/bin/qa-release-source-58/webkit.log) · [发行脚本](../build/bin/qa-release-source-58/release-scripts.log) · [成品扫描](../build/bin/qa-release-source-58/binary-vulnerabilities.log)
+- Windows 安装器 22.56 MiB、便携版 32.42 MiB、macOS Universal ZIP 40.93 MiB。Windows 安装器的主程序和便携版字节一致，WebView2 引导程序与依赖一致。macOS 的 arm64 和 x86_64 切片都以 macOS 13.0 为最低系统。归档后，Windows 的 7 项和 macOS 的 6 项 SHA-256 使用仓库脚本及系统工具复验通过。[包大小](../build/bin/qa-release-source-58/package-sizes.log) · [静态验收](../build/bin/qa-release-source-58/package-static.log) · [归档校验](../build/bin/qa-release-source-58/archived-checks.log)
+- Apple Silicon 从最终归档解包后实际启动 Wails 窗口，正常退出。隔离 SQLite 完整性检查通过，成品回滚探针保留活动 WAL 已提交的数据且源未变化。此次本地测试包使用 Windows 未签名成品和 macOS 临时签名。Windows 与 Intel Mac 的 .58 原生验收、正式签名和公证、GitHub 在线升级及授权公网联调仍待完成。[Apple Silicon 原生](../build/bin/qa-release-source-58/macos-native.log) · [BMad](../_bmad-output/plan-e13-local-candidate58-packages.md)
