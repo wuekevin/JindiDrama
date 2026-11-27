@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
+
+import { verifyPublicReleaseAsset } from './package-checksums.mjs'
 
 const script = fileURLToPath(new URL('./package-checksums.mjs', import.meta.url))
 const installer = 'JindiDrama-amd64-installer.exe'
@@ -110,4 +113,78 @@ test('exports verification without running the CLI on import', async (t) => {
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout, '')
   }
+})
+
+
+const publicAPI = 'https://api.github.com/repos/wuekevin/JindiDrama/releases/assets/1'
+const publicCDN = 'https://release-assets.githubusercontent.com/asset?opaque=1'
+const payload = Buffer.from('verified package')
+const publicAsset = {
+  name: 'SHA256SUMS.txt',
+  size: payload.length,
+  digest: createHash('sha256').update(payload).digest('hex'),
+}
+
+test('verifies streamed public bytes over GitHub redirects without authentication', async () => {
+  const visited = []
+  await verifyPublicReleaseAsset(publicAPI, publicAsset, async (url, options) => {
+    assert.equal(options.credentials, 'omit')
+    assert.equal(options.redirect, 'manual')
+    assert.equal(options.headers.Accept, 'application/octet-stream')
+    assert.equal(options.headers.Authorization, undefined)
+    visited.push(url.href)
+    if (url.href === publicAPI) return Response.redirect(publicCDN, 302)
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(payload.subarray(0, 4))
+        controller.enqueue(payload.subarray(4))
+        controller.close()
+      },
+    }))
+  })
+  assert.deepEqual(visited, [publicAPI, publicCDN])
+})
+
+test('rejects public assets with an incorrect response, reduced or extended size, or different bytes', async () => {
+  for (const [response, message] of [
+    [() => new Response(null, { status: 404 }), /response \(404\)/],
+    [() => new Response(payload, { headers: { 'content-encoding': 'gzip' } }), /response \(200\)/],
+    [() => new Response(payload, { headers: { 'content-length': '9000' } }), /size mismatch/],
+    [() => new Response(payload.subarray(1)), /size mismatch/],
+    [() => new Response(Buffer.concat([payload, payload])), /size mismatch/],
+    [() => new Response(Buffer.alloc(payload.length)), /SHA-256 mismatch/],
+    [() => new Response(new ReadableStream({ start(controller) { controller.error(new Error('signed-url-detail')) } })),
+      /Incomplete public asset transfer: SHA256SUMS.txt/],
+  ]) {
+    await assert.rejects(verifyPublicReleaseAsset(publicAPI, publicAsset, async () => response()), message)
+  }
+})
+
+test('rejects public asset redirects outside the GitHub CDN or above the redirect limit', async () => {
+  for (const url of ['https://example.test/assets/1', publicAPI + '?token=secret']) {
+    await assert.rejects(verifyPublicReleaseAsset(url, publicAsset, async () => {
+      assert.fail('invalid initial URL reached the transport')
+    }), /Invalid public asset API URL/)
+  }
+  for (const location of [
+    'http://release-assets.githubusercontent.com/asset',
+    'https://release-assets.githubusercontent.com:443/asset',
+    'https://release-assets.githubusercontent.com:444/asset',
+    'https://release-assets.githubusercontent.com.evil.test/asset',
+    'https://account:password@release-assets.githubusercontent.com/asset',
+    '/relative',
+  ]) {
+    let calls = 0
+    await assert.rejects(verifyPublicReleaseAsset(publicAPI, publicAsset, async () => {
+      calls++
+      return new Response(null, { status: 302, headers: { location } })
+    }), /Unexpected public asset redirect/)
+    assert.equal(calls, 1)
+  }
+  let calls = 0
+  await assert.rejects(verifyPublicReleaseAsset(publicAPI, publicAsset, async () => {
+    calls++
+    return Response.redirect(publicCDN)
+  }), /Unexpected public asset redirect/)
+  assert.equal(calls, 4)
 })

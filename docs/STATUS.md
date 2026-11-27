@@ -963,3 +963,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Windows 安装器 22.56 MiB、便携版 32.41 MiB，macOS Universal ZIP 40.93 MiB。归档后 Windows 7 项、macOS 6 项 SHA-256 全部匹配。两平台回滚文档与源码一致。[包大小](../build/bin/qa-release-source-56/package-sizes.log) · [归档校验](../build/bin/qa-release-source-56/archived-checks.log)
 - Apple Silicon 直接从 .56 ZIP 解包启动，实际窗口与 Wails 文档就绪、正常退出、SQLite 检查通过。归档程序的回滚探针保留仅在活动 WAL 提交的数据且源未变化。Go 源码、三套主程序架构及 npm 生产依赖扫描均未报告已知漏洞。[Apple Silicon 原生](../build/bin/qa-release-source-56/macos-native.log) · [成品扫描](../build/bin/qa-release-source-56/binary-vulnerabilities.log) · [BMad](../_bmad-output/plan-e13-local-candidate56-packages.md)
 - 本次为本地累计打包。Windows、Intel Mac 当前归档原生验收、正式签名与公证、从正式 GitHub 版本在线升级及授权公网接口联调待完成。既有 GitHub .52 记录仍对应 .52 源码。
+
+## E13 公开发布附件实读校验（2026-11-27）
+
+- 新增公开下载复验模式。核对发布信息、原始 Actions 交付 ZIP、签名任务和远程标签后，用与桌面更新相同的公开 GitHub 附件 API 读实际字节，逐项核对大小和 SHA-256，包含清单。限制重定向和传输时长，流式处理。原有草稿及发布信息复验模式继续可用。[发布后复验](../README.md#发布后复验)
+- 16 项发行脚本测试通过。端到端夹具核对 11 项附件，清单实际字节变化会失败。覆盖下载中断、长度异常、错误响应及不允许的 CDN 重定向。用 GitHub 上公开的 jq 1.8.1 附件验过真实匿名下载。[脚本测试](../build/bin/qa-public-release-downloads/tests.log) · [公开附件实测](../build/bin/qa-public-release-downloads/public-asset.log)
+- JindiDrama 公开稳定频道返回 HTTP 404，公开发布列表为空。该项目正式发布附件复验及旧版真实在线升级待已签名版本发布后执行。本轮不涉及桌面二进制更新。[稳定频道](../build/bin/qa-public-release-downloads/release-status.log) · [公开列表](../build/bin/qa-public-release-downloads/release-count.log) · [BMad](../_bmad-output/plan-e13-verify-public-downloads.md)

@@ -134,10 +134,10 @@ node scripts/package-checksums.mjs --verify-release-draft v0.1.0 "<解压目录>
 
 ```sh
 curl -q --fail --silent --show-error https://api.github.com/repos/wuekevin/JindiDrama/releases/latest > release-public.json
-node scripts/package-checksums.mjs --verify-release-published v0.1.0 "<解压目录>" release-public.json release-jobs.json release-handoff.zip release-artifact.json
+node scripts/package-checksums.mjs --verify-release-public-downloads v0.1.0 "<解压目录>" release-public.json release-jobs.json release-handoff.zip release-artifact.json
 ```
 
-命令校验公开版本的发布状态、频道、版本页、下载地址及每项附件的 SHA-256。还需从上一版桌面应用实际发现并下载新包，核对安装升级。[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
+命令校验公开版本和交付包，再通过桌面更新使用的公开附件 API 逐个获取文件内容，独立核对长度和 SHA-256，包含清单本身。若只需核对发布信息，可使用相同参数运行 `--verify-release-published`。随后还需用上一版桌面应用实际发现、下载并安装新包，核对升级。[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 
 #### Windows 证书库签名
 

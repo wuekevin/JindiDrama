@@ -147,12 +147,13 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     run_url: 'https://api.github.com/repos/' + repository + '/actions/runs/' + runID,
     status: 'completed', conclusion: 'success',
   }))
-  async function checkRelease(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false } = {}) {
+  async function checkRelease(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false, downloadEnv } = {}) {
     await writeFile(draftFile, JSON.stringify(data))
     await writeFile(jobsFile, JSON.stringify({ total_count: total, jobs: releaseJobs }))
     await writeFile(artifactFile, JSON.stringify(releaseArtifact))
-    const option = published ? '--verify-release-published' : '--verify-release-draft'
-    return run(checksums, [option, version, output, draftFile, jobsFile, archiveFile, artifactFile], { cwd })
+    const option = downloadEnv ? '--verify-release-public-downloads' : published ? '--verify-release-published' : '--verify-release-draft'
+    return run(checksums, [option, version, output, draftFile, jobsFile, archiveFile, artifactFile],
+      { cwd, env: downloadEnv ?? process.env })
   }
   const checkDraft = checkRelease
   const checkPublished = (data) => checkRelease(data, { published: true })
@@ -255,6 +256,29 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const validPublished = await checkPublished(published)
   assert.equal(validPublished.status, 0, validPublished.stderr)
   assert.match(validPublished.stdout, /GitHub published release 123 matches all 11 handoff files/)
+  const publicFetchFixture = join(cwd, 'public-fetch-fixture.mjs')
+  const assetPaths = Object.fromEntries(published.assets.map(({ url, name }) => [url, join(output, name)]))
+  await writeFile(publicFetchFixture, `
+    import { readFile } from 'node:fs/promises'
+    const paths = ${JSON.stringify(assetPaths)}
+    globalThis.fetch = async (url, { headers }) => {
+      const path = paths[url.href]
+      if (!path || headers.Accept !== 'application/octet-stream') throw new Error('unexpected request')
+      const bytes = await readFile(path)
+      if (process.env.JINDI_CORRUPT_PUBLIC && path.endsWith('SHA256SUMS.txt')) bytes[0] ^= 1
+      return new Response(bytes, { headers: { 'Content-Length': bytes.length } })
+    }
+  `)
+  const downloadEnv = { ...process.env, NODE_OPTIONS: '--import=' + pathToFileURL(publicFetchFixture).href }
+  const publicDownloads = await checkRelease(published, { downloadEnv })
+  assert.equal(publicDownloads.status, 0, publicDownloads.stderr)
+  assert.match(publicDownloads.stdout, /All 11 public downloads match the handoff/)
+  assert.match(publicDownloads.stdout, /Public download SHA256SUMS.txt: SHA-256 OK/)
+  const wrongPublicBytes = await checkRelease(published, { downloadEnv: { ...downloadEnv, JINDI_CORRUPT_PUBLIC: '1' } })
+  assert.equal(wrongPublicBytes.status, 1)
+  assert.match(wrongPublicBytes.stderr, /Public asset SHA-256 mismatch: SHA256SUMS.txt/)
+  assert.doesNotMatch(wrongPublicBytes.stdout, /All 11 public downloads/)
+
   assert.match((await checkDraft(published)).stderr, /repository, tag, and release channel/)
   assert.match((await checkPublished(draft)).stderr, /repository, tag, and release channel/)
   assert.match((await checkPublished({ ...published, prerelease: false })).stderr, /repository, tag, and release channel/)

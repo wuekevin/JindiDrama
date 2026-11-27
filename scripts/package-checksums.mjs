@@ -242,7 +242,63 @@ function validPublicationTime(value) {
   return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 19) === match[1]
 }
 
-async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile, archiveFile, artifactFile) {
+const assetRedirectHosts = new Set(['release-assets.githubusercontent.com', 'objects.githubusercontent.com'])
+const redirectStatuses = new Set([301, 302, 303, 307, 308])
+
+export async function verifyPublicReleaseAsset(url, { name, size, digest }, request = fetch) {
+  const signal = AbortSignal.timeout(300_000)
+  let target = URL.canParse(url) ? new URL(url) : null
+  if (!target || target.origin !== 'https://api.github.com' || target.username || target.password || target.search || target.hash) {
+    throw new Error('Invalid public asset API URL: ' + name)
+  }
+  let response
+  for (let redirects = 0; redirects <= 3; redirects++) {
+    try {
+      response = await request(target, {
+        redirect: 'manual', credentials: 'omit', signal,
+        headers: { Accept: 'application/octet-stream', 'Accept-Encoding': 'identity', 'User-Agent': 'JindiDrama-release-verification' },
+      })
+    } catch {
+      throw new Error('Cannot fetch public asset: ' + name)
+    }
+    if (!redirectStatuses.has(response.status)) break
+    await response.body?.cancel()
+    const location = response.headers.get('location') ?? ''
+    // Check the raw authority before URL normalization removes an explicit default port.
+    const host = /^https:\/\/([^/?#]+)\//.exec(location)?.[1]
+    target = URL.canParse(location) ? new URL(location) : null
+    if (redirects === 3 || !target || !assetRedirectHosts.has(host) || target.host !== host || target.hash) {
+      throw new Error('Unexpected public asset redirect: ' + name)
+    }
+  }
+
+  const length = response.headers.get('content-length')
+  const encoding = response.headers.get('content-encoding')
+  if (response.status !== 200 || !response.body || (encoding && encoding !== 'identity')) {
+    await response.body?.cancel()
+    throw new Error(`Unexpected public asset response (${response.status}): ${name}`)
+  }
+  if (length !== null && length !== String(size)) {
+    await response.body.cancel()
+    throw new Error('Public asset size mismatch: ' + name)
+  }
+
+  const hash = createHash('sha256')
+  let bytes = 0
+  try {
+    for await (const chunk of response.body) {
+      bytes += chunk.length
+      if (bytes > size) break
+      hash.update(chunk)
+    }
+  } catch {
+    throw new Error('Incomplete public asset transfer: ' + name)
+  }
+  if (bytes !== size) throw new Error('Public asset size mismatch: ' + name)
+  if (hash.digest('hex') !== digest) throw new Error('Public asset SHA-256 mismatch: ' + name)
+}
+
+async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile, archiveFile, artifactFile, downloadPublic) {
   const label = draft ? 'draft' : 'published release'
   const releaseLabel = draft ? 'GitHub Release draft' : 'GitHub published release'
   const assetLabel = draft ? 'Draft' : 'Published release'
@@ -295,6 +351,13 @@ async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile
   }
   console.log('GitHub release tag ' + tag + ' matches build commit ' + revision)
   console.log(`${releaseLabel} ${release.id} matches all ${files.size} handoff files`)
+  if (downloadPublic) {
+    for (const { name, id } of release.assets) {
+      await verifyPublicReleaseAsset(`https://api.github.com/repos/${repository}/releases/assets/${id}`, { name, ...files.get(name) })
+      console.log(`Public download ${name}: SHA-256 OK`)
+    }
+    console.log(`All ${files.size} public downloads match the handoff`)
+  }
 }
 
 function isMainModule(entry) {
@@ -310,17 +373,18 @@ function isMainModule(entry) {
 
 if (import.meta.main ?? isMainModule(process.argv[1])) {
   const [first, platform, directory, ...extra] = process.argv.slice(2)
+  const verifyReleaseModes = ['--verify-release-draft', '--verify-release-published', '--verify-release-public-downloads']
   if (first === '--verify' && (platformPackages.has(platform) || platform === 'release') && directory && extra.length === 0) {
     await verify(directory, platform)
   } else if (first === '--verify-hosted' && platformPackages.has(platform) && directory && extra.length === 0) {
     await verifyHostedPackage(directory, platform)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
-  } else if ((first === '--verify-release-draft' || first === '--verify-release-published') && platform && directory && extra.length === 4) {
-    await verifyGitHubRelease(first === '--verify-release-draft', platform, directory, ...extra)
+  } else if (verifyReleaseModes.includes(first) && platform && directory && extra.length === 4) {
+    await verifyGitHubRelease(first === '--verify-release-draft', platform, directory, ...extra, first === '--verify-release-public-downloads')
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | <--verify-release-draft|--verify-release-published> <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | <--verify-release-draft|--verify-release-published|--verify-release-public-downloads> <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
   }
 }
