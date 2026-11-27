@@ -844,3 +844,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 复现集数越过 JavaScript 安全整数边界、毫秒经秒数往返发生舍入、时间戳超出可显示日期。SQLite 在恢复和日常写入时共享校验，异常备份整次拒绝，直接批量写入失败时收藏、历史和回执一起回滚。有效旧备份、可精确往返的边界值和正常进度保留原值。[原版复现](../build/bin/qa-history-bridge-bounds/before.log) · [JavaScript 边界](../build/bin/qa-history-bridge-bounds/bridge-boundary.log)
 - 只改收藏时保留旧历史的原始毫秒。新增的异常历史在入队前拒绝。旧队列重放排除异常历史更新，继续处理有效的收藏、删除和进度。数据库中已存在的旧行沿用原有读取方式。[桥接原版复现](../build/bin/qa-history-bridge-bounds/before-bridge.log)
 - 前端类型检查、生产构建、125 项 Vitest 和收藏、历史、设置 91 项 Chromium 通过。Go 全量、vet、App 与 SQLite 竞态和 Windows amd64 SQLite 交叉编译通过。Windows 原生与成品验收待下一批，源码晚于 .52。[Vitest](../build/bin/qa-history-bridge-bounds/vitest.log) · [浏览器回归](../build/bin/qa-history-bridge-bounds/e2e.log) · [Go 竞态](../build/bin/qa-history-bridge-bounds/go-race.log) · [BMad 记录](../_bmad-output/plan-e11-history-bridge-bounds.md)
+
+## E11 Apple Silicon 原生备份恢复验收（2026-11-27）
+
+- 从发行源码 `2a46e7b46f86728ccc1a455bd3a00f20ed725f34` 构建 Apple Silicon 测试应用，以独立临时签名和隔离数据目录在 macOS 26.6.2 运行。通过设置页和系统文件选择器补回 1 项收藏及 1 条观看历史，重复导入显示记录已存在。损坏文件与时间戳越界文件均显示读取失败。取消选择后正常返回。每步复核 SQLite 字段，原有记录及新增记录均与预期一致。[原生交互](../build/bin/qa-native-library-restore/native-ui.log) · [构建身份](../build/bin/qa-native-library-restore/native-build-identity.log)
+- 三份源文件 SHA-256 一致，源目录文件集合一致。应用正常退出后重启，收藏和历史页各显示两条预期记录。再退出后 SQLite `quick_check` 通过，WAL 已检查点同步，会话标记已清理。本轮为 Apple Silicon 本地验收，Windows 与 Intel Mac 的当前源码验收仍待完成。[源文件校验](../build/bin/qa-native-library-restore/backup-source-integrity.log) · [重启界面](../build/bin/qa-native-library-restore/restart-ui.log) · [重启数据库](../build/bin/qa-native-library-restore/restart-sqlite.log) · [BMad 记录](../_bmad-output/plan-e11-native-library-restore.md)
