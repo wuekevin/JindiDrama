@@ -93,6 +93,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			body := fmt.Sprintf(`{
 				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%d,`, status) + trial + `
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
+				"vod_play_from":"主线路",
 				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]
 			}`
 			return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
@@ -216,7 +217,8 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		t.Fatalf("valid playback made %d detail GETs, want 1", calls)
 	}
 	if err != nil || ticket.Kind != "authorized" || ticket.LeaseID == "" || len(ticket.Sources) != 1 ||
-		ticket.EpisodeID != episodes[2].ID || ticket.Sources[0].Type != "video/webm" {
+		ticket.EpisodeID != episodes[2].ID || ticket.Sources[0].Type != "video/webm" ||
+		ticket.Sources[0].RouteName != "主线路" {
 		t.Fatalf("ticket: %+v, %v", ticket, err)
 	}
 	lease, err := url.Parse(ticket.Sources[0].Src)

@@ -62,9 +62,10 @@ type Episode struct {
 }
 
 type MediaSource struct {
-	Src     string `json:"src"`
-	Type    string `json:"type"`
-	Quality string `json:"quality,omitempty"`
+	Src       string `json:"src"`
+	Type      string `json:"type"`
+	Quality   string `json:"quality,omitempty"`
+	RouteName string `json:"routeName,omitempty"`
 }
 
 type PlaybackTicket struct {

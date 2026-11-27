@@ -4,7 +4,7 @@ export type CapabilityState = 'ready'|'mock'|'not_authorized'|'unavailable'|'uns
 export interface CapabilityResult { state: CapabilityState; reason?: string; checkedAt?: string }
 export interface Drama { id: string; title: string; cover: string; tags: string[]; summary?: string; episodeCount: number }
 export interface Episode { id: string; dramaId: string; index: number; title?: string; durationMs?: number; available: boolean }
-export interface MediaSource { src: string; type: string; quality?: 'sd' | 'hd' }
+export interface MediaSource { src: string; type: string; quality?: 'sd' | 'hd'; routeName?: string }
 export interface PlaybackTicket { kind: 'demo'|'licensed'|'authorized'; episodeId: string; sources?: MediaSource[]; playbackUrl?: string; expiresAt?: string; leaseId?: string; restrictions?: string[] }
 export interface Comment { id: string; episodeId: string; authorDisplay: string; text: string; createdAt: string; likes: number; replyCount: number }
 export interface Danmaku { id: string; episodeId: string; offsetMs: number; text: string; likes: number }

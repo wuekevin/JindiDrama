@@ -559,7 +559,7 @@ async function load() {
 
 function sourceLabel(choice: MediaSource, index: number) {
   const quality = DEMO_QUALITIES.find((item) => item.id === choice.quality)?.label
-  return ['线路 ' + (index + 1), quality, failedSources.value.has(index) ? '不可用' : null].filter(Boolean).join(' · ')
+  return ['线路 ' + (index + 1), choice.routeName, quality, failedSources.value.has(index) ? '不可用' : null].filter(Boolean).join(' · ')
 }
 
 function selectPlaybackSource(event: Event) {
@@ -758,6 +758,9 @@ onBeforeUnmount(() => {
           </option>
         </select>
       </label>
+      <span v-else-if="canInteract && state === 'ready' && video && source?.routeName" class="source-name">
+        播放源 · {{ source.routeName }}
+      </span>
       <BaseButton v-if="state === 'ready' && video" variant="ghost" type="button" data-testid="catalog-pip"
         :aria-pressed="pipActive" :disabled="pipBusy" @click="togglePip">
         <PictureInPicture2 :size="16" aria-hidden="true" />{{ pipActive ? '退出画中画' : '画中画' }}
@@ -800,13 +803,14 @@ video { display: block; width: 100%; max-width: 960px; max-height: calc(65vh / v
   &:disabled { opacity: .45; cursor: not-allowed; }
 }
 .source-picker {
-  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--c-text-2);
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; max-width: 100%; color: var(--c-text-2);
   select {
-    min-height: 38px; max-width: 100%; padding: 0 12px; border-radius: var(--r-pill);
+    min-width: 0; min-height: 38px; max-width: min(100%, 18rem); padding: 0 12px; border-radius: var(--r-pill);
     border: 1px solid var(--c-border-strong); background: var(--c-surface-hover); color: var(--c-text);
   }
   option { background: var(--c-surface-solid); color: var(--c-text); }
 }
+.source-name { min-width: 0; max-width: 100%; overflow-wrap: anywhere; color: var(--c-text-2); }
 .local-comment-panel { width: min(100%, 640px); height: min(560px, 75vh); min-height: 290px; margin-top: 12px; }
 .local-danmaku-panel { width: min(100%, 640px); height: min(660px, 75vh); min-height: 290px; margin-top: 12px; }
 </style>

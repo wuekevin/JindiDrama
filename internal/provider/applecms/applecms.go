@@ -45,6 +45,7 @@ var (
 	htmlTag          = regexp.MustCompile(`<[^>]*>`)
 	metadataURL      = regexp.MustCompile(`(?i)https?://[^\s\p{Z}<>"，。；！？、）】》]+`)
 	genreURL         = regexp.MustCompile(`(?i)(?:[a-z][a-z0-9+.-]*:)?//[^\s\p{Z}<>"，。；！？、）】》]+`)
+	routeName        = regexp.MustCompile(`^[\p{L}\p{N}][\p{L}\p{N}\p{M} _+()（）·-]{0,31}$`)
 	episodeLabel     = regexp.MustCompile(`^(?:([0-9]+)|第\s*([0-9]+)\s*集)$`)
 )
 
@@ -387,6 +388,7 @@ type record struct {
 	Director     json.RawMessage `json:"vod_director"`
 	Total        json.RawMessage `json:"vod_total"`
 	PlayURL      string          `json:"vod_play_url"`
+	PlayFrom     json.RawMessage `json:"vod_play_from"`
 	Locked       json.RawMessage `json:"locked"`
 	TrialMinutes json.RawMessage `json:"vod_trysee"`
 	PlayPoints   json.RawMessage `json:"vod_points_play"`
@@ -561,6 +563,30 @@ func (p *Provider) coverURL(picture json.RawMessage) string {
 	return p.endpoint.ResolveReference(ref).String()
 }
 
+func playbackRouteNames(raw json.RawMessage, count int) []string {
+	var names string
+	if json.Unmarshal(raw, &names) != nil || names == "" {
+		return nil
+	}
+	delimiter := "$$$"
+	if !strings.Contains(names, delimiter) {
+		delimiter = ","
+	}
+	if strings.Count(names, delimiter)+1 != count {
+		return nil
+	}
+	labels := strings.SplitN(names, delimiter, maxRoutes+1)
+	labels = labels[:min(len(labels), maxRoutes)]
+	for index, name := range labels {
+		label := strings.TrimSpace(name)
+		labels[index] = ""
+		if routeName.MatchString(label) {
+			labels[index] = label
+		}
+	}
+	return labels
+}
+
 func (p *Provider) normalize(item record, id, title string) (provider.Drama, map[int][]provider.MediaSource) {
 	total, _ := strconv.Atoi(scalar(item.Total).decimal(9))
 	drama := provider.Drama{
@@ -575,7 +601,8 @@ func (p *Provider) normalize(item record, id, title string) (provider.Drama, map
 	sources := make(map[int][]provider.MediaSource)
 	restricted := item.restricted()
 	routes := strings.SplitN(item.PlayURL, "$$$", maxRoutes+1)
-	for _, route := range routes[:min(len(routes), maxRoutes)] {
+	labels := playbackRouteNames(item.PlayFrom, strings.Count(item.PlayURL, "$$$")+1)
+	for routeIndex, route := range routes[:min(len(routes), maxRoutes)] {
 		for entry := range strings.SplitSeq(route, "#") {
 			label, rawURL, ok := strings.Cut(entry, "$")
 			if !ok {
@@ -597,10 +624,14 @@ func (p *Provider) normalize(item record, id, title string) (provider.Drama, map
 			if !allowed {
 				continue
 			}
-			if !slices.Contains(sources[index], source) {
-				sources[index] = append(sources[index], source)
-				drama.UpdatedTo = max(drama.UpdatedTo, index)
+			if slices.ContainsFunc(sources[index], func(earlier provider.MediaSource) bool { return earlier.Src == source.Src }) {
+				continue
 			}
+			if labels != nil {
+				source.RouteName = labels[routeIndex]
+			}
+			sources[index] = append(sources[index], source)
+			drama.UpdatedTo = max(drama.UpdatedTo, index)
 		}
 	}
 	return drama, sources

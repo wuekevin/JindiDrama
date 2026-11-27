@@ -1382,13 +1382,14 @@ test('CMS manual source choice preserves pause, playback and fallback to an earl
   await cmsLibraryFixture(page)
   await page.goto(cmsRoute)
   await page.evaluate(() => {
-    type Playback = (id: string, episode: number) => Promise<{ sources: { quality?: string }[] }>
+    type Playback = (id: string, episode: number) => Promise<{ sources: { quality?: string; routeName?: string }[] }>
     const desktop = window as unknown as { go: { app: { App: { CatalogPlayback: Playback } } } }
     const runtime = desktop.go.app.App
     const resolve = runtime.CatalogPlayback.bind(runtime)
     runtime.CatalogPlayback = async (id, episode) => {
       const ticket = await resolve(id, episode)
       ticket.sources[0].quality = 'hd'
+      ticket.sources[0].routeName = '主线路'
       return ticket
     }
   })
@@ -1397,7 +1398,7 @@ test('CMS manual source choice preserves pause, playback and fallback to an earl
   const source = page.getByRole('combobox', { name: '播放源' })
   await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
   await expect(source).toBeVisible({ timeout: 5000 })
-  await expect(source.locator('option')).toHaveText(['线路 1 · 高清', '线路 2'])
+  await expect(source.locator('option')).toHaveText(['线路 1 · 主线路 · 高清', '线路 2'])
   await expect(video).toHaveJSProperty('paused', true)
   await video.evaluate((media: HTMLVideoElement) => { media.currentTime = 7 })
   await expect.poll(() => position(video)).toBe(7)
@@ -1434,6 +1435,44 @@ test('CMS manual source choice preserves pause, playback and fallback to an earl
   await video.dispatchEvent('error')
   await expect(page.getByTestId('error')).toContainText('媒体加载失败')
   await expect(source).toHaveCount(0)
+})
+
+test('CMS displays a single named source and fits long names at 220% zoom', async ({ page }, testInfo) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.dpi = 220
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.goto(cmsRoute)
+  await page.evaluate(() => {
+    type Playback = (id: string, episode: number) => Promise<{ sources: { routeName?: string }[] }>
+    const desktop = window as unknown as { go: { app: { App: { CatalogPlayback: Playback } } } }
+    const runtime = desktop.go.app.App
+    const resolve = runtime.CatalogPlayback.bind(runtime)
+    runtime.CatalogPlayback = async (id, episode) => {
+      const ticket = await resolve(id, episode)
+      ticket.sources[0].routeName = episode === 1 ? '主线路' : '长'.repeat(32)
+      if (episode === 1) ticket.sources.splice(1)
+      return ticket
+    }
+  })
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  await expect(page.getByText('播放源 · 主线路', { exact: true })).toBeVisible()
+  const source = page.getByRole('combobox', { name: '播放源' })
+  await expect(source).toHaveCount(0)
+
+  await page.getByRole('button', { name: '第2集', exact: true }).click()
+  await expect(source.locator('option')).toHaveText(['线路 1 · ' + '长'.repeat(32), '线路 2'])
+  await source.focus()
+  await source.scrollIntoViewIfNeeded()
+  const bounds = await source.evaluate((control) => {
+    const rect = control.getBoundingClientRect()
+    return { left: rect.left, right: rect.right, viewportWidth: window.innerWidth,
+      documentWidth: document.documentElement.scrollWidth }
+  })
+  expect(bounds.left).toBeGreaterThanOrEqual(0)
+  expect(bounds.right).toBeLessThanOrEqual(bounds.viewportWidth)
+  expect(bounds.documentWidth).toBeLessThanOrEqual(bounds.viewportWidth)
+  await expect(source).toBeInViewport({ ratio: 0.95 })
+  await page.screenshot({ path: testInfo.outputPath('cms-source-long-220.png') })
 })
 
 test('CMS fallback preserves a newer paused seek after manual source selection', async ({ page }) => {

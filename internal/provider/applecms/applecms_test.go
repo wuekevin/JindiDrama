@@ -39,6 +39,44 @@ func fixtureProvider(t *testing.T, endpoint string, client *http.Client) *Provid
 	})
 }
 
+func TestRouteNamesKeepSourcePositionsAndIgnoreInformationalErrors(t *testing.T) {
+	p := fixtureProvider(t, "https://catalog.example.test/vod", http.DefaultClient)
+	const routes = "1$https://media.example.test/main.mp4$$$1$http://media.example.test/blocked.mp4$$$1$https://media.example.test/main.mp4#1$https://media.example.test/backup.webm"
+	for _, test := range []struct {
+		name, metadata string
+		want           []string
+	}{
+		{"parallel groups", `" 主线路 $$$不可播$$$备用线路_2 "`, []string{"主线路", "备用线路_2"}},
+		{"filtered JSON", `"主线路（备用）,不可播,CDN A+B"`, []string{"主线路（备用）", "CDN A+B"}},
+		{"combining accent", `"Cafe\u0301$$$不可播$$$备用线路"`, []string{"Cafe\u0301", "备用线路"}},
+		{"mismatched", `"主线路$$$备用线路"`, []string{"", ""}},
+		{"invalid names", `"https://example.test?token=secret$$$不可播$$$<b>备用</b>"`, []string{"", ""}},
+		{"wrong type", `{"name":"主线路"}`, []string{"", ""}},
+		{"missing", "", []string{"", ""}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, episodes := p.normalize(record{PlayURL: routes, PlayFrom: []byte(test.metadata)}, "1", "片源")
+			sources := episodes[1]
+			if len(sources) != 2 || sources[0].RouteName != test.want[0] || sources[1].RouteName != test.want[1] ||
+				sources[0].Quality != "" || sources[1].Quality != "" {
+				t.Fatalf("unexpected playback sources: %+v", sources)
+			}
+		})
+	}
+}
+
+func TestRouteNamesRespectMediaGroupLimit(t *testing.T) {
+	const primary = "主线路"
+	raw := []byte(`"` + primary + strings.Repeat("$$$备用线路", maxRoutes+2) + `"`)
+	names := playbackRouteNames(raw, maxRoutes+3)
+	if len(names) != maxRoutes || names[0] != primary || names[maxRoutes-1] != "备用线路" {
+		t.Fatalf("retained names: %q", names)
+	}
+	if names := playbackRouteNames(raw, maxRoutes+4); names != nil {
+		t.Fatalf("mismatched names: %q", names)
+	}
+}
+
 func TestCatalogPreservesIDsAndPositionsAcrossRoutes(t *testing.T) {
 	const routes = "第 3 集$https://media.example.test/three.mp4?key=synthetic#预告$https://media.example.test/extra.mp4#1$https://media.example.test/one.m3u8$$$3$https://media.example.test/three.webm#03$https://media.example.test/three.webm#第5集$https://media.example.test/five.webm#1001$https://media.example.test/overflow.mp4"
 	var requests atomic.Int32
