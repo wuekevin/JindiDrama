@@ -900,3 +900,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 从发行源码 `e1ac291b8608870a2094fd265bc24c48c55e1900` 构建 Apple Silicon 测试应用，使用独立资料目录和临时签名。实际 WKWebView 设置页在备份目录受阻时提示失败，并保留同名文件。排除障碍后原页重试成功，备份只生成一个独立 SQLite 文件，权限为 `0600`，未继承对照文件具有的 ACL。备份包含只在活动 WAL 中的观看记录。[构建身份](../build/bin/qa-native-backup-vfs/identity.log) · [WKWebView 往返](../build/bin/qa-native-backup-vfs/automation-roundtrip.log) · [ACL 对照](../build/bin/qa-native-backup-vfs/backup-acl.log)
 - 系统锁屏时，辅助功能读取不到目标窗口。隔离自动化构建通过实际界面按钮和 Wails 绑定执行，文件选择的返回值由夹具提供。恢复补回 1 项收藏和 1 条观看历史，保留较新的当前断点及无关项，重复导入保持结果。重启后实际界面显示各 3 条，退出后 SQLite 完整性通过，源备份文件 SHA-256 一致且无辅助文件。真实系统文件选择器的点击和取消待解锁环境验收。[控制台状态](../build/bin/qa-native-backup-vfs/console-condition.log) · [恢复事件](../build/bin/qa-native-backup-vfs/webdriver-restore.log) · [重启事件](../build/bin/qa-native-backup-vfs/webdriver-restart.log)
 - 未插桩的同源程序从上述成品备份生成可读取的 SQLite v2 回滚副本，核对 WAL 中的 6789 毫秒记录、目标版本、完整性及源备份摘要。自动化钩子用于隔离构建，发行源码只增加验收文档。本轮未生成新的分发测试包。[回滚记录](../build/bin/qa-native-backup-vfs/rollback-from-ui-backup.log) · [BMad 记录](../_bmad-output/plan-e11-native-backup-vfs-roundtrip.md)
+
+## E11 SQLite 备份文件头预检（2026-11-27）
+
+- 复现空文件、截断头及 4 MiB 伪装备份均被旧版复制到暂存区。新版在没有 WAL 或回滚日志时先从已打开句柄读取 100 字节 SQLite 头部。明显无效的文件在第一份暂存文件创建前被拒绝，源文件内容一致。[旧版复现](../build/bin/qa-backup-header/baseline.log) · [专项回归](../build/bin/qa-backup-header/targeted.log) · [SQLite 文件格式](https://www.sqlite.org/fileformat2.html#the_database_header)
+- 带 WAL 或回滚日志时完整保留文件组，由 SQLite 验证。当前和旧版备份、活动 WAL、回滚与无损清理用例均通过。Go 全量、vet、App 与 SQLite 竞态通过，Windows amd64 SQLite 测试交叉编译通过。源码改动晚于 .53，Windows 原生待验收。[Go 全量](../build/bin/qa-backup-header/go-test.log) · [竞态](../build/bin/qa-backup-header/go-race.log) · [Windows 编译](../build/bin/qa-backup-header/windows-compile.log) · [BMad 记录](../_bmad-output/plan-e11-backup-header-preflight.md)
+- 同源回滚 CLI 直接拒绝伪装文件，源摘要一致。上一轮由桌面设置页生成的有效备份仍可制作 v2，完整性及源摘要复核通过。[拒绝路径](../build/bin/qa-backup-header/cli-invalid.log) · [有效回滚](../build/bin/qa-backup-header/cli-valid.log)

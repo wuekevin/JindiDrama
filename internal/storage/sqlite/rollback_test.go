@@ -376,3 +376,75 @@ func TestPrepareRollbackCopyDetectsLateOutputSidecar(t *testing.T) {
 		t.Fatalf("late WAL changed: %q %v", data, err)
 	}
 }
+
+func TestSnapshotRejectsInvalidHeaderBeforeWriting(t *testing.T) {
+	const sqliteMagic = "SQLite format 3\x00"
+	for _, fixture := range []struct {
+		name string
+		data string
+		size int64
+	}{
+		{"empty", "", 0},
+		{"truncated-header", sqliteMagic, int64(len(sqliteMagic))},
+		{"mislabeled-large-file", "<!doctype html>", 4 << 20},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "backup.db")
+			if err := os.WriteFile(source, []byte(fixture.data), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Truncate(source, fixture.size); err != nil {
+				t.Fatal(err)
+			}
+			original, err := os.ReadFile(source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			destination := t.TempDir()
+			root, err := os.OpenRoot(destination)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			err = snapshotDatabase(source, root, "snapshot")
+			files, readErr := os.ReadDir(destination)
+			if readErr != nil || len(files) != 0 || err == nil {
+				t.Fatalf("invalid backup was staged: entries=%v, read error=%v, snapshot error=%v", files, readErr, err)
+			}
+			after, err := os.ReadFile(source)
+			if err != nil || !bytes.Equal(after, original) {
+				t.Fatalf("source changed: %v", err)
+			}
+		})
+	}
+}
+
+func TestSnapshotLeavesAuxiliaryFileSetsForSQLiteValidation(t *testing.T) {
+	for _, suffix := range []string{"-wal", "-journal"} {
+		t.Run(suffix, func(t *testing.T) {
+			source := filepath.Join(t.TempDir(), "backup.db")
+			// These fixtures only exercise the copy boundary. Full validation
+			// of the copied SQLite inputs happens after this function returns.
+			files := map[string]string{"": "truncated", suffix: "companion"}
+			for extension, body := range files {
+				if err := os.WriteFile(source+extension, []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			root, err := os.OpenRoot(t.TempDir())
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer root.Close()
+			if err := snapshotDatabase(source, root, "snapshot"); err != nil {
+				t.Fatal(err)
+			}
+			for extension, want := range files {
+				data, err := root.ReadFile("snapshot" + extension)
+				if err != nil || string(data) != want {
+					t.Fatalf("copied %q: %q, %v", extension, data, err)
+				}
+			}
+		})
+	}
+}

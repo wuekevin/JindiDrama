@@ -264,6 +264,13 @@ func snapshotDatabase(source string, root *os.Root, staged string) error {
 		inputs[suffix] = input
 		originals[suffix] = info
 	}
+	// A sidecar can contain a newer or recoverable page 1. Let SQLite
+	// validate those file sets together instead of inspecting the main file alone.
+	if len(inputs) == 1 {
+		if err := checkStandaloneSnapshotHeader(inputs[""]); err != nil {
+			return err
+		}
+	}
 	for suffix, input := range inputs {
 		output, err := root.OpenFile(staged+suffix, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err != nil {
@@ -293,6 +300,21 @@ func snapshotDatabase(source string, root *os.Root, staged string) error {
 		}
 	}
 	return checkSnapshotSources(selected, source, originals)
+}
+
+func checkStandaloneSnapshotHeader(input *os.File) error {
+	const signature = "SQLite format 3\x00"
+	var header [100]byte
+	if _, err := input.ReadAt(header[:], 0); err != nil {
+		if errors.Is(err, io.EOF) {
+			return errors.New("源数据库的 SQLite 文件头不完整")
+		}
+		return err
+	}
+	if string(header[:len(signature)]) != signature {
+		return errors.New("源数据库的 SQLite 文件头无效")
+	}
+	return nil
 }
 
 func checkSnapshotSources(selected, source string, files map[string]os.FileInfo) error {
