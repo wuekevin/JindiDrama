@@ -167,7 +167,14 @@ export const useCommentStore = defineStore('comments', () => {
   function validate(text: string): string | null { const t = text.trim(); if (!t) return '评论不能为空'; if (t.length > MAX_LEN) return `评论不能超过 ${MAX_LEN} 字`; return null }
   function post(text: string): string | null { if (!canEdit()) return '本集评论尚未载入'; const e = validate(text); if (e) return e; all.value.unshift({ id: `my-${localId()}`, user: '我', level: 1, text: text.trim(), likes: 0, liked: false, ago: '刚刚', ts: Date.now(), replies: [], replyTotal: 0, mine: true }); sort.value = 'new'; void persist(); return null }
   function like(c: Comment | Reply) { if (!canEdit()) return; c.liked = !c.liked; c.likes = Math.max(0, (c.likes ?? 0) + (c.liked ? 1 : -1)); void persist() }
-  function remove(id: string) { if (!canEdit()) return; const l = all.value; const i = l.findIndex((c) => c.id === id && c.mine); if (i >= 0) { l.splice(i, 1); void persist() } }
+  function remove(id: string): boolean {
+    if (!canEdit()) return false
+    const index = all.value.findIndex((comment) => comment.id === id && comment.mine === true)
+    if (index < 0) return false
+    all.value.splice(index, 1)
+    void persist()
+    return true
+  }
   function reply(c: Comment, text: string): string | null {
     if (!canEdit()) return '本集评论尚未载入'
     const error = validate(text)

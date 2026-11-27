@@ -596,6 +596,18 @@ test('CMS local comments start empty and persist independently for each episode'
   await expect(panel.getByTestId('comment')).toContainText('第 1 集的本机笔记')
   await expect(panel.getByTestId('comment-total')).toHaveText('(1)')
   expect(snapshots.has(cmsId + ':2')).toBe(false)
+  await panel.getByTestId('more').click()
+  await panel.getByTestId('delete').click()
+  await expect(panel.getByTestId('comment-input')).toBeFocused()
+  await expect(panel.getByText('暂无评论')).toBeVisible()
+  await expect.poll(() => snapshots.get(cmsId + ':1')).toBe('[]')
+
+  snapshots.set(cmsId + ':2', JSON.stringify([{ id: 'previous', text: '过往只读评论', mine: false }]))
+  await page.getByRole('button', { name: '第2集' }).click()
+  await open.click()
+  const readonly = panel.getByTestId('comment').filter({ hasText: '过往只读评论' })
+  await expect(readonly).toBeVisible()
+  await expect(readonly.getByTestId('more')).toHaveCount(0)
 })
 
 const durationMs = (video: ReturnType<typeof historyVideo>) => video.evaluate((media: HTMLVideoElement) =>

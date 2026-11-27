@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue'
-import { X, Smile, Image, Video, AtSign, ThumbsUp, MessageCircle, Ellipsis, Crown, ChevronRight } from 'lucide-vue-next'
+import { computed, nextTick, ref, watch } from 'vue'
+import { X, Smile, ThumbsUp, MessageCircle, Ellipsis, Crown, ChevronRight } from 'lucide-vue-next'
 import { useCommentStore, MAX_LEN, replyCount, type Comment } from '@/stores/comments'
 import { useToastStore } from '@/stores/toast'
 import { EmptyState } from '@/components/ui'
@@ -10,6 +10,8 @@ const c = useCommentStore(); const toast = useToastStore()
 const err = ref('')
 const replyFor = ref<string | null>(null)
 const menuFor = ref<string | null>(null)
+let menuTrigger: HTMLButtonElement | undefined
+watch(() => c.saveConflict, () => { menuFor.value = null })
 const draft = c.draftForEpisode()
 const editor = ref<HTMLTextAreaElement>()
 const emojiTrigger = ref<HTMLButtonElement>()
@@ -40,6 +42,7 @@ async function toggleEmojiPicker() {
     closeEmojiPicker()
     return
   }
+  menuFor.value = null
   emojiOpen.value = true
   await nextTick()
   if (emojiOpen.value) emojiChoices.value?.querySelector('button')?.focus()
@@ -71,7 +74,23 @@ function closeOnEscape(event: KeyboardEvent) {
     closeEmojiPicker()
     return
   }
+  if (menuFor.value !== null) {
+    event.stopPropagation()
+    menuFor.value = null
+    menuTrigger?.focus()
+    return
+  }
   emit('close')
+}
+function toggleCommentMenu(id: string, event: MouseEvent) {
+  menuFor.value = menuFor.value === id ? null : id
+  if (menuFor.value !== null) emojiOpen.value = false
+  menuTrigger = event.currentTarget as HTMLButtonElement
+}
+function closeCommentMenuOnFocusExit(event: FocusEvent) {
+  const menu = event.currentTarget as HTMLElement
+  const next = event.relatedTarget
+  if (!(next instanceof Node) || !menu.contains(next)) menuFor.value = null
 }
 function submit(event?: KeyboardEvent) {
   if (composing(event) || c.draftForEpisode() !== draft) return
@@ -93,14 +112,19 @@ function sendReply(cm: Comment, event?: KeyboardEvent) {
   replyFor.value = null
   if (!c.expanded.has(cm.id)) c.toggleReplies(cm.id)
 }
-function del(id: string) { c.remove(id); menuFor.value = null; toast.push('评论已删除') }
+async function deleteComment(id: string) {
+  if (!c.remove(id)) return
+  menuFor.value = null
+  toast.push('评论已删除')
+  await nextTick()
+  editor.value?.focus()
+}
 async function deleteReply(commentId: string, replyId: string, event: MouseEvent) {
   const trigger = (event.currentTarget as HTMLButtonElement).closest('article')?.querySelector<HTMLButtonElement>('.reply-button')
   if (!c.removeReply(commentId, replyId)) return
   await nextTick()
   trigger?.focus()
 }
-const dummy = () => toast.push('该功能在演示模式下暂不可用')
 </script>
 <template>
   <aside class="cp on-dark" role="complementary" :aria-label="localOnly ? '本机评论' : '本集评论'" tabindex="-1" data-testid="comment-panel"
@@ -111,7 +135,7 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
       <div class="box"><textarea ref="editor" v-model="draft.text" rows="2" placeholder="说说你对这一集的看法吧～" aria-label="发表评论" data-testid="comment-input"
         @input="err = ''" @compositionstart="editorComposing = true" @compositionend="editorComposing = false"
         @change="editorComposing = false" @keydown.ctrl.enter="submit" @keydown.meta.enter="submit" /></div></div>
-    <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button><template v-if="!localOnly"><button aria-label="图片" @click="dummy"><Image :size="22" /></button><button aria-label="视频" @click="dummy"><Video :size="22" /></button><button aria-label="@" @click="dummy"><AtSign :size="22" /></button></template>
+    <div class="tools"><button ref="emojiTrigger" aria-label="表情" :aria-expanded="emojiOpen" aria-controls="comment-emoji-choices" @mousedown.prevent @click="toggleEmojiPicker"><Smile :size="22" /></button>
       <span class="cnt" :class="{ over }" data-testid="comment-count">{{ draft.text.length }}/{{ MAX_LEN }}</span><button class="post" :disabled="!draft.text.trim() || over || c.loading || c.readError || c.saveConflict" data-testid="comment-post" @click="submit()">发表评论</button></div>
     <div v-show="emojiOpen" id="comment-emoji-choices" ref="emojiChoices" class="emoji-choices" role="group" aria-label="选择表情">
       <button v-for="emoji in emojis" :key="emoji.value" type="button" :aria-label="emoji.label" @mousedown.prevent @click="insertEmoji(emoji.value)">{{ emoji.value }}</button>
@@ -138,8 +162,12 @@ const dummy = () => toast.push('该功能在演示模式下暂不可用')
           <time v-if="cm.ago">{{ cm.ago }}</time><p>{{ cm.text }}</p>
           <div class="acts"><button class="lk" :class="{ on: cm.liked }" data-testid="like" :aria-pressed="cm.liked ?? false" :disabled="c.saveConflict" @click="c.like(cm)"><ThumbsUp :size="15" :fill="cm.liked ? 'currentColor' : 'none'" />{{ n(cm.likes ?? 0) }}</button>
             <button class="reply-button" data-testid="reply-btn" @click="replyFor = replyFor === cm.id ? null : cm.id"><MessageCircle :size="15" />回复 ({{ replyCount(cm) }})</button>
-            <span class="sp" /><div class="more"><button aria-label="更多" data-testid="more" @click="menuFor = menuFor === cm.id ? null : cm.id"><Ellipsis :size="18" /></button>
-              <ul v-if="menuFor === cm.id" class="mn"><li v-if="cm.mine"><button data-testid="delete" :disabled="c.saveConflict" @click="del(cm.id)">删除</button></li><li v-if="!localOnly"><button @click="dummy(); menuFor = null">举报</button></li></ul></div></div>
+            <span class="sp" />
+            <div v-if="cm.mine === true" class="more" @focusout="closeCommentMenuOnFocusExit">
+              <button type="button" aria-label="更多" :aria-expanded="menuFor === cm.id" :disabled="c.saveConflict" data-testid="more" @click="toggleCommentMenu(cm.id, $event)"><Ellipsis :size="18" /></button>
+              <ul v-if="menuFor === cm.id" class="mn"><li><button type="button" data-testid="delete" :disabled="c.saveConflict" @mousedown.prevent @click="deleteComment(cm.id)">删除</button></li></ul>
+            </div>
+          </div>
           <div v-if="replyFor === cm.id" class="rbox"><input v-model="draft.replies[cm.id]" :placeholder="`回复 ${cm.user ?? '未知用户'}`" data-testid="reply-input" @keydown.enter="sendReply(cm, $event)" /><button data-testid="reply-send" :disabled="c.saveConflict" @click="sendReply(cm)">发送</button></div>
           <div v-if="cm.replies?.length && c.expanded.has(cm.id)" class="replies" data-testid="replies">
             <div v-for="r in cm.replies" :key="r.id" class="rp" data-testid="comment-reply">
