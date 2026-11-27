@@ -981,3 +981,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - CMS 播放器在选集旁显示画中画控制，复用演示和本地片库的标准 API、WebKit 路径和能力提示。切集、换源和退出关闭旧画面。预先复现过共享 WebKit 请求超时后，已替换的视频仍迟到进入画中画。修复继续处理该完成事件，同时保护同一视频上的新请求。[元数据已就绪但无入口的原版](../build/bin/qa-cms-picture-in-picture/baseline.log) · [超时复现](../build/bin/qa-cms-picture-in-picture/timeout-baseline.log)
 - 生产构建、125 项 Vitest、148 项 Chromium 播放相关回归及 WebKit 两项专项通过。验证标准 API、系统退出状态、环境不支持提示、换源、键盘激活、离页及超时后切集。初次 Chromium 合跑因磁盘空间不足中断，清理完毕后按套件复跑通过。[播放套件汇总](../build/bin/qa-cms-picture-in-picture/chromium-verified.log) · [WebKit](../build/bin/qa-cms-picture-in-picture/webkit-retry.log)
 - 对照现有 CMS 播放布局，1448×1086 与 1280×860、220% 下按钮完整，未覆盖选集及本机评论和弹幕。使用实际样片和模拟浏览器画中画接口，系统真实浮窗与授权公网片源待原生验收。[默认窗口](../build/bin/qa-cms-picture-in-picture/cms-pip-default.png) · [220% 窗口](../build/bin/qa-cms-picture-in-picture/cms-pip-220.png) · [BMad](../_bmad-output/plan-e04-cms-picture-in-picture.md)
+
+## E04 Apple Silicon 原生 CMS 画中画能力验证（2026-11-27）
+
+- 在 macOS 26.6.2 的本地临时签名 .57 构建上，用合成 CMS 目录和 H.264/AAC 样片验证真实 Wails、WKWebView 与 Go 媒体转发。临时构建只注入片源响应与观察脚本。产物生产前端摘要保持一致，画中画使用系统原有 API。[构建和环境](../build/bin/qa-native-cms-picture-in-picture/identity.log)
+- 系统辅助功能触发播放页按钮，浏览器记录真实点击和有效用户激活。WKWebView 对样片返回 NotSupportedError，应用显示不支持提示，画面继续在页面播放，按钮保持未开启。返回详情后移除播放器，两处均记录系统模式为 inline，活动画中画为空。只观察到原主窗口。应用正常退出，无残留会话标记和 SQLite 辅助文件，隔离库检查及关闭专项测试通过。[应用原生结果](../build/bin/qa-native-cms-picture-in-picture/native.log) · [浏览器事件](../build/bin/qa-native-cms-picture-in-picture/runtime-events.log) · [数据库关闭测试](../build/bin/qa-native-cms-picture-in-picture/store-close-test.log)
+- 同机独立 WKWebView 对同一文件也解码成功并返回相同错误。当前证据覆盖原生拒绝与降级处理。真实系统浮窗的开启、切集关闭和媒体兼容性仍需在支持该能力的桌面及样片上验证。[独立对照](../build/bin/qa-native-cms-picture-in-picture/control.log) · [BMad](../_bmad-output/plan-e04-cms-pip-native.md)
