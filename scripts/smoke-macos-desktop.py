@@ -152,9 +152,10 @@ def run_app(executable, helper, database_probe, profile, output, timeout, versio
             if list((profile / "logs" / "sessions").glob("run-*.session")):
                 raise RuntimeError("Normal exit left a running-session marker")
             verify_database(profile, database_probe, stream)
+            # The probe rolls back both the real profile and a separate WAL fixture.
             subprocess.run([database_probe, "verify-rollback", executable, profile / "jindi.db"],
-                           check=True, timeout=30, stdout=stream, stderr=subprocess.STDOUT)
-            print("Packaged SQLite rollback and unchanged source verified", flush=True)
+                           check=True, timeout=60, stdout=stream, stderr=subprocess.STDOUT)
+            print("Packaged SQLite rollback, committed WAL data, and unchanged source verified", flush=True)
         finally:
             if process.poll() is None:
                 process.kill()

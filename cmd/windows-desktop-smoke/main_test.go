@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"io/fs"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"jindi-drama/internal/storage/sqlite"
@@ -45,5 +47,46 @@ func TestVerifyDBCommandUsesExistingProfile(t *testing.T) {
 	}
 	if err := run([]string{"verify-db", path}); err != nil {
 		t.Fatalf("existing profile: %v", err)
+	}
+}
+
+func TestVerifyRollbackWALRequiresCommittedLibraryRows(t *testing.T) {
+	for _, fixture := range []struct {
+		name      string
+		ignoreWAL bool
+	}{
+		{name: "complete"},
+		{name: "drops-wal", ignoreWAL: true},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			dir := t.TempDir()
+			err := verifyRollbackWAL(dir, func(source string, check func(string) error) error {
+				output := filepath.Join(t.TempDir(), "old.db")
+				if fixture.ignoreWAL {
+					contents, err := os.ReadFile(source)
+					if err != nil {
+						return err
+					}
+					source = filepath.Join(t.TempDir(), "checkpointed.db")
+					if err := os.WriteFile(source, contents, 0o600); err != nil {
+						return err
+					}
+				}
+				if err := sqlite.PrepareRollbackCopy(source, output, 2); err != nil {
+					return err
+				}
+				return check(output)
+			})
+			if fixture.ignoreWAL {
+				if err == nil || !strings.Contains(err.Error(), "lost or changed committed WAL library data") {
+					t.Fatalf("WAL data loss was not detected: %v", err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			}
+			if entries, err := os.ReadDir(dir); err != nil || len(entries) != 0 {
+				t.Fatalf("temporary fixture was not cleaned: %v, %v", entries, err)
+			}
+		})
 	}
 }

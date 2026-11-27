@@ -87,7 +87,7 @@ function Confirm-CleanExit([Diagnostics.Process]$Process, [string]$Trigger, [int
     $database = Join-Path $dataDir 'jindi.db'
     Invoke-DesktopProbe @('verify-db', $database)
     Invoke-DesktopProbe @('verify-rollback', $exe, $database)
-    Write-Host "Packaged SQLite rollback and unchanged source verified: $exe"
+    Write-Host "Packaged SQLite rollback, committed WAL data, and unchanged source verified: $exe"
     Write-Host "Clean exit, SQLite integrity, and current application schema verified: $exe"
 }
 

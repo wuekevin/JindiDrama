@@ -10,12 +10,27 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"time"
 
 	"jindi-drama/internal/storage/sqlite"
 )
 
-func verifyRollback(executable, source string) error {
+func verifyRollback(executable, source string) (result error) {
+	if err := verifyRollbackCopy(executable, source, sqlite.VerifyDesktopRollback); err != nil {
+		return err
+	}
+	fixtureRoot, err := os.MkdirTemp("", "jindi-packaged-rollback-")
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, os.RemoveAll(fixtureRoot)) }()
+	return verifyRollbackWAL(fixtureRoot, func(input string, check func(string) error) error {
+		return verifyRollbackCopy(executable, input, check)
+	})
+}
+
+func verifyRollbackCopy(executable, source string, check func(string) error) error {
 	before, err := readRollbackSource(source)
 	if err != nil {
 		return err
@@ -58,7 +73,70 @@ func verifyRollback(executable, source string) error {
 			return fmt.Errorf("unexpected rollback side effect: %s", filepath.Base(name))
 		}
 	}
-	return sqlite.VerifyDesktopRollback(output)
+	return check(output)
+}
+
+func verifyRollbackWAL(parent string, run func(string, func(string) error) error) (result error) {
+	dir, err := os.MkdirTemp(parent, "rollback-wal-")
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, os.RemoveAll(dir)) }()
+	source := filepath.Join(dir, "fixture.db")
+	store, err := sqlite.Open(source)
+	if err != nil {
+		return err
+	}
+	if err := store.Close(); err != nil {
+		return err
+	}
+	checkpointed, err := os.ReadFile(source)
+	if err != nil {
+		return err
+	}
+	store, err = sqlite.Open(source)
+	if err != nil {
+		return err
+	}
+	defer func() { result = errors.Join(result, store.Close()) }()
+
+	favorites := []string{"wal-favorite-second", "wal-favorite-first"}
+	history := sqlite.HistoryEntry{DramaID: "wal-history", Episode: 3, PositionMs: 6789,
+		DurationMs: 10000, Percent: 67, WatchedAt: 1735689600123, EpisodeCountAtWatch: 5}
+	if err := store.SetFavorites(favorites); err != nil {
+		return err
+	}
+	if err := store.RecordHistory(history); err != nil {
+		return err
+	}
+	files, err := readRollbackSource(source)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(checkpointed, files[""]) || len(files["-wal"]) <= 32 {
+		return errors.New("rollback fixture records are not isolated in the WAL")
+	}
+	// The v2 schema stores the position and episode but predates episode totals.
+	history.EpisodeCountAtWatch = 0
+	return run(source, func(output string) error {
+		if err := sqlite.VerifyDesktopRollback(output); err != nil {
+			return err
+		}
+		root, err := os.OpenRoot(dir)
+		if err != nil {
+			return err
+		}
+		defer root.Close()
+		library, err := sqlite.ReadLibraryBackup(output, root, "readback.db")
+		if err != nil {
+			return err
+		}
+		if !slices.Equal(library.Favorites, favorites) ||
+			!slices.Equal(library.History, []sqlite.HistoryEntry{history}) {
+			return errors.New("packaged rollback lost or changed committed WAL library data")
+		}
+		return nil
+	})
 }
 
 // SQLite may leave committed data in the WAL. Include durable sidecars in
