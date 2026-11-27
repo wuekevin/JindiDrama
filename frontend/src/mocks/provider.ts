@@ -107,7 +107,8 @@ function cmsPageResult(result: CatalogPage | undefined, page: number) {
   if (!result || result.page !== page || !Array.isArray(result.entries) || typeof result.hasMore !== 'boolean') {
     throw new Error('苹果 CMS 目录响应无效')
   }
-  return { entries: result.entries.map(providerCard), hasMore: result.entries.length > 0 && result.hasMore }
+  // The provider can filter every title on an otherwise valid page.
+  return { entries: result.entries.map(providerCard), hasMore: result.hasMore }
 }
 
 export async function loadCatalogHome(mode: 'normal'|'empty'|'error' = 'normal'): Promise<HomePayload> {

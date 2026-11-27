@@ -733,3 +733,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 诊断日志现在会完整遮蔽单双引号包裹的键值凭据，包括内含空格、分隔符、转义字符和 URL 的值。截断的引号值只遮蔽到本行末尾，正常闭合的字段保留后续诊断内容。
 - 回归测试复现了旧版本会写出带引号的凭据。修复后，新日志在写盘前脱敏，导出时也会二次遮蔽旧的轮转日志。专项、Go vet、Go 全量、App 与诊断模块竞态测试通过。Windows x64 诊断测试程序交叉编译通过。修复纳入当前源码候选，晚于 .49 本地安装包。[BMad 记录](../_bmad-output/plan-e13-redact-quoted-diagnostics.md)
+
+## E12 苹果 CMS 上架状态（2026-11-27）
+
+- 苹果 CMS 官方目录仅返回上架状态为 1 的剧目。兼容片源明确返回 `vod_status` 时，Go 适配器只显示状态为 1 的条目。下架或无效状态的条目不会进入首页目录、搜索或分类，通过旧链接也取不到详情。播放申请读取最新详情，发现剧目下架就拒绝新票据。省略状态字段的兼容源继续按已有规则处理。[苹果 CMS 目录实现](https://github.com/magicblack/maccms10/blob/f29bb61e052af248241871a06f30d4d751708a00/application/api/controller/Provide.php#L42-L59)
+- 整页条目被筛除时，只在上游页码与总页数已核对的情况下保留「下一页」。首次浏览器测试复现前端会丢弃这个分页标记，修复后能经过空页浏览后续上架内容。Go 用合成响应验证从上架切到下架时无新票据或媒体请求。Go 全量、vet、App/CMS 竞态、122 项 Vitest 及 81 项目录和播放 Playwright 通过。本轮修复晚于 .49 安装包，真实授权公网片源仍待验收。[浏览器回归](../build/bin/qa-cms-published-status/e2e.log) · [BMad 记录](../_bmad-output/plan-e12-cms-published-status.md)

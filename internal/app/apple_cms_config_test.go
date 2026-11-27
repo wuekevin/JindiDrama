@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -59,7 +60,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
-	var thirdEpisodeRemoved, trialRestricted atomic.Bool
+	var thirdEpisodeRemoved, trialRestricted, withdrawn atomic.Bool
 	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Scheme != "https" {
 			t.Errorf("invalid scheme: %s", req.URL.Scheme)
@@ -85,8 +86,12 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			if trialRestricted.Load() {
 				trial = `"vod_trysee":2,`
 			}
-			body := `{
-				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4",` + trial + `
+			status := 1
+			if withdrawn.Load() {
+				status = 0
+			}
+			body := fmt.Sprintf(`{
+				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%d,`, status) + trial + `
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
 				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]
 			}`
@@ -170,6 +175,18 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		t.Fatalf("trial-restricted title and episodes: %+v, %v", detailWithTrial, err)
 	}
 	trialRestricted.Store(false)
+
+	withdrawn.Store(true)
+	beforeWithdrawn := detailCalls.Load()
+	hidden, err := a.CatalogPlayback(id, 3)
+	if !errors.Is(err, errCatalogPlaybackUnavailable) || hidden.Kind != "" || hidden.LeaseID != "" ||
+		len(hidden.Sources) != 0 || detailCalls.Load()-beforeWithdrawn != 1 || mediaCalls.Load() != 0 {
+		t.Errorf("withdrawn title returned playback: %+v, %v", hidden, err)
+	}
+	if detail, err := a.CatalogDetail(id); !errors.Is(err, provider.ErrNotFound) || detail.Drama.ID != "" {
+		t.Errorf("withdrawn title returned details: %+v, %v", detail, err)
+	}
+	withdrawn.Store(false)
 
 	for _, attempt := range []struct {
 		id    string

@@ -358,7 +358,7 @@ type CMSGenreWindow = typeof window & {
   cmsGenreCalls: string[]
   releaseCMSGenrePage: () => void
   deleteCMSGenre: (genre: string) => void
-  setNextCMSGenrePage: (outcome: 'empty' | 'error') => void
+  setNextCMSGenrePage: (outcome: 'empty' | 'empty-more' | 'error') => void
 }
 
 async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'retry-class' | 'late-page' = 'normal') {
@@ -406,6 +406,7 @@ async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'ret
         nextOutcome = undefined
         if (outcome === 'error') throw new Error('苹果 CMS 返回的短剧与请求分类不一致')
         if (outcome === 'empty' || deleted.has(genre)) return { entries: [], page: pg, hasMore: false }
+        if (outcome === 'empty-more') return { entries: [], page: pg, hasMore: true }
         if (genre === '7' && scenario === 'late-page' && ++otherAttempts === 1) {
           throw new Error('苹果 CMS 返回的短剧与请求分类不一致')
         }
@@ -585,6 +586,21 @@ test('CMS verifies empty pages and removes a deleted classification', async ({ p
     'class', `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class',
     `genre:${wideGenre}:1`, `genre:${wideGenre}:2`, 'class',
   ])
+})
+
+test('CMS can advance beyond a page with only filtered titles', async ({ page }) => {
+  await setupCMSGenres(page)
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const cards = page.getByTestId('result-card')
+  const next = page.getByRole('button', { name: '下一页' })
+  await expect(cards).toContainText('北海来信')
+  await page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('empty-more'))
+  await next.click()
+  await expect(page.getByTestId('empty')).toContainText('本页暂无短剧')
+  await expect(page.getByRole('navigation', { name: '分页' })).toContainText('第 2 页')
+  await next.click()
+  await expect(cards).toContainText('北海归航')
+  await expect(page.getByRole('navigation', { name: '分页' })).toContainText('第 3 页')
 })
 
 test('CMS retry refreshes a previously valid classification before sending a filter', async ({ page }) => {

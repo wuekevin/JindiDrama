@@ -171,6 +171,57 @@ func TestCMSAllowsPlaybackWithoutATrialLimit(t *testing.T) {
 	}
 }
 
+func TestCatalogShowsOnlyPublishedTitles(t *testing.T) {
+	const current = `{"vod_id":42,"vod_name":"海岛来信","type_id":7,"vod_status":1}`
+	const legacy = `{"vod_id":43,"vod_name":"旧版目录","type_id":7}`
+	const stringStatus = `{"vod_id":44,"vod_name":"旧版状态","type_id":7,"vod_status":"1"}`
+	const unavailable = `{"vod_id":41,"vod_name":"不可见剧目","type_id":8,"vod_status":0,"vod_play_url":"1$https://media.example.test/private.mp4"}`
+	const invalid = `{"vod_id":40,"vod_name":"无效状态","type_id":7,"vod_status":null}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query()
+		switch {
+		case query.Get("ac") == "list":
+			_, _ = io.WriteString(w, `{"code":1,"class":[{"type_id":7,"type_name":"剧情"}]}`)
+		case query.Get("ids") == "41":
+			_, _ = fmt.Fprintf(w, `{"code":1,"list":[%s]}`, unavailable)
+		case query.Get("pg") == "2":
+			_, _ = fmt.Fprintf(w, `{"code":1,"page":2,"pagecount":3,"list":[%s,%s]}`, unavailable, invalid)
+		default:
+			_, _ = fmt.Fprintf(w, `{"code":1,"page":1,"pagecount":3,"list":[%s,%s,%s,%s,%s]}`,
+				unavailable, current, legacy, invalid, stringStatus)
+		}
+	}))
+	defer server.Close()
+
+	p := fixtureProvider(t, server.URL, server.Client())
+	want := []string{"海岛来信", "旧版目录", "旧版状态"}
+	check := func(rows []provider.Drama, err error) {
+		t.Helper()
+		titles := make([]string, 0, len(rows))
+		for _, row := range rows {
+			titles = append(titles, row.Title)
+		}
+		if err != nil || !slices.Equal(titles, want) {
+			t.Errorf("want published titles %v, got %v, %v", want, titles, err)
+		}
+	}
+	check(p.Home(t.Context()))
+	check(p.Search(t.Context(), "海岛"))
+	page, err := p.CatalogGenrePage(t.Context(), "7", 1)
+	check(page.Entries, err)
+	page, err = p.CatalogGenrePage(t.Context(), "7", 2)
+	if err != nil || page.Page != 2 || len(page.Entries) != 0 || !page.HasMore {
+		t.Errorf("filtered page should still allow the next page: %+v, %v", page, err)
+	}
+	id := p.idPrefix + "41"
+	if detail, err := p.CatalogDetail(t.Context(), id); !errors.Is(err, provider.ErrNotFound) || detail.Drama.ID != "" {
+		t.Errorf("unpublished detail escaped: %+v, %v", detail, err)
+	}
+	if ticket, err := p.ResolvePlayback(t.Context(), id, 1); !errors.Is(err, provider.ErrNotFound) || len(ticket.Sources) != 0 {
+		t.Errorf("unpublished playback escaped: %+v, %v", ticket, err)
+	}
+}
+
 func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 	tests := []struct {
 		name   string

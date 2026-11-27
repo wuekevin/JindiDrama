@@ -229,7 +229,12 @@ func (p *Provider) catalogPage(ctx context.Context, keyword, genre string, page 
 	}
 	results := make([]provider.Drama, 0, len(data.List))
 	seen := make(map[string]bool)
+	skippedUnpublished := false
 	for _, item := range data.List {
+		if !item.published() {
+			skippedUnpublished = true
+			continue
+		}
 		if genre != "" && genreID(scalar(item.TypeID).text()) != genre {
 			return CatalogPage{}, errGenreMismatch
 		}
@@ -246,7 +251,7 @@ func (p *Provider) catalogPage(ctx context.Context, keyword, genre string, page 
 	return CatalogPage{
 		Entries: results,
 		Page:    page,
-		HasMore: echoedPage && len(results) > 0 && page < maxPage && ok && uint64(page) < pageCount,
+		HasMore: echoedPage && (len(results) > 0 || skippedUnpublished) && page < maxPage && ok && uint64(page) < pageCount,
 	}, nil
 }
 
@@ -318,7 +323,7 @@ func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[i
 		return provider.Drama{}, nil, record{}, err
 	}
 	items := data.List
-	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID {
+	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID || !items[0].published() {
 		return provider.Drama{}, nil, record{}, provider.ErrNotFound
 	}
 	title := metadataText(items[0].Name)
@@ -373,6 +378,7 @@ func genreID(value string) string {
 type record struct {
 	ID           json.RawMessage `json:"vod_id"`
 	TypeID       json.RawMessage `json:"type_id"`
+	Status       json.RawMessage `json:"vod_status"`
 	Name         string          `json:"vod_name"`
 	Picture      json.RawMessage `json:"vod_pic"`
 	Category     string          `json:"type_name"`
@@ -508,6 +514,11 @@ func creditNames(raw json.RawMessage) []string {
 		}
 	}
 	return names
+}
+
+func (item record) published() bool {
+	// Some compatible endpoints omit this field for their published catalog.
+	return len(item.Status) == 0 || strings.TrimSpace(scalar(item.Status).text()) == "1"
 }
 
 func (item record) restricted() bool {
