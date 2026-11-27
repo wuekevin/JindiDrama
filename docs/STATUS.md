@@ -1178,3 +1178,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 校验最终 .62 ZIP 和解出的主程序 SHA-256 后，在 Apple Silicon 启动原包，实际进程报告 .62 和 darwin/arm64。打开演示第 32 集的评论，确认占位入口已收起，普通演示评论无删除按钮。用系统键盘 Space 展开本人菜单、Esc 返回同一个触发按钮，再次用键盘打开并改用系统鼠标点击删除，焦点返回输入框。[归档身份](../build/bin/qa-native-comments62/identity.log) · [临时签名验签](../build/bin/qa-native-comments62/codesign.log) · [退出前焦点和混合操作](../build/bin/qa-native-comments62/roundtrip-native.log)
 - 隔离 SQLite 首先确认两条本人评论与十二条演示评论。删除后仅目标记录消失，其他记录逐项相同。两次正常退出之间从原包重启，未恢复被删除评论，保留另一条本人评论及其菜单。SQLite 完整性、连续迁移 1–10、无残留会话标记及归档和主程序摘要复验通过。日志位于 JindiDrama 主工作区的 `build/bin/`。[重启页面](../build/bin/qa-native-comments62/reopen-persisted.ax) · [SQLite 独立读回](../build/bin/qa-native-comments62/sqlite-readback.log) · [BMad](../_bmad-output/plan-e05-native-comment-actions62.md)
+
+## E13 .62 真实更新渠道与重试提示（2026-11-28）
+
+- Apple Silicon 用最终 .62 归档和独立数据目录打开原生设置页。先以仅拒绝 GitHub CONNECT 的隔离代理触发故障，再在同一进程恢复端到端 TLS。稳定版显示暂无正式发布版本，预发布显示暂无可用发布版本。独立请求核对稳定入口为 HTTP 404，预发布列表为 HTTP 200 且为空。预发布设置写入 SQLite，正常退出后重启仍使用该渠道。
+- 原包重试成功后，上轮失败提示短暂与本次结果同屏。修复后开始新一轮检查或保存更新渠道时，会撤下上次检查提示。隔离的修复版原生构建复验联网恢复、结果不重叠、切换渠道和重启。修复晚于 .62 归档。证据位于 JindiDrama 主工作区的 `build/bin/qa-native-update62/`。
+- Chromium 设置页 45 项、WebKit 更新专项 4 项、Vitest 125 项、类型检查和生产构建通过。暂停旧提示计时复现重试期间的界面，并确认下载完整性警告在重新检查时仍可见。本轮验收覆盖真实 GitHub 发现状态和网络恢复，签名版线上下载和安装升级仍待验证。[BMad](../_bmad-output/plan-e13-native-public-update62.md)

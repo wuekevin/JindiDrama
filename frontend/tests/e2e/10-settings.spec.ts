@@ -390,7 +390,7 @@ test('downloads a verified update through the desktop bridge and shows its path 
     checks++
     if (checks === 2) throw new Error('offline')
     const next = checks >= 4
-    return { current: 'v0.1.0', latest: next ? 'v1.2.4' : 'v1.2.3', channel: checks === 5 ? 'preview' : 'stable', hasUpdate: true, url: next ? nextURL : url, downloadName: 'JindiDrama-macos-universal.zip' }
+    return { current: 'v0.1.0', latest: next ? 'v1.2.4' : 'v1.2.3', channel: checks === 6 ? 'preview' : 'stable', hasUpdate: true, url: next ? nextURL : url, downloadName: 'JindiDrama-macos-universal.zip' }
   })
   await page.exposeFunction('downloadUpdateFixture', (release: string) => {
     if (release === nextURL) {
@@ -497,6 +497,9 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await expect(page.getByTestId('toast').last()).toContainText(unverifiedFailure)
   await expect(saved).toHaveCount(0)
   await expect(copy).toHaveCount(0)
+  await check.click()
+  await expect(page.getByTestId('open-release')).toContainText('v1.2.4')
+  await expect(page.getByTestId('toast').filter({ hasText: unverifiedFailure })).toBeVisible()
   await download.click()
   await expect(saved.locator('code')).toHaveText(nextPath)
   expect(await page.getByTestId('toast').filter({ hasText: unverifiedFailure }).count()).toBe(0)
@@ -835,6 +838,8 @@ test('desktop reports failed cache and diagnostics operations without changing t
 })
 
 test('desktop update status only records success, and database backup shows the returned path', async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-11-28T00:00:00Z') })
+  await page.clock.pauseAt(new Date('2026-11-28T00:00:01Z'))
   await page.addInitScript(() => {
     let check = 0
     let backup = 0
@@ -845,6 +850,9 @@ test('desktop update status only records success, and database backup shows the 
       CacheStats: async () => ({ bytes: 0, files: 0, max: 2 * 1024 ** 3, path: '/native/cache' }),
       CheckUpdate: async () => {
         if (++check === 1 || check === 3) throw new Error('fixture: update failed')
+        if (check === 2) await new Promise<void>((resolve) => {
+          document.addEventListener('resolve-update-retry', () => resolve(), { once: true })
+        })
         return { current: 'v0.1.0', latest: 'v0.2.0', hasUpdate: check === 2 || check === 4, noRelease: false, url: 'https://github.com/wuekevin/JindiDrama/releases/tag/v0.2.0', notes: '' }
       },
       OpenReleasePage: async (url: string) => { document.body.dataset.openedRelease = url },
@@ -864,8 +872,13 @@ test('desktop update status only records success, and database backup shows the 
   await expect(page.getByTestId('toast').last()).toContainText('检查更新失败')
   await expect(checkedAt).toHaveText('尚未检查更新')
   await check.click()
+  await expect(check).toHaveText('检查中…')
+  const oldError = page.getByTestId('toast').filter({ hasText: '检查更新失败' })
+  await expect(oldError).toHaveCount(0)
+  await page.evaluate(() => { document.dispatchEvent(new Event('resolve-update-retry')) })
   await expect(page.getByTestId('open-release')).toBeVisible()
   await expect(checkedAt).toContainText('上次成功检查')
+  await expect(oldError).toHaveCount(0)
   await page.getByTestId('open-release').click()
   await expect(page.locator('body')).toHaveAttribute('data-opened-release', 'https://github.com/wuekevin/JindiDrama/releases/tag/v0.2.0')
   const lastSuccess = await checkedAt.innerText()
@@ -881,6 +894,7 @@ test('desktop update status only records success, and database backup shows the 
   await page.reload()
   await expect(checkedAt).toContainText('上次成功检查')
 
+  await page.clock.resume()
   const backup = page.getByTestId('create-backup')
   await backup.click()
   await expect(page.getByTestId('toast').last()).toContainText('数据库备份失败')

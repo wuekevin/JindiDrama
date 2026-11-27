@@ -24,6 +24,13 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     try { return !localStorage.getItem(noticeKey.value) } catch { return true }
   })
   let loaded = false
+  let checkToast: number | undefined
+
+  function clearCheckToast() {
+    if (checkToast === undefined) return
+    toast.dismiss(checkToast)
+    checkToast = undefined
+  }
 
   function acknowledge() {
     const key = noticeKey.value
@@ -68,6 +75,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     try {
       await setUpdateChannel(next)
       setCurrentChannel(next)
+      clearCheckToast()
       upd.value = null
       checkMessage.value = ''
       restoreLastCheck()
@@ -83,11 +91,12 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
   async function check(showToast = true) {
     if (checking.value || channelBusy.value || downloading.value) return
     checking.value = true
+    clearCheckToast()
     upd.value = null
     checkMessage.value = ''
     function report(message: string, kind: 'info' | 'success' | 'error') {
       checkMessage.value = message
-      if (showToast) toast.push(message, kind)
+      if (showToast) checkToast = toast.push(message, kind)
     }
     try {
       const result = await checkUpdate()
