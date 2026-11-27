@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.52`，打包源提交为 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4`。最新 GitHub 测试候选也是 `.52`，同一提交的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.53`，打包源提交为 `e506ab1d7667ad5dc875e2a3edb68501b90baa56`。最新 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .53 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.53/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.53/macos/SHA256SUMS.txt) |
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
 | .52 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项任务通过 | 两份 GitHub 原始归档摘要及内部清单共 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [本地复验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) |
 | .52 双平台 CI | Windows 和 macOS 各通过 394 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [GitHub CI](https://github.com/wuekevin/JindiDrama/actions/runs/45955369636) |
@@ -873,3 +874,11 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 旧版只在开始前检查目标文件。夹具复现降级期间新增同名 WAL 后仍发布了副本。现在 SQLite 在用户缓存的私有工作区降级并检查完整性，之后才将成品复制入原目标卷的私有暂存区。从已打开的源和目标目录创建独占硬链接，保留现有文件。工作区和目标卷各需要一份副本的空间。[原版复现](../build/bin/qa-rollback-publish/before.log) · [回滚说明](RELEASE-ROLLBACK.md)
 - 实际 macOS 文件系统测试覆盖降级期间替换目标路径、晚出现的 WAL、同名冲突、源与目标目录句柄被改名及硬链接时目录变化。发布前看见冲突则拒绝写入。若变化恰好发生在独占创建期间，命令报告失败，已生成的副本只留在原目录，同名辅助文件和替换目录中的数据保留。目标目录的变动不会重定向工作区内的 SQLite 操作。[专项](../build/bin/qa-rollback-publish/targeted.log)
 - macOS 回滚 CLI 实际生成 v2，`quick_check` 通过，源库 SHA-256 保持一致。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 两套测试交叉编译通过。Windows NTFS 原生发布仍待验收。用户缓存工作区需维持系统的私有权限。源码晚于 .52。[CLI](../build/bin/qa-rollback-publish/cli.log) · [竞态](../build/bin/qa-rollback-publish/go-race.log) · [Windows 交叉编译](../build/bin/qa-rollback-publish/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e13-rollback-pinned-publication.md)
+
+## E13 .53 累计本地候选验收（2026-11-27）
+
+- Windows x64 和 macOS Universal 从发行源码 `e506ab1d7667ad5dc875e2a3edb68501b90baa56` 构建。相比 .52，这批纳入 SQLite 备份目录及源句柄隔离、恢复读取隔离、历史桥接精度、ExFAT 媒体保存、回滚副本权限和固定目录发布。Chromium、WebKit 和两平台打包共用同一份前端生产产物，其文件 SHA-256 已比对。首次 macOS 合并遇到磁盘空间不足，清理旧验收暂存后重跑 macOS 构建并复核此前生成的 Windows 文件。[前端摘要](../build/bin/qa-release-source-53/verified-frontend.sha256) · [构建日志](../build/bin/qa-release-source-53/package-build.log)
+- 锁文件重新安装后 npm 依赖树正常。125 项 Vitest、394 项 Chromium、4 项 WebKit 专项、Go 全量、vet 及关键模块竞态均通过。npm 生产依赖、Go 生产源码和打包主程序的三个架构扫描均未报告已知漏洞。[Chromium](../build/bin/qa-release-source-53/e2e.log) · [WebKit](../build/bin/qa-release-source-53/webkit.log) · [Vitest](../build/bin/qa-release-source-53/vitest.log) · [Go 竞态](../build/bin/qa-release-source-53/go-race.log) · [成品扫描](../build/bin/qa-release-source-53/binary-vulnerabilities.log)
+- Windows 安装器 22.55 MiB、便携版 32.38 MiB、macOS Universal ZIP 40.91 MiB。Windows NSIS 内主程序与便携版字节一致，包含 WebView2 引导程序。macOS ZIP 含 arm64 和 x86_64，两切片最低 macOS 13.0，临时签名校验通过。按随包命令和归档后独立复验 Windows 7 项、macOS 6 项 SHA-256，全部通过。[结构检查](../build/bin/qa-release-source-53/package-static.log) · [归档校验](../build/bin/qa-release-source-53/archived-checks.log)
+- Apple Silicon 从已归档的测试 ZIP 通过原生启动、SQLite 完整性、正常退出及回滚。用归档内相同的可执行文件确认回滚 v2 不继承测试目录的 `everyone` ACL，源库 SHA-256 保持一致。[原生冒烟](../build/bin/qa-release-source-53/macos-native.log) · [回滚权限及包大小](../build/bin/qa-release-source-53/package-final.log)
+- .53 的 Windows 与 Intel Mac 原生验收、真实 Windows 托盘交互及正式签名、公证、在线更新待完成。CMS 和红果相关公网联调需要项目可用的授权接口或片源。本次为本地累计验收。目前 GitHub 原生结果覆盖 .52。[BMad 记录](../_bmad-output/plan-e13-local-candidate53-packages.md)
