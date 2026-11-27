@@ -114,6 +114,7 @@ type AutoStart = { reason: 'next' | 'fallback' | 'source'; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
 let nextSourceBookmark: PlaybackBookmark | undefined
+let preferredRoute: { dramaId: string; name: string } | undefined
 let preferenceMedia: HTMLVideoElement | undefined
 let nextEpisode: Advance | undefined
 const autoStart = shallowRef<AutoStart>()
@@ -498,6 +499,7 @@ async function load() {
   playbackPath = path
   const targetId = id.value
   const targetEpisode = episode.value
+  if (preferredRoute?.dramaId !== targetId) preferredRoute = undefined
   startupFallback = takeCMSStartupFallback(targetId, targetEpisode)
   clearTimeout(expiryTimer)
   stopMedia()
@@ -544,6 +546,7 @@ async function load() {
     activeLease = ticket.leaseId
     if (result.appleCMS) {
       watchTarget = { id: targetId, episode: targetEpisode, episodeCount: result.drama.episodeCount, protectCompletion: !!automatic }
+      if (preferredRoute) selected.value = Math.max(0, namedSourceIndex(choices, preferredRoute.name))
     }
     expiresAt = Date.parse(ticket.expiresAt ?? '')
     sources.value = choices
@@ -555,6 +558,11 @@ async function load() {
     fail(isAppleCMSDramaId(targetId) && message === cmsRateLimitError
       ? cmsRateLimitError + '。' : '无法取得可用的播放源，请重试。')
   }
+}
+
+function namedSourceIndex(choices: MediaSource[], name: string) {
+  const matches = choices.filter((choice) => choice.routeName === name)
+  return matches.length === 1 ? choices.indexOf(matches[0]) : -1
 }
 
 function sourceLabel(choice: MediaSource, index: number) {
@@ -571,6 +579,10 @@ function selectPlaybackSource(event: Event) {
     control.value = String(selected.value)
     return
   }
+  const name = sources.value[index].routeName
+  preferredRoute = name && namedSourceIndex(sources.value, name) === index
+    ? { dramaId: current.target.id, name }
+    : undefined
   const { media } = current
   const { paused, ended, muted } = media
   const bookmark = current.pending || current.restoring ? current.checkpoint : mediaBookmark(current) ?? current.checkpoint

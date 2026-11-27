@@ -1475,6 +1475,75 @@ test('CMS displays a single named source and fits long names at 220% zoom', asyn
   await page.screenshot({ path: testInfo.outputPath('cms-source-long-220.png') })
 })
 
+test('CMS keeps the chosen named route across manual and automatic episode changes', async ({ page }, testInfo) => {
+  const desktop = await cmsLibraryFixture(page)
+  desktop.catalog.playMode = '连续播放（自动下一集）'
+  await page.goto(cmsRoute)
+  await page.evaluate(() => {
+    type Playback = (id: string, episode: number) => Promise<{
+      sources: { src: string; type: string; routeName?: string }[]
+    }>
+    const desktop = window as unknown as { go: { app: { App: { CatalogPlayback: Playback } } } }
+    const runtime = desktop.go.app.App
+    const resolve = runtime.CatalogPlayback.bind(runtime)
+    let episodeTwoVisits = 0
+    runtime.CatalogPlayback = async (id, episode) => {
+      const ticket = await resolve(id, episode)
+      const visit = episode === 2 ? ++episodeTwoVisits : 0
+      ticket.sources[0].routeName = visit === 2 ? '备用线' : '主线路'
+      ticket.sources[1].routeName = episode === 3 || visit === 3 ? '其他线路' : '备用线'
+      if (episode === 3) {
+        const backup = ticket.sources[1]
+        ticket.sources.push({ ...backup, src: backup.src.replace(/\/1$/, '/2'), routeName: '备用线' })
+      }
+      return ticket
+    }
+  })
+  const source = page.getByRole('combobox', { name: '播放源' })
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  const first = historyVideo(page, 1)
+  await expect.poll(() => durationMs(first)).toBeGreaterThan(1000)
+  await source.selectOption('1')
+  await expect(first).toHaveAttribute('src', /\/1$/)
+
+  await page.getByRole('button', { name: '第2集', exact: true }).click()
+  const second = historyVideo(page, 2)
+  await expect(second).toHaveAttribute('src', /\/1$/)
+  await expect(second).toHaveJSProperty('paused', true)
+  await playHistoryVideo(second)
+  await second.evaluate((media: HTMLVideoElement) => {
+    media.muted = true
+    media.currentTime = media.duration - 0.45
+  })
+
+  await expect(page).toHaveURL(/\/play\/3$/)
+  const third = historyVideo(page, 3)
+  await expect(third).toHaveAttribute('src', /\/2$/)
+  await expect(source).toHaveValue('2')
+  await expect.poll(() => position(third)).toBeGreaterThan(0.1)
+  await expect(third).toHaveJSProperty('muted', true)
+  await source.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('cms-route-preference.png') })
+
+  await third.dispatchEvent('error')
+  await expect(third).toHaveAttribute('src', /\/0$/)
+  await page.getByRole('button', { name: '第2集', exact: true }).click()
+  await expect(second).toHaveAttribute('src', /\/0$/)
+  await expect(source.locator('option')).toHaveText(['线路 1 · 备用线', '线路 2 · 备用线'])
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  await expect(first).toHaveAttribute('src', /\/1$/)
+
+  await page.getByRole('button', { name: '第2集', exact: true }).click()
+  await expect(second).toHaveAttribute('src', /\/0$/)
+  await expect(source.locator('option')).toHaveText(['线路 1 · 主线路', '线路 2 · 其他线路'])
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  await expect(first).toHaveAttribute('src', /\/1$/)
+
+  await page.getByRole('link', { name: '返回详情' }).click()
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  await expect(first).toHaveAttribute('src', /\/0$/)
+})
+
 test('CMS fallback preserves a newer paused seek after manual source selection', async ({ page }) => {
   const desktop = await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')
