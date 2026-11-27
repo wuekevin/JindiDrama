@@ -1,6 +1,7 @@
 package applecms
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -563,6 +564,321 @@ func TestCatalogGenrePageUsesLatestClassSnapshot(t *testing.T) {
 	}
 	if classCalls.Load() != 2 || pageCalls.Load() != 3 {
 		t.Fatalf("requests after refresh: class %d, filtered %d", classCalls.Load(), pageCalls.Load())
+	}
+}
+
+func TestCanceledCatalogGenreCallsDoNotWaitForRefresh(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("ac") == "list" {
+			select {
+			case started <- struct{}{}:
+			default:
+			}
+			<-release
+		}
+		_, _ = io.WriteString(w, "{\"code\":1,\"class\":[{\"type_id\":7,\"type_name\":\"剧情\"}]}")
+	}))
+	defer server.Close()
+	p := fixtureProvider(t, server.URL, server.Client())
+	refreshed := make(chan error, 1)
+	defer func() {
+		close(release)
+		<-refreshed
+	}()
+	go func() {
+		_, err := p.CatalogGenres(t.Context())
+		refreshed <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not reach CMS")
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	result := make(chan error, 2)
+	go func() {
+		_, err := p.CatalogGenres(ctx)
+		result <- err
+	}()
+	go func() {
+		_, err := p.CatalogGenrePage(ctx, "7", 1)
+		result <- err
+	}()
+	for range 2 {
+		select {
+		case err := <-result:
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("canceled request: %v", err)
+			}
+		case <-time.After(400 * time.Millisecond):
+			t.Fatal("canceled category request waited for an unrelated CMS refresh")
+		}
+	}
+}
+
+type genreWaitContext struct {
+	context.Context
+	waiting chan struct{}
+}
+
+func (ctx genreWaitContext) Done() <-chan struct{} {
+	select {
+	case ctx.waiting <- struct{}{}:
+	default:
+	}
+	return ctx.Context.Done()
+}
+
+func receiveGenreResult[T any](t *testing.T, ch <-chan T) T {
+	t.Helper()
+	select {
+	case result := <-ch:
+		return result
+	case <-time.After(2 * time.Second):
+		t.Fatal("catalog genre operation did not finish")
+		var zero T
+		return zero
+	}
+}
+
+func TestCatalogGenreCallsShareRefreshAndUseLatestSnapshot(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		status      int
+		refreshErr  error
+		pageErr     error
+		wantDetails int32
+		otherLimit  bool
+	}{
+		{"removed genre", http.StatusOK, nil, errInvalidGenre, 0, false},
+		{"refresh failure keeps saved genre", http.StatusBadGateway, errUpstream, nil, 1, false},
+		{"refresh throttled", http.StatusTooManyRequests, ErrRateLimited, ErrRateLimited, 0, false},
+		{"another request starts cooldown during refresh", http.StatusOK, nil, ErrRateLimited, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lists, details atomic.Int32
+			began := make(chan struct{}, 1)
+			release := make(chan struct{}, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Query().Get("ac") {
+				case "list":
+					if lists.Add(1) == 1 {
+						_, _ = io.WriteString(w, "{\"code\":1,\"class\":[{\"type_id\":7,\"type_name\":\"旧分类\"}]}")
+						return
+					}
+					select {
+					case began <- struct{}{}:
+					default:
+					}
+					<-release
+					w.WriteHeader(tc.status)
+					_, _ = io.WriteString(w, "{\"code\":1,\"class\":[{\"type_id\":8,\"type_name\":\"新分类\"}]}")
+				case "detail":
+					if r.URL.Query().Get("wd") == "rate limit fixture" {
+						w.WriteHeader(http.StatusTooManyRequests)
+						return
+					}
+					details.Add(1)
+					if r.URL.Query().Get("t") != "7" {
+						t.Errorf("unexpected CMS classification: %s", r.URL.Query().Get("t"))
+					}
+					_, _ = io.WriteString(w, "{\"code\":1,\"page\":1,\"list\":[]}")
+				}
+			}))
+			defer server.Close()
+			defer close(release)
+			p := fixtureProvider(t, server.URL, server.Client())
+			if _, err := p.CatalogGenres(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+
+			type refreshResult struct {
+				genres []CatalogGenre
+				err    error
+			}
+			refresh := func(ctx context.Context, out chan<- refreshResult) {
+				genres, err := p.CatalogGenres(ctx)
+				out <- refreshResult{genres: genres, err: err}
+			}
+			first := make(chan refreshResult, 1)
+			joined := make(chan refreshResult, 1)
+			page := make(chan error, 1)
+			go refresh(t.Context(), first)
+			receiveGenreResult(t, began)
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			gui := genreWaitContext{ctx, make(chan struct{}, 1)}
+			filter := genreWaitContext{ctx, make(chan struct{}, 1)}
+			go refresh(gui, joined)
+			go func() {
+				_, err := p.CatalogGenrePage(filter, "7", 1)
+				page <- err
+			}()
+			receiveGenreResult(t, gui.waiting)
+			receiveGenreResult(t, filter.waiting)
+
+			abandoned, cancelAbandoned := context.WithCancel(ctx)
+			defer cancelAbandoned()
+			leaving := genreWaitContext{abandoned, make(chan struct{}, 1)}
+			abandonedResult := make(chan refreshResult, 1)
+			go refresh(leaving, abandonedResult)
+			receiveGenreResult(t, leaving.waiting)
+			cancelAbandoned()
+			if got := receiveGenreResult(t, abandonedResult); !errors.Is(got.err, context.Canceled) {
+				t.Fatalf("canceled waiting refresh: %v", got.err)
+			}
+			joinedErr := tc.refreshErr
+			if tc.otherLimit {
+				if _, err := p.Search(t.Context(), "rate limit fixture"); !errors.Is(err, ErrRateLimited) {
+					t.Fatalf("concurrent search did not enter cooldown: %v", err)
+				}
+				joinedErr = ErrRateLimited
+			}
+			release <- struct{}{}
+			a, b := receiveGenreResult(t, first), receiveGenreResult(t, joined)
+			if a.err != tc.refreshErr || b.err != joinedErr {
+				t.Fatalf("refresh errors: first=%v joined=%v", a.err, b.err)
+			}
+			if tc.refreshErr == nil {
+				want := []CatalogGenre{{ID: "8", Name: "新分类"}}
+				if !slices.Equal(a.genres, want) {
+					t.Fatalf("refresh result: %v", a.genres)
+				}
+				if joinedErr == nil {
+					a.genres[0].Name = "changed by caller"
+					if !slices.Equal(b.genres, want) {
+						t.Fatal("joined caller did not receive an independent result")
+					}
+				}
+			}
+			if err := receiveGenreResult(t, page); err != tc.pageErr {
+				t.Fatalf("classification check: got %v, want %v", err, tc.pageErr)
+			}
+			if lists.Load() != 2 || details.Load() != tc.wantDetails {
+				t.Fatalf("CMS requests: list=%d detail=%d", lists.Load(), details.Load())
+			}
+		})
+	}
+}
+
+func TestCatalogGenreWaiterCanRefreshAfterInitiatorCancellation(t *testing.T) {
+	for _, cached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cached=%v", cached), func(t *testing.T) {
+			var calls atomic.Int32
+			began := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Query().Get("ac") != "list" {
+					t.Error("a removed genre reached the page endpoint")
+					w.WriteHeader(http.StatusBadGateway)
+					return
+				}
+				n := calls.Add(1)
+				if cached && n == 1 {
+					_, _ = io.WriteString(w, `{"code":1,"class":[{"type_id":7,"type_name":"旧分类"}]}`)
+					return
+				}
+				if (!cached && n == 1) || (cached && n == 2) {
+					close(began)
+					<-r.Context().Done()
+					return
+				}
+				_, _ = io.WriteString(w, `{"code":1,"class":[{"type_id":8,"type_name":"新分类"}]}`)
+			}))
+			defer server.Close()
+			p := fixtureProvider(t, server.URL, server.Client())
+			if cached {
+				if _, err := p.CatalogGenres(t.Context()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			leader, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			leaderErr := make(chan error, 1)
+			waiterErr := make(chan error, 1)
+			go func() {
+				_, err := p.CatalogGenres(leader)
+				leaderErr <- err
+			}()
+			receiveGenreResult(t, began)
+			waiter := genreWaitContext{t.Context(), make(chan struct{}, 1)}
+			go func() {
+				if cached {
+					_, err := p.CatalogGenrePage(waiter, "7", 1)
+					waiterErr <- err
+					return
+				}
+				genres, err := p.CatalogGenres(waiter)
+				if err == nil && !slices.Equal(genres, []CatalogGenre{{ID: "8", Name: "新分类"}}) {
+					err = fmt.Errorf("unexpected genres: %v", genres)
+				}
+				waiterErr <- err
+			}()
+			receiveGenreResult(t, waiter.waiting)
+			cancel()
+			if err := receiveGenreResult(t, leaderErr); !errors.Is(err, context.Canceled) {
+				t.Fatalf("initiator cancellation: %v", err)
+			}
+			wantCalls, wantErr := int32(2), error(nil)
+			if cached {
+				wantCalls, wantErr = 3, errInvalidGenre
+			}
+			if err := receiveGenreResult(t, waiterErr); err != wantErr || calls.Load() != wantCalls {
+				t.Fatalf("waiter recovery: got %v and %d requests, want %v and %d", err, calls.Load(), wantErr, wantCalls)
+			}
+		})
+	}
+}
+
+type genreTestTransport func(*http.Request) (*http.Response, error)
+
+func (transport genreTestTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return transport(req)
+}
+
+func TestCatalogGenreRefreshShares429AfterInitiatorCancellation(t *testing.T) {
+	var calls atomic.Int32
+	began := make(chan struct{})
+	client := &http.Client{Transport: genreTestTransport(func(req *http.Request) (*http.Response, error) {
+		if calls.Add(1) == 1 {
+			close(began)
+			<-req.Context().Done()
+			return &http.Response{
+				StatusCode: http.StatusTooManyRequests,
+				Header:     http.Header{"Retry-After": {"0"}},
+				Body:       http.NoBody,
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"code":1,"class":[]}`)),
+		}, nil
+	})}
+	p := fixtureProvider(t, "https://catalog.example.test", client)
+	leader, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	leaderErr := make(chan error, 1)
+	waiterErr := make(chan error, 1)
+	go func() {
+		_, err := p.CatalogGenres(leader)
+		leaderErr <- err
+	}()
+	receiveGenreResult(t, began)
+	waiter := genreWaitContext{t.Context(), make(chan struct{}, 1)}
+	go func() {
+		_, err := p.CatalogGenres(waiter)
+		waiterErr <- err
+	}()
+	receiveGenreResult(t, waiter.waiting)
+	cancel()
+	if got := receiveGenreResult(t, leaderErr); !errors.Is(got, ErrRateLimited) {
+		t.Fatalf("initiating request lost its 429: %v", got)
+	}
+	if got := receiveGenreResult(t, waiterErr); !errors.Is(got, ErrRateLimited) || calls.Load() != 1 {
+		t.Fatalf("waiting request did not share the 429: %v, CMS calls %d", got, calls.Load())
 	}
 }
 

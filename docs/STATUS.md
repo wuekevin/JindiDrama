@@ -1218,3 +1218,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 草稿、发布后验证和公开附件核对统一从 GitHub 的公开 Git 数据库查询准确标签。本地 Git 标签继续校验，远端查询独立于本机 URL 重写配置。轻量标签和附注标签均解析到实际提交。远端标签缺失、移动、引用类型错误或对象异常会中止核验。[GitHub 引用接口](https://docs.github.com/en/rest/git/refs#get-a-reference) · [GitHub 附注标签接口](https://docs.github.com/en/rest/git/tags#get-a-tag)
 - 本机镜像一致、模拟公开端缺失时，原版仍通过，修复后停止。Node 22 发行校验 18 项通过。真实 GitHub 的 Node.js 附注标签和 Vite 轻量标签分别与独立提交接口匹配。现存 .52 两份 GitHub 原始 ZIP 及内部 13 项 SHA-256 重新通过。真实签名 Release 的整条发布验收待运行。测试证据位于主工作区 `build/bin/qa-release-tag-origin/`。[BMad](../_bmad-output/plan-e13-release-tag-origin.md)
+
+## E12 合并苹果 CMS 分类并发刷新（2026-11-28）
+
+- 同一片源的并发分类刷新共享一次上游请求。切换分类时，分类页使用本轮成功快照，已移除分类不会再发分页请求。等待方可以取消。如果发起方取消，其他有效请求会完成或加入替代刷新。刷新失败保留最后一次有效快照，限流时仍停止发请求。
+- 受控 HTTP 夹具复现原版已取消的请求继续等待。修复后覆盖并发刷新、部分取消、发起方取消后恢复、旧分类移除及 429 限流，也覆盖发起方取消与零等待时间的 429 同时出现。分类专项连续 25 轮、Go 全量与 vet、Provider 和 App 竞态、Chromium 目录和分类 18 项通过。Windows amd64 测试二进制交叉编译通过。本次修改晚于 .63，实网授权 CMS 和最新成品待验收。测试证据位于主工作区 `build/bin/qa-cms-genre-refresh/`。[BMad](../_bmad-output/plan-e12-cms-genre-refresh.md)

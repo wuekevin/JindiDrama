@@ -53,14 +53,15 @@ var (
 )
 
 type Provider struct {
-	endpoint url.URL
-	idPrefix string
-	client   *http.Client
-	media    func(string) (provider.MediaSource, bool)
-	genreMu  sync.Mutex
-	genreIDs map[string]bool
-	retryMu  sync.Mutex
-	retryAt  time.Time
+	endpoint     url.URL
+	idPrefix     string
+	client       *http.Client
+	media        func(string) (provider.MediaSource, bool)
+	genreMu      sync.Mutex
+	genres       *catalogGenreSnapshot
+	genreRefresh *catalogGenreRefresh
+	retryMu      sync.Mutex
+	retryAt      time.Time
 }
 
 type CatalogPage struct {
@@ -80,6 +81,17 @@ type CatalogDetail struct {
 type CatalogGenre struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+type catalogGenreSnapshot struct {
+	entries []CatalogGenre
+	ids     map[string]bool
+}
+
+type catalogGenreRefresh struct {
+	done     chan struct{}
+	snapshot *catalogGenreSnapshot
+	err      error
 }
 
 var _ provider.VideoProvider = (*Provider)(nil)
@@ -137,16 +149,76 @@ func (p *Provider) CatalogPage(ctx context.Context, query string, page int) (Cat
 }
 
 func (p *Provider) CatalogGenres(ctx context.Context) ([]CatalogGenre, error) {
-	if p.coolingDown() {
-		return nil, ErrRateLimited
+	snapshot, err := p.catalogGenreList(ctx, true)
+	if err != nil {
+		return nil, err
 	}
-	p.genreMu.Lock()
-	defer p.genreMu.Unlock()
-	return p.refreshCatalogGenres(ctx)
+	return slices.Clone(snapshot.entries), nil
 }
 
-// refreshCatalogGenres replaces the genre snapshot with genreMu held.
-func (p *Provider) refreshCatalogGenres(ctx context.Context) ([]CatalogGenre, error) {
+func (p *Provider) catalogGenreList(ctx context.Context, refresh bool) (*catalogGenreSnapshot, error) {
+	needRefresh := refresh
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if p.coolingDown() {
+			return nil, ErrRateLimited
+		}
+		p.genreMu.Lock()
+		saved := p.genres
+		pending := p.genreRefresh
+		if pending != nil {
+			p.genreMu.Unlock()
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-pending.done:
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
+			}
+			if p.coolingDown() {
+				return nil, ErrRateLimited
+			}
+			if errors.Is(pending.err, context.Canceled) || errors.Is(pending.err, context.DeadlineExceeded) {
+				needRefresh = true
+				continue // Another caller can refresh after the initiating caller leaves.
+			}
+		} else {
+			if !needRefresh && saved != nil {
+				p.genreMu.Unlock()
+				return saved, nil
+			}
+			pending = &catalogGenreRefresh{done: make(chan struct{})}
+			p.genreRefresh = pending
+			p.genreMu.Unlock()
+			p.completeGenreRefresh(ctx, pending)
+		}
+		if pending.err != nil && !refresh && saved != nil &&
+			!errors.Is(pending.err, ErrRateLimited) && ctx.Err() == nil {
+			return saved, nil
+		}
+		return pending.snapshot, pending.err
+	}
+}
+
+func (p *Provider) completeGenreRefresh(ctx context.Context, pending *catalogGenreRefresh) {
+	snapshot, err := p.fetchCatalogGenres(ctx)
+	p.genreMu.Lock()
+	defer p.genreMu.Unlock()
+	if canceled := ctx.Err(); canceled != nil && !errors.Is(err, ErrRateLimited) {
+		snapshot, err = nil, canceled
+	}
+	if err == nil {
+		p.genres = snapshot
+	}
+	pending.snapshot, pending.err = snapshot, err
+	p.genreRefresh = nil
+	close(pending.done)
+}
+
+func (p *Provider) fetchCatalogGenres(ctx context.Context) (*catalogGenreSnapshot, error) {
 	data, err := p.request(ctx, url.Values{"ac": {"list"}, "pg": {"1"}})
 	if err != nil {
 		return nil, err
@@ -176,22 +248,15 @@ func (p *Provider) refreshCatalogGenres(ctx context.Context) ([]CatalogGenre, er
 			break
 		}
 	}
-	p.genreIDs = seen
-	return genres, nil
+	return &catalogGenreSnapshot{entries: genres, ids: seen}, nil
 }
 
 func (p *Provider) requireCatalogGenre(ctx context.Context, id string) error {
-	if p.coolingDown() {
-		return ErrRateLimited
+	snapshot, err := p.catalogGenreList(ctx, false)
+	if err != nil {
+		return err
 	}
-	p.genreMu.Lock()
-	defer p.genreMu.Unlock()
-	if p.genreIDs == nil {
-		if _, err := p.refreshCatalogGenres(ctx); err != nil {
-			return err
-		}
-	}
-	if !p.genreIDs[id] {
+	if !snapshot.ids[id] {
 		return errInvalidGenre
 	}
 	return nil
