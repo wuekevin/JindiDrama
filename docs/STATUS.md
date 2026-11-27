@@ -19,7 +19,7 @@
 | .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
 | Windows 正式签名 | 托管打包要求签名 PFX。证书库脚本可使用 Windows 上的硬件密钥，已通过本地夹具 | 确认维护者实际可用的签名路径；正式成品的便携程序、安装器和卸载器通过原生验签及时间戳检查。[签名说明](../README.md#windows-证书库签名) |
 | macOS 正式签名与公证 | 本地成品为临时签名 | 为 `release-macos` 配置 Developer ID Application 和公证凭据；双架构归档通过票据验证与分发策略检查。[签名环境](../README.md#签名环境) |
-| 正式发布版在线更新 | .49 的 Apple Silicon 系统保存、校验、重试与剪贴板已通过隔离验收 | 发布签名安装包后，用旧版实际验证 GitHub 版本发现与下载校验。[原生更新日志](../build/bin/qa-native-update-download-49/verify.log) |
+| 正式发布版在线更新 | Apple Silicon 通过合成预发布接口从 .52 原生设置下载并手动启动实际 .59 归档，数据保留 | 发布签名安装包后，用旧版验证 GitHub 版本发现、下载和签名版升级。[本地下载升级](../build/bin/qa-macos-download-upgrade-59/roundtrip.log) |
 | 苹果 CMS 公网联调 | Go 直连已用合成授权片源验证目录及播放 | 使用可供项目联调的授权 HTTPS 端点和测试剧目，验证目录、搜索、详情、播放与授权限制。 |
 | 红果官方接口 | 等待第三方桌面接入授权、接口文档和测试环境 | 按[上游授权规定](UPSTREAM-AUTHORIZATION.md)验证目录、播放、登录、互动和同步。 |
 
@@ -1082,3 +1082,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 在 Go 适配器的响应、剧目和分类对象上检查重复字段。大小写变体和 JSON 转义后同名也算重复。响应本身有歧义时返回片源错误。单条目录或分类记录有歧义时跳过该行，精确详情和播放申请拒绝异常记录。当字段只出现一次时，保留已有的大小写兼容。[原版复现](../build/bin/qa-cms-unique-fields/baseline.log) · [专项回归](../build/bin/qa-cms-unique-fields/targeted.log)
 - Go 全量、vet、App/CMS 竞态和 Windows amd64 交叉 vet 均通过。App 夹具包含有效的媒体地址，碰到重复上架字段仍无票据和媒体请求。Apple Silicon 隔离 Wails 构建用合成响应验证收藏和历史，歧义字段使条目进入「重试核验」。片源恢复后原页继续观看，25% 和 6000 ms 断点保持原值，正常退出和 SQLite 完整性均通过。[原生](../build/bin/qa-cms-unique-fields/native.log)
 - 本次修改晚于 .59 本地打包。验收证据位于本机 JindiDrama 主工作区的 `build/bin/`。公网授权联调和跨平台成品仍待验收。[BMad](../_bmad-output/plan-e12-cms-unique-json-fields.md)
+
+## E13 Apple Silicon 下载 .59 成品并验证升级（2026-11-27）
+
+- 核对 .52 GitHub 原归档和 .59 本地归档的 macOS 清单各 6 项。旧版测试构建使用发行源码 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4`。测试构建与 .52 原归档的 69 个内嵌前端文件逐路径和 SHA-256 匹配。隔离构建仅替换更新 HTTP 传输并固定保存对话框的起始目录。[旧归档](../build/bin/qa-macos-download-upgrade-59/archived-52.log) · [前端一致性](../build/bin/qa-macos-download-upgrade-59/test-52-frontend.log)
+- .52 通过原生设置页发现预发布 .59，在 macOS 系统保存对话框下载并显示校验成功。合成发布接口传输的是 .59 实际归档。落盘文件与原归档逐字节一致，独立 SHA-256 为 `07fb0fe444215905f98b2f5c9a5fe7886408b8d65a7bd8759c816e3cffb06c1c`，ZIP 完整性和文件隔离标记均通过。[保存对话框](../build/bin/qa-macos-download-upgrade-59/save-panel.ax) · [成功界面](../build/bin/qa-macos-download-upgrade-59/verified-save.ax)
+- 从下载 ZIP 解出 .59，在同一隔离安装路径直接运行主程序，沿用预置数据的 SQLite v10 目录。新版主程序与 .59 原归档字节一致，临时签名核验通过。旧版和新版均正常退出，新版界面显示 .59、两项收藏及两条历史。SQLite 完整性、收藏顺序、12345 ms 与 7456 ms 断点、搜索、浅色主题和预发布设置均核对通过。[升级日志](../build/bin/qa-macos-download-upgrade-59/roundtrip.log) · [程序身份](../build/bin/qa-macos-download-upgrade-59/installed-identity.log) · [数据读回](../build/bin/qa-macos-download-upgrade-59/sqlite-full-readback.log)
+- 本机验收证据位于 JindiDrama 主工作区的 `build/bin/`。此项覆盖 .59 的本地下载与启动，正式签名、系统分发策略、公证与 GitHub 真实公开下载待验收。[BMad](../_bmad-output/plan-e13-macos-download-upgrade-59.md)
