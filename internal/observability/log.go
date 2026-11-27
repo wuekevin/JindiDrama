@@ -14,18 +14,25 @@ import (
 	"unicode"
 )
 
+const credentialKeys = `(?:token|access_token|refresh_token|sessionid|sid|passwd|password|secret|sign|x-tt-token)`
+
 var (
 	reHeader     = regexp.MustCompile(`(?i)\b((?:cookie|set-cookie|authorization|proxy-authorization)\s*[=:][ \t]*)[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*`)
-	reJSONSecret = regexp.MustCompile(`(?i)("(?:cookie|set-cookie|authorization|proxy-authorization|token|access_token|refresh_token|sessionid|sid|passwd|password|secret|sign|x-tt-token)"[ \t]*:[ \t]*)"(?:\\.|[^"\\])*"`)
-	reKV         = regexp.MustCompile(`(?i)\b(token|access_token|refresh_token|sessionid|sid|passwd|password|secret|sign|x-tt-token)\s*[=:]\s*[^\s;,&"']+`)
-	rePhone      = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
-	reURL        = regexp.MustCompile(`(?i)https?://[^\s"]+`)
-	reBearer     = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/\-]+=*`)
+	reJSONSecret = regexp.MustCompile(`(?i)("(?:cookie|set-cookie|authorization|proxy-authorization|` + credentialKeys + `)"[ \t]*:[ \t]*)"(?:\\.|[^"\\])*"`)
+	// A quoted value may contain delimiters and whole URLs. Treat an open
+	// quote on a truncated log line as sensitive through the end of that line.
+	reQuotedKV = regexp.MustCompile(`(?im)\b(` + credentialKeys + `[ \t]*[=:][ \t]*)` +
+		`(?:"(?:\\[^\r\n]|[^"\\\r\n])*(?:"|\\?\r?$)|'(?:\\[^\r\n]|[^'\\\r\n])*(?:'|\\?\r?$))`)
+	reKV     = regexp.MustCompile(`(?i)\b(` + credentialKeys + `)\s*[=:]\s*[^\s;,&"']+`)
+	rePhone  = regexp.MustCompile(`\b1[3-9]\d{9}\b`)
+	reURL    = regexp.MustCompile(`(?i)https?://[^\s"]+`)
+	reBearer = regexp.MustCompile(`(?i)bearer\s+[A-Za-z0-9._~+/\-]+=*`)
 )
 
 // Redact 去除敏感信息；URL 仅保留 scheme+host+path，丢弃查询串与片段。
 func Redact(s string) string {
 	s = reJSONSecret.ReplaceAllString(s, `${1}"<redacted>"`)
+	s = reQuotedKV.ReplaceAllString(s, "${1}<redacted>")
 	s = reHeader.ReplaceAllString(s, "${1}<redacted>")
 	s = reURL.ReplaceAllStringFunc(s, func(u string) string {
 		parsed, err := url.Parse(u)

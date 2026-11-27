@@ -728,3 +728,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 使用 .49 同一份生产前端和应用源码，用测试构建替换 Go 更新请求的 HTTP 传输。Apple Silicon 从设置页实际检查更新、打开 macOS 保存对话框、选定隔离目录并操作系统剪贴板。取消时没有安装包请求。模拟限流和摘要错误时分别显示对应提示，目标目录没有暂存或输出文件，并可继续重试。[界面证据](../build/bin/qa-native-update-download-49/native-ui.log)
 - 第三次请求成功写入测试 ZIP。系统命令核对独立 SHA-256 和 ZIP 完整性。原生剪贴板路径与设置页及实际输出路径一致，验证后恢复剪贴板内容。应用正常退出，隔离 SQLite 完整性为 `ok`。本次使用合成发布及安装包，项目正式签名 Release 和线上下载仍待验收。[验收日志](../build/bin/qa-native-update-download-49/verify.log) · [BMad 记录](../_bmad-output/plan-e13-native-update-download.md)
+
+## E13 诊断日志遮蔽带引号的凭据（2026-11-27）
+
+- 诊断日志现在会完整遮蔽单双引号包裹的键值凭据，包括内含空格、分隔符、转义字符和 URL 的值。截断的引号值只遮蔽到本行末尾，正常闭合的字段保留后续诊断内容。
+- 回归测试复现了旧版本会写出带引号的凭据。修复后，新日志在写盘前脱敏，导出时也会二次遮蔽旧的轮转日志。专项、Go vet、Go 全量、App 与诊断模块竞态测试通过。Windows x64 诊断测试程序交叉编译通过。修复纳入当前源码候选，晚于 .49 本地安装包。[BMad 记录](../_bmad-output/plan-e13-redact-quoted-diagnostics.md)

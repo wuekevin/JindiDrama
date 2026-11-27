@@ -74,3 +74,41 @@ func TestRedactStructuredCredentialStrings(t *testing.T) {
 		t.Fatalf("structured diagnostics: %s", out)
 	}
 }
+
+func TestRedactQuotedCredentialAssignments(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{`password="private alpha; beta" status=failed`, `password=<redacted> status=failed`},
+		{`password="private Cookie: alpha" status=failed`, `password=<redacted> status=failed`},
+		{`token='private, https://credentials.example.test/secret?key=private' status=failed`, `token=<redacted> status=failed`},
+		{`X-TT-TOKEN : "private\"second" status=failed`, `X-TT-TOKEN :<redacted> status=failed`},
+		{`sid='private\'second' refresh_token="private\\suffix" status=failed`, `sid=<redacted> refresh_token=<redacted> status=failed`},
+		{"secret=\"private truncated\r\nplayer ready", "secret=<redacted>\nplayer ready"},
+		{"secret='private truncated\\\nplayer ready", "secret=<redacted>\nplayer ready"},
+	} {
+		if got := Redact(tc.input); got != tc.want {
+			t.Errorf("Redact(%q) = %q; want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestDiagnosticsNeverExportsQuotedCredentials(t *testing.T) {
+	log, err := New(t.TempDir(), 2000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Log("warn", "player", `password="synthetic-new-private log" status=failed`); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(log.Path()+".1", []byte("token='synthetic-old-private token' stage=loading\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(log.Path())
+	if err != nil || strings.Contains(string(saved), "synthetic-new-private") {
+		t.Fatalf("raw log file should omit the synthetic credential: %q %v", saved, err)
+	}
+	lines, err := log.Tail(5)
+	if err != nil || len(lines) != 2 || lines[0] != "token=<redacted> stage=loading" ||
+		!strings.HasSuffix(lines[1], "password=<redacted> status=failed") {
+		t.Fatalf("diagnostic output: %v %v", lines, err)
+	}
+}
