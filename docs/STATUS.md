@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.61`，打包源提交为 `ee62daf4e95d3d385d310550655c2ec089a8d6a4`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-28，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261128.62`，打包源提交为 `9ad65eb70abc3878d5c294848997cc848f990f35`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .62 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261128.62/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261128.62/macos/SHA256SUMS.txt) |
 | .61 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.61/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.61/macos/SHA256SUMS.txt) |
 | .60 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.60/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.60/macos/SHA256SUMS.txt) |
 | .59 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.59/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.59/macos/SHA256SUMS.txt) |
@@ -21,7 +22,7 @@
 | .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
 | Windows 正式签名 | 托管打包要求签名 PFX。证书库脚本可使用 Windows 上的硬件密钥，已通过本地夹具 | 确认维护者实际可用的签名路径；正式成品的便携程序、安装器和卸载器通过原生验签及时间戳检查。[签名说明](../README.md#windows-证书库签名) |
 | macOS 正式签名与公证 | 本地成品为临时签名 | 为 `release-macos` 配置 Developer ID Application 和公证凭据；双架构归档通过票据验证与分发策略检查。[签名环境](../README.md#签名环境) |
-| 正式发布版在线更新 | Apple Silicon 通过合成预发布接口从 .52 原生设置下载并手动启动实际 .59 归档，数据保留 | 发布签名安装包后，用旧版验证 GitHub 版本发现、下载和签名版升级。[本地下载升级](../build/bin/qa-macos-download-upgrade-59/roundtrip.log) |
+| 正式发布版在线更新 | Apple Silicon 通过合成预发布接口保存并启动实际 .61 归档，SQLite 数据保留 | 发布签名安装包后，用旧版验证 GitHub 版本发现、下载和签名版升级。[本地下载升级](../build/bin/qa-native-update-61/roundtrip.log) |
 | 苹果 CMS 公网联调 | Go 直连已用合成授权片源验证目录及播放 | 使用可供项目联调的授权 HTTPS 端点和测试剧目，验证目录、搜索、详情、播放与授权限制。 |
 | 红果官方接口 | 等待第三方桌面接入授权、接口文档和测试环境 | 按[上游授权规定](UPSTREAM-AUTHORIZATION.md)验证目录、播放、登录、互动和同步。 |
 
@@ -1165,3 +1166,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 演示评论移除仅显示不可用提示的图片、视频、提及和举报入口。演示和 CMS 本机评论仅为自己的评论提供删除菜单。保存冲突时该入口禁用。表情区和删除菜单互斥，Esc 返回对应按钮，删除后焦点回到评论输入框。[BMad](../_bmad-output/plan-e05-comment-actions.md)
 - Chromium 40 项、WebKit 4 项、Vitest 125 项、类型检查和生产构建通过。WebKit 复现并修复键盘打开菜单后改用鼠标无法删除。CMS 本机评论夹具通过分集隔离、删除持久化及旧记录只读验证。[原版复现](../build/bin/qa-comment-actions/before.log) · [WebKit 复现](../build/bin/qa-comment-actions/review-before.log) · [Chromium](../build/bin/qa-comment-actions/chromium.log) · [WebKit](../build/bin/qa-comment-actions/webkit.log)
 - 已对照 1448×1086 的原样与改后画面，并确认在 1280×860、220% 缩放下可用键盘打开并操作菜单。首轮在菜单打开时直接改变视口，浏览器没有主动滚动到已聚焦项；通过在目标缩放下打开与操作菜单完成验收。证据为本机浏览器和授权片源夹具。[原样](../build/bin/qa-comment-actions/05-before.png) · [改后](../build/bin/qa-comment-actions/05-after.png) · [220% 键盘焦点](../build/bin/qa-comment-actions/05-keyboard-220.png)
+
+## E13 .62 累计本地打包验收（2026-11-28）
+
+- Windows x64 和 macOS Universal 测试包从发行提交 `9ad65eb70abc3878d5c294848997cc848f990f35` 构建，含评论操作修复和最新的授权 CMS 随包指引。三个架构内嵌的完整文件表均包含同样的 69 个文件及 5 个目录。实际字节和编译器摘要与锁文件构建匹配，浏览器预览服务返回的 69 个文件也逐项核对通过。Windows 安装器 7 项内容齐全，主程序、WebView2 引导程序和 4 项 NSIS 资源逐字节比对通过。macOS 两切片最低系统版本均为 13.0。[来源](../build/bin/qa-release-source-62/provenance.log) · [前端内嵌验证](../build/bin/qa-release-source-62/embedded-frontend-full.log) · [预览 HTTP 数据](../build/bin/qa-release-source-62/chromium-preview-readback.log) · [NSIS](../build/bin/qa-release-source-62/nsis-inventory.log) · [macOS 成品结构](../build/bin/qa-release-source-62/package-static.log)
+- 归档目录独立复算 Windows 7 项、macOS 6 项 SHA-256。Windows 安装包 22.58 MiB，便携版 32.45 MiB，macOS Universal ZIP 40.97 MiB。Apple Silicon 从最终归档目录中的 .62 ZIP 启动真实界面、正常退出，运行前后 ZIP 摘要与清单一致，SQLite 完整性、活动 WAL 回滚及源库未改动均通过。Windows 文件未签名，macOS 使用本机隔离标识及临时签名。[SHA-256](../build/bin/qa-release-source-62/archive-readback.log) · [包大小](../build/bin/qa-release-source-62/package-sizes.log) · [Apple Silicon 原生](../build/bin/qa-release-source-62/macos-native.log)
+- Chromium 全量 406 项，WebKit 专项 5 项，Vitest 125 项，Node 发行 18 项，以及 Go 全量和 vet 均通过。三架构二进制与 npm 生产依赖扫描未报告已知漏洞。首次 NSIS 预检指向已移除的默认资源目录，切换到隔离工具目录后重新跑通。Wails 只重排配置格式，解析后的内容一致。[Chromium](../build/bin/qa-release-source-62/chromium.log) · [WebKit](../build/bin/qa-release-source-62/webkit.log) · [Go](../build/bin/qa-release-source-62/go-test.log) · [安全扫描](../build/bin/qa-release-source-62/binary-vulnerabilities.log)
+- 本地归档与日志位于 JindiDrama 主工作区的 `build/bin/`，归档目录为 `smoke-20261128.62/`。GitHub 只读检查显示最新托管批次仍为 .52，签名环境、仓库级 Actions secrets 和 Release 均为 0。.62 的 Windows 与 Intel Mac 原生验收、正式签名公证、签名版在线升级及授权公网联调仍待完成。[托管打包](../build/bin/qa-release-source-62/github-latest.json) · [BMad](../_bmad-output/plan-e13-local-candidate62-packages.md)
