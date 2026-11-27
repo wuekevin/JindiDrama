@@ -3,6 +3,7 @@ import { copyFile, lstat, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { hostedPackageHeader } from './package-provenance.mjs'
+import { mediaNotes } from './package-media-notes.mjs'
 
 const [directory, platform = process.platform] = process.argv.slice(2)
 const { PACKAGE_VERSION: version, PACKAGE_MODE: mode, GITHUB_SHA: sha,
@@ -116,7 +117,9 @@ const lines = [
   ...isolatedMacTest,
   '## 功能与数据',
   '',
-  '桌面版提供演示目录、授权本地片库、收藏、观看进度、数据备份和本地诊断。演示账号与演示目录可离线使用。红果正式服务待取得接入授权。',
+  ...mediaNotes,
+  '',
+  '## 更新与回滚',
   '',
   '可在设置中选择稳定版或预发布渠道。GitHub 提供匹配平台的安装包及 SHA-256 时，设置页可校验下载。也可打开发布页，安装由用户手动确认。旧版需要兼容副本时，先备份用户资料，再按回滚说明操作。',
   '',

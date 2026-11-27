@@ -3,6 +3,7 @@ import { copyFile, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { hashFile, platformPackages, readVerifiedText, releaseLicenses, sharedReleaseDocuments, verify, verifyHostedPackage, writeManifest } from './package-checksums.mjs'
 import { hostedPackageHeader } from './package-provenance.mjs'
+import { mediaNotes } from './package-media-notes.mjs'
 
 const [windowsDirectory, macosDirectory, output, ...extra] = process.argv.slice(2)
 const { PACKAGE_MODE: mode } = process.env
@@ -64,7 +65,11 @@ try {
     '',
     '## 功能与数据',
     '',
-    '桌面应用支持离线演示目录、授权本地片库、收藏、观看进度、数据备份和本地诊断。红果正式服务待取得接入授权。检测到含 SHA-256 的新版安装包时，桌面设置支持校验下载，由用户手动安装。',
+    ...mediaNotes,
+    '',
+    '## 更新与回滚',
+    '',
+    '检测到含 SHA-256 的新版安装包时，桌面设置支持校验下载，由用户手动安装。',
     '',
     '退回旧版前先备份用户资料。数据库版本不兼容时，请下载 `RELEASE-ROLLBACK.md` 并按说明生成独立的兼容副本。',
     '',
