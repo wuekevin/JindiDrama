@@ -310,6 +310,92 @@ func TestCatalogHLSSameLeaseFallbackCanReuseURLInDifferentRole(t *testing.T) {
 	}
 }
 
+func TestCatalogHLSAudioGroupMembers(t *testing.T) {
+	type audioTrack struct{ group, name, defaultValue, route string }
+	cantoneseTS := hlsTestTS[:1] + "C" + hlsTestTS[2:]
+	mandarin := audioTrack{"stereo", "普通话", "YES", "mandarin"}
+	cantonese := audioTrack{"stereo", "粤语", "NO", "cantonese"}
+	for _, test := range []struct {
+		name       string
+		tracks     []audioTrack
+		wantStatus int
+	}{
+		{"distinct members", []audioTrack{mandarin, cantonese}, http.StatusOK},
+		{"same name in different groups", []audioTrack{mandarin, cantonese,
+			{"surround", "普通话", "YES", "surround-mandarin"},
+			{"surround", "粤语", "NO", "surround-cantonese"}}, http.StatusOK},
+		{"duplicate name", []audioTrack{mandarin, {"stereo", "普通话", "NO", "cantonese"}}, http.StatusBadGateway},
+		{"duplicate default", []audioTrack{mandarin, {"stereo", "粤语", "YES", "cantonese"}}, http.StatusBadGateway},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			master := "#EXTM3U\n"
+			for _, track := range test.tracks {
+				master += `#EXT-X-MEDIA:TYPE=AUDIO,GROUP-ID="` + track.group + `",NAME="` + track.name +
+					`",DEFAULT=` + track.defaultValue + `,URI="` + track.route + ".m3u8?private=fixture\"\n"
+			}
+			master += "#EXT-X-STREAM-INF:BANDWIDTH=350000,AUDIO=\"stereo\"\nvideo.m3u8\n"
+			requests := make(chan string, 8)
+			relay := testCatalogRelay(t, func(req *http.Request) (*http.Response, error) {
+				requests <- req.URL.Path
+				switch req.URL.Path {
+				case "/catalog/main.m3u8":
+					return hlsTestResponse(http.StatusOK, catalogHLSType, master), nil
+				case "/catalog/mandarin.m3u8", "/catalog/cantonese.m3u8":
+					segment := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/catalog/"), ".m3u8") + ".ts"
+					return hlsTestResponse(http.StatusOK, catalogHLSType, hlsVODStart+"#EXTINF:2,\n"+segment+"\n"+hlsVODEnd), nil
+				case "/catalog/mandarin.ts":
+					return hlsTestResponse(http.StatusOK, "video/mp2t", hlsTestTS), nil
+				case "/catalog/cantonese.ts":
+					return hlsTestResponse(http.StatusOK, "video/mp2t", cantoneseTS), nil
+				default:
+					t.Errorf("unexpected request %s", req.URL)
+					return hlsTestResponse(http.StatusNotFound, "text/plain", ""), nil
+				}
+			})
+			ticket := issueTestHLS(t, relay, time.Now().Add(time.Minute))
+			prefix := catalogMediaPath + ticket.LeaseID + "/hls/"
+			local := "http://" + relay.host + prefix
+			response, body := hlsTestRequest(t, http.MethodGet, ticket.Sources[0].Src, nil)
+			if response.StatusCode != test.wantStatus || len(requests) != 1 || <-requests != "/catalog/main.m3u8" {
+				t.Fatalf("master response: %d, want %d", response.StatusCode, test.wantStatus)
+			}
+			if test.wantStatus != http.StatusOK {
+				response, _ := hlsTestRequest(t, http.MethodGet, local+"0.m3u8", nil)
+				if body != "" || response.StatusCode != http.StatusNotFound || len(requests) != 0 {
+					t.Fatalf("rejected master exposed a child: %d %q, extra requests=%d", response.StatusCode, body, len(requests))
+				}
+				return
+			}
+			for index, track := range test.tracks {
+				location := prefix + strconv.Itoa(index) + ".m3u8"
+				if !strings.Contains(body, `NAME="`+track.name+`",DEFAULT=`+track.defaultValue+`,URI="`+location+`"`) ||
+					strings.Contains(body, "private=fixture") {
+					t.Fatalf("unexpected rewritten master: %q", body)
+				}
+			}
+			for index, track := range test.tracks[:2] {
+				response, child := hlsTestRequest(t, http.MethodGet, local+strconv.Itoa(index)+".m3u8", nil)
+				if response.StatusCode != http.StatusOK || len(requests) != 1 || <-requests != "/catalog/"+track.route+".m3u8" {
+					t.Fatalf("wrong child for %s: %d", track.name, response.StatusCode)
+				}
+				mediaPath := prefix + strconv.Itoa(len(test.tracks)+1+index)
+				if !strings.Contains(child, mediaPath) {
+					t.Fatalf("missing relayed segment: %q", child)
+				}
+				payload, segment := hlsTestRequest(t, http.MethodGet, "http://"+relay.host+mediaPath, nil)
+				expectedSegment := hlsTestTS
+				if index == 1 {
+					expectedSegment = cantoneseTS
+				}
+				if payload.StatusCode != http.StatusOK || segment != expectedSegment ||
+					len(requests) != 1 || <-requests != "/catalog/"+track.route+".ts" {
+					t.Fatalf("incomplete TS segment for %s: %d", track.name, payload.StatusCode)
+				}
+			}
+		})
+	}
+}
+
 func TestCatalogHLSGenericManifestMIMERequiresM3U8AndValidBody(t *testing.T) {
 	const master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nvalid.M3U8\n" +
 		"#EXT-X-STREAM-INF:BANDWIDTH=2000\nhtml.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2000\nextensionless\n"

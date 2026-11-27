@@ -77,6 +77,11 @@ func parseHLSRange(value string) (hlsRange, bool) {
 	return hlsRange{length: length, offset: offset, explicit: explicit}, sizeOK && length > 0 && offset <= math.MaxInt64-length
 }
 
+type hlsAudioGroup struct {
+	names      map[string]bool
+	hasDefault bool
+}
+
 type hlsManifestState struct {
 	manifest hlsManifest
 	base     *url.URL
@@ -97,7 +102,7 @@ type hlsManifestState struct {
 	previousRangeEnd  int64
 	previousURL       string
 	singletons        map[string]bool
-	audioGroups       map[string]bool
+	audioGroups       map[string]*hlsAudioGroup
 	referencedAudio   map[string]bool
 }
 
@@ -115,7 +120,7 @@ func parseCatalogHLSManifest(body []byte, base *url.URL, allowMaster bool) (hlsM
 	}
 	s := hlsManifestState{
 		base: base, allowMaster: allowMaster, version: 1, singletons: make(map[string]bool),
-		audioGroups: make(map[string]bool), referencedAudio: make(map[string]bool),
+		audioGroups: make(map[string]*hlsAudioGroup), referencedAudio: make(map[string]bool),
 	}
 	s.manifest.literal(header)
 	for line := range strings.SplitSeq(rest, "\n") {
@@ -131,7 +136,7 @@ func parseCatalogHLSManifest(body []byte, base *url.URL, allowMaster bool) (hlsM
 			return hlsManifest{}, errCatalogHLSManifest
 		}
 		for group := range s.referencedAudio {
-			if !s.audioGroups[group] {
+			if s.audioGroups[group] == nil {
 				return hlsManifest{}, errCatalogHLSManifest
 			}
 		}
@@ -470,7 +475,17 @@ func (s *hlsManifestState) acceptMasterAttributes(tag, raw string) bool {
 	if group == "" || name == "" || mediaType == "" || (defaultValue == "YES" && autoSelect == "NO") {
 		return false
 	}
-	s.audioGroups[group] = true
+	audio := s.audioGroups[group]
+	if audio == nil {
+		audio = &hlsAudioGroup{names: make(map[string]bool)}
+		s.audioGroups[group] = audio
+	}
+	isDefault := defaultValue == "YES"
+	if audio.names[name] || (isDefault && audio.hasDefault) {
+		return false
+	}
+	audio.names[name] = true
+	audio.hasDefault = audio.hasDefault || isDefault
 	s.appendURIAttribute(tag, attrs, resource)
 	return true
 }

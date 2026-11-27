@@ -1184,3 +1184,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Apple Silicon 用最终 .62 归档和独立数据目录打开原生设置页。先以仅拒绝 GitHub CONNECT 的隔离代理触发故障，再在同一进程恢复端到端 TLS。稳定版显示暂无正式发布版本，预发布显示暂无可用发布版本。独立请求核对稳定入口为 HTTP 404，预发布列表为 HTTP 200 且为空。预发布设置写入 SQLite，正常退出后重启仍使用该渠道。
 - 原包重试成功后，上轮失败提示短暂与本次结果同屏。修复后开始新一轮检查或保存更新渠道时，会撤下上次检查提示。隔离的修复版原生构建复验联网恢复、结果不重叠、切换渠道和重启。修复晚于 .62 归档。证据位于 JindiDrama 主工作区的 `build/bin/qa-native-update62/`。
 - Chromium 设置页 45 项、WebKit 更新专项 4 项、Vitest 125 项、类型检查和生产构建通过。暂停旧提示计时复现重试期间的界面，并确认下载完整性警告在重新检查时仍可见。本轮验收覆盖真实 GitHub 发现状态和网络恢复，签名版线上下载和安装升级仍待验证。[BMad](../_bmad-output/plan-e13-native-public-update62.md)
+
+## E12 HLS 音轨组去重与默认成员校验（2026-11-28）
+
+- 苹果 CMS 授权 HLS 主清单按组校验成员名称，仅允许一个默认音轨。同组重名或多默认成员会返回 502，该清单的子资源不会公开。不同组仍可复用音轨名称。URI 继续改写为本机中继地址。[RFC 8216 音轨组规则](https://www.rfc-editor.org/rfc/rfc8216.html#section-4.3.4.1.1)
+- Go 中继夹具验证普通话和粤语分别取得对应点播分段。中继返回的两条合成 MPEG-TS 与各自输入逐字节一致，FFmpeg 独立解码结果为 440 Hz 和 660 Hz。两种歧义清单均可在原版复现。Go 全量及 vet、HLS/媒体中继竞态、Windows amd64 交叉编译和 Chromium HLS 2 项通过。本次改动晚于 .62。证据位于 JindiDrama 主工作区的 `build/bin/qa-cms-hls-audio-groups/`。[BMad](../_bmad-output/plan-e12-hls-audio-groups.md)
