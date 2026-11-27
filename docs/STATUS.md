@@ -2,11 +2,12 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.52`，打包源提交为 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4`。最新 GitHub 测试候选为 `.51`。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.52`，打包源提交为 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4`。最新 GitHub 测试候选也是 `.52`，同一提交的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
+| .52 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项任务通过 | 两份 GitHub 原始归档摘要及内部清单共 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [本地复验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) |
 | .51 本地源码回归 | 393 项 Chromium、122 项 Vitest、WebKit 专项及 Go 全量、vet 和竞态通过 | [浏览器日志](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log) |
 | .51 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项打包与复验任务通过 | 两份原始归档 SHA-256 与 GitHub 摘要相符，两平台内部清单 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45946619517) · [本地复验日志](../build/bin/github-smoke-20261127.51/evidence/archived-checks.log) |
 | .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
@@ -805,7 +806,7 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 从独立发行源码 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4` 构建 `v0.1.0-smoke.20261127.52`，包含实际解码状态、CMS 公开封面复用和媒体保存目录保护。验收源码也包含 Windows 交互托盘脚本。Node 22 按锁文件重建。浏览器与桌面构建使用的前端逐项摘要一致。Chromium 394 项、Vitest 122 项、WebKit 3 项通过。[浏览器回归](../build/bin/smoke-20261127.52/evidence/e2e.log) · [WebKit 点验](../build/bin/smoke-20261127.52/evidence/webkit.log)
 - Windows x64 安装器 22.54 MiB、便携程序 32.36 MiB。NSIS 内嵌主程序和 WebView2 引导程序与输入逐字节一致。macOS Universal ZIP 40.89 MiB，含 arm64 和 x86_64，两切片最低系统版本均为 macOS 13.0。两平台清单共 13 项通过项目工具、随包指令和归档后独立复验。[Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) · [归档复验](../build/bin/smoke-20261127.52/evidence/archived-checks.log)
 - Apple Silicon 从最终 ZIP 原生启动并正常退出，SQLite 完整性和成品回滚通过。Go 全量、vet 和 App/CMS/更新/开机启动/诊断竞态通过。Go 生产源码、三套二进制和 npm 生产依赖扫描未报告已知漏洞。Wails 重新格式化配置，JSON 内容复核一致后恢复隔离检出原文件。[原生证据](../build/bin/smoke-20261127.52/evidence/macos-native.log) · [二进制扫描](../build/bin/smoke-20261127.52/evidence/binary-vulnerabilities.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate52-packages.md)
-- .52 是本地 smoke，Windows 包未签名，macOS 包为隔离标识和临时签名。当前托管验收仍为 .51。本批 Windows 原生安装与托盘、Intel 启动、真实 ExFAT、正式签名和公证、正式在线更新以及授权公网片源仍待验收。
+- 本地 .52 Windows 包未签名，macOS 包为隔离标识和临时签名。同提交后续 GitHub 原生验收见下方。
 
 ## E12 macOS 锁定钥匙串验收（2026-11-27）
 
@@ -815,9 +816,18 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 ## E13 .52 正式分发校验的拒绝路径（2026-11-27）
 
 - 用已归档的 .52 macOS Universal ZIP 核对真实系统校验。测试模式的临时签名校验成功。正式模式在 `stapler validate` 因缺少公证票据被拒绝，独立执行 `syspolicy_check distribution` 也确认临时签名及缺票据。Windows 便携程序和安装器的 PE 内嵌 Authenticode 证书表为空。本次检查仅证明这些测试包在正式分发验收中的状态。[归档签名检查](../build/bin/qa-release-negative-52/archive-gate.log) · [macOS 分发策略](../build/bin/qa-release-negative-52/macos-policy.log) · [Windows 证书表](../build/bin/qa-release-negative-52/windows-certificate-table.log) · [Apple 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
-- 当轮只读检查发现本机有效代码签名身份为 0，GitHub 签名环境、仓库级 Actions secrets 和 Release 均为 0。正式签名成品的正向验收仍需实际发行凭据。本轮 .52 的托管验收仍待确认。
+- 当轮只读检查发现本机有效代码签名身份为 0，GitHub 签名环境、仓库级 Actions secrets 和 Release 均为 0。正式签名成品的正向验收仍需实际发行凭据。同提交后续 GitHub 原生验收见下方。
 
 ## E11 SQLite 备份固定原目录（2026-11-27）
 
 - 回归复现旧版在 SQLite 快照写入期间改向备份目录后错误返回成功。现在先打开原备份目录，在独立受保护的临时目录生成 SQLite 快照，再复制并独占发布到已打开的目标目录。替换目录及已有文件保持原样，设置页提示检查数据目录或前往原目录查找已保存结果。快照复制阶段会占用一份额外临时空间。[原版回归](../build/bin/qa-backup-destination/before.log) · [BMad 记录](../_bmad-output/plan-e11-backup-destination.md)
 - macOS 实际 ACL 夹具验证暂存目录清除继承 ACL，临时目录被替换时通过原句柄清除快照并保留替代内容。Windows 源码复用受保护 DACL，测试程序完成 amd64 交叉编译。SQLite 备份恢复、Go 全量、vet、App/SQLite 竞态、前端生产构建和 Chromium 设置页 45 项通过。Windows 原生运行待验收，本次源码晚于 .52。[ACL 与目录专项](../build/bin/qa-backup-destination/backup-acl.log) · [设置页回归](../build/bin/qa-backup-destination/settings.log) · [备份对话框](../build/bin/qa-backup-destination/backup-dialog.png)
+
+## E13 .52 累计候选 GitHub 包验收（2026-11-27）
+
+- 独立测试分支 `codex/smoke-20261127-52` 从 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4` 构建 `v0.1.0-smoke.20261127.52`。第 1 次运行的 Windows 和 Apple Silicon 打包、Windows 下载复验、Intel Mac 归档启动四项均通过。[GitHub 打包](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788)
+- Windows 安装版和便携版均启动 WebView2，并通过 SQLite 完整性、成品回滚和正常退出。安装器通过占用时拒绝升级和解除占用后原位升级的检查。卸载保留了无关文件及其他开机启动项。已验证安装版 `jindi:` 分享协议唤回原窗口。托管环境走托盘的最小化回退，真实通知区交互仍需未提升权限的 Windows 会话验证。[Windows 原生记录](../build/bin/github-smoke-20261127.52/evidence/windows-native.log)
+- Apple Silicon 与 Intel Mac 从同一 ZIP 启动桌面窗口并通过正常退出、SQLite 完整性和回滚。下载的 Universal 主程序两切片最低系统版本均为 macOS 13.0。[Apple Silicon 日志](../build/bin/github-smoke-20261127.52/evidence/macos-arm64-native.log) · [Intel 日志](../build/bin/github-smoke-20261127.52/evidence/macos-intel-native.log) · [成品结构](../build/bin/github-smoke-20261127.52/evidence/package-layout.log)
+- 本机按 GitHub API 产物 ID 下载两份原始归档，核对原始归档摘要、随包版本与运行来源，再用项目脚本和 `shasum` 分别复验 Windows 7 项、macOS 6 项。安装器 22.54 MiB、Windows 便携版 32.33 MiB、macOS Universal ZIP 40.89 MiB。[校验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) · [Windows 清单](../build/bin/github-smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/github-smoke-20261127.52/macos/SHA256SUMS.txt)
+- 随包 Windows PowerShell 校验命令复验 7 项通过。对实际下载的 Windows 主程序与 macOS 两个架构分别运行 Go 二进制漏洞扫描，未报告已知漏洞。[PowerShell 记录](../build/bin/github-smoke-20261127.52/evidence/windows-readme-checks.log) · [Go 二进制扫描](../build/bin/github-smoke-20261127.52/evidence/binary-vulnerabilities.log)
+- 本次覆盖到 .52 同一源提交。后续 SQLite 备份目录修复保留本地验收。真实 ExFAT、正式签名及公证、正式在线更新、授权公网片源与红果官方接口联调仍待完成。
