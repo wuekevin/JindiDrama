@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"encoding/binary"
 	"io"
 	"net/http"
@@ -153,14 +152,10 @@ func canonicalCatalogHLSPayloadType(mediaType string) string {
 	}
 }
 
-// HLS byte ranges may start inside a transport packet or a box. Validate the
-// format at byte zero, and reject recognizable HTML even for interior ranges.
+// HLS byte ranges may start inside a transport packet or a box, so
+// format signatures can only be validated at byte zero.
 func validCatalogHLSPayload(prefix []byte, mediaType string, res *http.Response) bool {
 	if len(prefix) == 0 {
-		return false
-	}
-	textPrefix := bytes.TrimPrefix(bytes.TrimSpace(prefix), []byte("\xef\xbb\xbf"))
-	if http.DetectContentType(textPrefix) == "text/html; charset=utf-8" {
 		return false
 	}
 	partial := res.StatusCode == http.StatusPartialContent

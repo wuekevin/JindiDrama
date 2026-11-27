@@ -2,6 +2,7 @@ package app
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"io"
@@ -268,7 +269,7 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 
 	var body io.Reader = res.Body
-	if hlsRequest && req.Method == http.MethodGet {
+	if req.Method == http.MethodGet {
 		const prefixLimit = 512
 		count := int64(prefixLimit)
 		if res.ContentLength >= 0 {
@@ -276,8 +277,9 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 		}
 		buffered := bufio.NewReaderSize(body, prefixLimit)
 		prefix, readErr := buffered.Peek(int(count))
-		if (readErr != nil && (readErr != io.EOF || res.ContentLength >= 0)) ||
-			!validCatalogHLSPayload(prefix, mediaType, res) || lease.ctx.Err() != nil {
+		if len(prefix) == 0 || (readErr != nil && (readErr != io.EOF || res.ContentLength >= 0)) ||
+			catalogMediaLooksLikeMarkup(prefix) || (hlsRequest && !validCatalogHLSPayload(prefix, mediaType, res)) ||
+			lease.ctx.Err() != nil {
 			w.WriteHeader(http.StatusBadGateway)
 			return
 		}
@@ -308,6 +310,17 @@ func (r *catalogMediaRelay) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 			// A normal final chunk would make truncated media look complete.
 			panic(http.ErrAbortHandler)
 		}
+	}
+}
+
+// An upstream gateway can send an error document with the requested video MIME.
+func catalogMediaLooksLikeMarkup(prefix []byte) bool {
+	text := bytes.TrimPrefix(bytes.TrimSpace(prefix), []byte("\xef\xbb\xbf"))
+	switch http.DetectContentType(text) {
+	case "text/html; charset=utf-8", "text/xml; charset=utf-8":
+		return true
+	default:
+		return false
 	}
 }
 

@@ -302,6 +302,60 @@ func TestCatalogRelayRefusesRedirectsAndInvalidMediaResponses(t *testing.T) {
 	}
 }
 
+func TestCatalogRelayRefusesMarkupLabeledAsDirectMedia(t *testing.T) {
+	for _, tc := range []struct {
+		name, mediaType, body string
+		rangeHeader           string
+	}{
+		{"whole mp4 with HTML", "video/mp4", "\xef\xbb\xbf  <!DOCTYPE html><html>synthetic error</html>", ""},
+		{"chunked webm with XML", "video/webm", `<?xml version="1.0"?><Error>synthetic error</Error>`, ""},
+		{"mp4 range with HTML", "video/mp4", "<html>synthetic error</html>", "bytes=10-"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const goodBody = "synthetic alternate media bytes"
+			relay := testCatalogRelay(t, func(req *http.Request) (*http.Response, error) {
+				headers := http.Header{"Content-Type": {tc.mediaType}}
+				if req.URL.Path == "/good" {
+					return &http.Response{StatusCode: http.StatusOK, Header: headers,
+						ContentLength: int64(len(goodBody)), Body: io.NopCloser(strings.NewReader(goodBody))}, nil
+				}
+				if req.Header.Get("Range") != tc.rangeHeader {
+					t.Errorf("unexpected range %q", req.Header.Get("Range"))
+				}
+				status, size := http.StatusOK, int64(len(tc.body))
+				switch {
+				case tc.rangeHeader != "":
+					status = http.StatusPartialContent
+					headers.Set("Content-Range", fmt.Sprintf("bytes 10-%d/%d", size+9, size+10))
+				case tc.mediaType == "video/webm":
+					size = -1
+				}
+				return &http.Response{StatusCode: status, Header: headers,
+					ContentLength: size, Body: io.NopCloser(strings.NewReader(tc.body))}, nil
+			})
+			ticket, err := relay.issue(provider.PlaybackTicket{Sources: []provider.MediaSource{
+				{Src: "https://public.example.test/bad", Type: tc.mediaType},
+				{Src: "https://public.example.test/good", Type: tc.mediaType},
+			}}, time.Now().Add(time.Minute))
+			if err != nil {
+				t.Fatal(err)
+			}
+			headers := make(http.Header)
+			if tc.rangeHeader != "" {
+				headers.Set("Range", tc.rangeHeader)
+			}
+			res, body := hlsTestRequest(t, http.MethodGet, ticket.Sources[0].Src, headers)
+			if res.StatusCode != http.StatusBadGateway || body != "" || res.Header.Get("Content-Type") != "" {
+				t.Errorf("markup response escaped: %d %q", res.StatusCode, body)
+			}
+			res, body = hlsTestRequest(t, http.MethodGet, ticket.Sources[1].Src, nil)
+			if res.StatusCode != http.StatusOK || body != goodBody {
+				t.Errorf("alternate was not readable: %d %q", res.StatusCode, body)
+			}
+		})
+	}
+}
+
 func TestCatalogRelayRevokesAnInFlightUpstreamRequest(t *testing.T) {
 	started, canceled := make(chan struct{}), make(chan struct{})
 	relay := testCatalogRelay(t, func(req *http.Request) (*http.Response, error) {
