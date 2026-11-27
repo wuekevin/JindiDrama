@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, controlsTabKey } from './fixtures'
 import fs from 'node:fs'
 
 test.describe('01 首页推荐', () => {
@@ -109,7 +109,7 @@ test.describe('01 首页推荐', () => {
     await expect(settings).toHaveAttribute('aria-current', 'page')
   })
 
-  test('home topics reflow without clipping at 150% zoom', async ({ page }, testInfo) => {
+  test('home topics reflow without clipping at 150% zoom', async ({ page, browserName }, testInfo) => {
     const topics = page.getByRole('region', { name: '题材精选' })
     async function measure() {
       return topics.evaluate((section) => {
@@ -167,7 +167,7 @@ test.describe('01 首页推荐', () => {
     await expect(page.getByRole('heading', { name: /豪门.*搜索结果/ })).toBeVisible()
     await page.goBack()
     await luxury.focus()
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(controlsTabKey(browserName))
     await expect(topics.getByRole('button', { name: '更多', exact: true })).toBeFocused()
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: '按题材浏览' })).toBeVisible()
@@ -298,7 +298,7 @@ test('Tab keeps the home resume card visible at 220% in the minimum window', asy
   await page.locator('html').evaluate(element => element.style.setProperty('--user-zoom', '2.2'))
   const resume = page.getByTestId('resume-card').first()
   await expect(resume).toBeEnabled()
-  const tabKey = browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
+  const tabKey = controlsTabKey(browserName)
   for (let step = 0; step < 100; step++) {
     await page.keyboard.press(tabKey)
     if (await resume.evaluate(element => document.activeElement === element)) break

@@ -1,8 +1,4 @@
-import { test, expect, deferPanelResize } from './fixtures'
-
-function controlsTabKey(browserName: string) {
-  return browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
-}
+import { test, expect, controlsTabKey, deferPanelResize } from './fixtures'
 
 test('desktop Apple CMS settings test, preserve failed edits, and defer activation until restart', async ({ page, browserName }, testInfo) => {
   const source = 'https://catalog.example.test/api.php/provide/vod/'

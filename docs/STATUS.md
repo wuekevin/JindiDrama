@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.60`，打包源提交为 `011b4cbcf42f45d0d9d8b74c9b8bfc54ea963c76`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.61`，打包源提交为 `ee62daf4e95d3d385d310550655c2ec089a8d6a4`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .61 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.61/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.61/macos/SHA256SUMS.txt) |
 | .60 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.60/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.60/macos/SHA256SUMS.txt) |
 | .59 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.59/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.59/macos/SHA256SUMS.txt) |
 | .58 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.58/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.58/macos/SHA256SUMS.txt) |
@@ -1132,3 +1133,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 非 APFS 更新保存会在发布前回读暂存文件。在发布后从固定目录和同一个打开文件核对身份、大小及 SHA-256，并检查回读期间的写入事件。HFS+ 额外核对文件系统写入代数，覆盖秒级时间戳内的普通写入和可写共享映射。发布后校验失败时设置页移除旧的可安装状态和复制路径，并提示勿用目标文件。[原版复现](../build/bin/qa-macos-update-readback/before.log) · [HFS+ 回归](../build/bin/qa-macos-update-readback/hfs-regression.log) · [Apple 文件代数说明](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/getattrlist.2) · [HFS+ 驱动](https://github.com/apple-oss-distributions/hfs/blob/main/core/hfs_vnops.c#L1088)
 - 实际 HFS+ 测试卷成功保存本地 .60 归档，42,934,650 字节、SHA-256 与清单一致，隔离标记保留。提交期间、发布后及回读期间的内容变更均被拒绝报告为成功。覆盖目标替换、目录移动、发布前后取消和已有文件保留。HFS+ 卷已卸载。兼容卷的按名操作及验证完成后的文件访问仍由系统文件权限保护。[归档回读](../build/bin/qa-macos-update-readback/hfs-archive.log) · [卸载](../build/bin/qa-macos-update-readback/hfs-detach.log)
 - Go 全量、vet、App 与 update 竞态、Windows amd64 与 Intel macOS 测试交叉编译、前端类型检查、生产构建及 Vitest 125 项通过。Chromium 和 WebKit 各通过设置页更新专项。原版复现前的 Go 链接遇到磁盘空间不足，清理旧隔离测试副本后通过链接。新候选跨平台成品与正式公证仍待验收。[Go 全量](../build/bin/qa-macos-update-readback/go-test.log) · [Chromium](../build/bin/qa-macos-update-readback/settings-chromium.log) · [WebKit](../build/bin/qa-macos-update-readback/settings-webkit.log) · [BMad](../_bmad-output/plan-e13-macos-update-readback.md)
+
+## E13 .61 累计本地打包验收（2026-11-27）
+
+- Windows x64 和 macOS Universal 从发行源码 `ee62daf4e95d3d385d310550655c2ec089a8d6a4` 构建。这批包含 .60 后的首页续看重试、安装包校验和暂存清理、APFS 发布、兼容卷回读以及 Apple 公证诊断。三套主程序内嵌的 69 个前端路径和 SHA-256 与浏览器使用的生产前端一致。Windows 安装器包含预期的 7 个文件。主程序、WebView2 引导程序及四个 NSIS 资源与各自输入逐字节一致，卸载器为有效的 NSIS PE。macOS 双切片最低系统版本均为 13.0。[源码与工具链](../build/bin/qa-release-source-61/provenance.log) · [前端摘要](../build/bin/qa-release-source-61/frontend-provenance.log) · [内嵌文件](../build/bin/qa-release-source-61/embedded-frontend.log) · [成品结构](../build/bin/qa-release-source-61/package-static.log) · [NSIS 七项清单](../build/bin/qa-release-source-61/nsis-inventory.log)
+- 最终归档位置独立复算 Windows 7 项及 macOS 6 项，随包说明中的 PowerShell 与 sh 校验命令也通过。安装器 22.58 MiB、Windows 便携版 32.45 MiB、macOS Universal ZIP 40.97 MiB。Apple Silicon 从最终 ZIP 启动真实桌面窗口，正常退出、SQLite 完整性和活动 WAL 回滚通过。Windows EXE 未签名，macOS 测试包为临时签名，该 ZIP 进入正式验收模式时因无公证票据被拒绝。[归档读回](../build/bin/qa-release-source-61/archive-readback.log) · [Windows PowerShell 校验](../build/bin/qa-release-source-61/windows-readme-checksum.log) · [包大小](../build/bin/qa-release-source-61/package-sizes.log) · [原生运行](../build/bin/qa-release-source-61/macos-native.log) · [正式模式拒绝](../build/bin/qa-release-source-61/macos-release-negative-verified.log)
+- Chromium 全量复跑 404 项通过。WebKit 首页、设置与 Provider 专项 13 项通过。首次 Chromium 全量在写截图时磁盘空间不足，单项随后连续 4 次通过。磁盘波动中断第二次全量，随后通过独立内存卷执行。WebKit 首轮的控件焦点用例改用项目已有的 macOS 按键约定，修正仅在测试代码。Go 全量、vet、App/CMS/update 竞态、Vitest 125 项、Node 发行脚本 17 项、macOS 工具 18 项和 Windows PowerShell 夹具通过。三架构二进制与 npm 生产依赖扫描未报告已知漏洞。[Chromium 首轮](../build/bin/qa-release-source-61/chromium.log) · [Chromium 复跑](../build/bin/qa-release-source-61/chromium-final.log) · [WebKit](../build/bin/qa-release-source-61/webkit-final.log) · [Go](../build/bin/qa-release-source-61/go-test.log) · [二进制扫描](../build/bin/qa-release-source-61/binary-vulnerabilities.log)
+- 测试包和日志位于本机 JindiDrama 主工作区的 `build/bin/`。GitHub 只读核对显示最近完成的托管打包为 .52，仓库可见正式 Release、签名环境及仓库级 Actions secrets 均为 0。本机也未探测到签名身份。.61 的 Windows 及 Intel Mac 原生验收、正式签名与公证、线上签名版升级和授权公网联调仍待完成。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [BMad](../_bmad-output/plan-e13-local-candidate61-packages.md)

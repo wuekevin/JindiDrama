@@ -3,6 +3,10 @@ import { test as base, expect, type Locator, type Page } from '@playwright/test'
 export const test = base.extend({ page: async ({ page }, use) => { await page.addInitScript(() => { (window as any).__JD_MEDIA = 'sim' }); await use(page) } })
 export { expect }
 
+export function controlsTabKey(browserName: string) {
+  return browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
+}
+
 export function deferPanelResize(page: Page, panelId: string) {
   return page.addInitScript((id) => {
     const BrowserResizeObserver = window.ResizeObserver
