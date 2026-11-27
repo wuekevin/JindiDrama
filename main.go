@@ -5,8 +5,10 @@ import (
 	"embed"
 	"io/fs"
 	"os"
+	"os/signal"
 	goruntime "runtime"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -27,6 +29,9 @@ func main() {
 	if args := os.Args[1:]; len(args) > 0 && args[0] == rollbackcli.DesktopFlag {
 		os.Exit(rollbackcli.Run(args[1:], os.Stdout, os.Stderr))
 	}
+	// Wails installs its own signal handler only after the desktop host initializes.
+	startupSignals, stopStartupSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopStartupSignals()
 	var session atomic.Pointer[observability.Session]
 	var documentReady atomic.Bool
 	if goruntime.GOOS != "windows" {
@@ -58,6 +63,14 @@ func main() {
 		}
 	}()
 	startup, shutdown := app.Lifecycle(a)
+	beforeClose, quit := app.PrepareWindowClose(a)
+	const (
+		starting = iota
+		quitAfterStartup
+		started
+	)
+	var startupState atomic.Uint32
+	var desktopContext context.Context
 	err = wails.Run(&options.App{
 		Title:            "金帝短剧",
 		Width:            1448,
@@ -87,9 +100,23 @@ func main() {
 				}
 			})
 			startup(ctx)
+			desktopContext = ctx
+			quitRequested := startupState.Swap(started) == quitAfterStartup || startupSignals.Err() != nil
+			stopStartupSignals()
+			if quitRequested {
+				quit(ctx)
+			}
 		},
-		OnShutdown:         shutdown,
-		OnBeforeClose:      app.PrepareWindowClose(a),
+		OnShutdown: shutdown,
+		OnBeforeClose: func(context.Context) bool {
+			// Wails can receive a quit signal before constructing the native window.
+			// Defer that request until startup can safely replay the normal close hook.
+			if startupState.CompareAndSwap(starting, quitAfterStartup) || startupState.Load() == quitAfterStartup {
+				return true
+			}
+			// Startup publishes the complete Wails context before marking the state started.
+			return beforeClose(desktopContext)
+		},
 		Menu:               app.DesktopWindowMenu(a),
 		SingleInstanceLock: instance,
 		Bind:               []interface{}{a},

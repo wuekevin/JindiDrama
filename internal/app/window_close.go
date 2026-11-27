@@ -188,8 +188,8 @@ func parseWindowCloseResponse(id string, data []any) (pendingWindowWrites, bool)
 	return pending, true
 }
 
-// PrepareWindowClose gives the WebView a bounded opportunity to finish local writes.
-func PrepareWindowClose(a *App) func(context.Context) bool {
+// PrepareWindowClose wires closing the window and an explicit application quit.
+func PrepareWindowClose(a *App) (beforeClose func(context.Context) bool, quit func(context.Context)) {
 	const (
 		waiting uint32 = iota
 		confirming
@@ -277,7 +277,7 @@ func PrepareWindowClose(a *App) func(context.Context) bool {
 			flush()
 		}
 		return true
-	}
+	}, a.quitApplication
 }
 
 func confirmUnsavedQuit(ctx context.Context, pending pendingWindowWrites) bool {
