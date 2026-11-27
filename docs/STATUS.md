@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.53`，打包源提交为 `e506ab1d7667ad5dc875e2a3edb68501b90baa56`。最新 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.54`，打包源提交为 `b41f03e8136d6b6f850bec806a2e5ca66efb0762`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 文档就绪、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
 | .53 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.53/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.53/macos/SHA256SUMS.txt) |
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
 | .52 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项任务通过 | 两份 GitHub 原始归档摘要及内部清单共 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [本地复验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) |
@@ -906,3 +907,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 复现空文件、截断头及 4 MiB 伪装备份均被旧版复制到暂存区。新版在没有 WAL 或回滚日志时先从已打开句柄读取 100 字节 SQLite 头部。明显无效的文件在第一份暂存文件创建前被拒绝，源文件内容一致。[旧版复现](../build/bin/qa-backup-header/baseline.log) · [专项回归](../build/bin/qa-backup-header/targeted.log) · [SQLite 文件格式](https://www.sqlite.org/fileformat2.html#the_database_header)
 - 带 WAL 或回滚日志时完整保留文件组，由 SQLite 验证。当前和旧版备份、活动 WAL、回滚与无损清理用例均通过。Go 全量、vet、App 与 SQLite 竞态通过，Windows amd64 SQLite 测试交叉编译通过。源码改动晚于 .53，Windows 原生待验收。[Go 全量](../build/bin/qa-backup-header/go-test.log) · [竞态](../build/bin/qa-backup-header/go-race.log) · [Windows 编译](../build/bin/qa-backup-header/windows-compile.log) · [BMad 记录](../_bmad-output/plan-e11-backup-header-preflight.md)
 - 同源回滚 CLI 直接拒绝伪装文件，源摘要一致。上一轮由桌面设置页生成的有效备份仍可制作 v2，完整性及源摘要复核通过。[拒绝路径](../build/bin/qa-backup-header/cli-invalid.log) · [有效回滚](../build/bin/qa-backup-header/cli-valid.log)
+
+## E13 .54 累计本地候选验收（2026-11-27）
+
+- 从发行源码 `b41f03e8136d6b6f850bec806a2e5ca66efb0762` 为 Windows x64 和 macOS Universal 本地打包，纳入 .53 后的 Windows 私有备份权限、SQLite 句柄写入和输入文件头预检。与 .53 的前端及接口契约无差异，复用已验证的生产前端，打包前后文件 SHA-256 一致。当前源码的 Go 全量、vet、备份专项与竞态证据见前述修复记录。[构建](../build/bin/qa-release-source-54/package-build.log) · [前端摘要](../build/bin/qa-release-source-54/verified-frontend.sha256)
+- Windows 安装器 22.56 MiB、便携版 32.41 MiB、macOS Universal ZIP 40.93 MiB。安装器内主程序与便携版逐字节一致，WebView2 引导程序与依赖一致。macOS 两切片最低系统版本为 13.0，临时签名验证通过。随包命令、项目校验器及归档后的独立 SHA-256 检查共通过 13 项。[包结构](../build/bin/qa-release-source-54/package-static.log) · [归档校验](../build/bin/qa-release-source-54/archived-checks.log)
+- Apple Silicon 从 ZIP 内相同的未插桩程序验证实际 Wails 文档就绪、正常退出及本地 SQLite 完整性。系统锁屏，当前成品的可见窗口与系统文件选择器交互待解锁验收。归档程序从实际桌面生成的备份生成 SQLite v2 副本，保留只在 WAL 提交的断点，源摘要一致，成品未继承对照 ACL。伪装备份被拒绝且未生成回滚输出。[原生运行](../build/bin/qa-release-source-54/macos-native.log) · [归档回滚](../build/bin/qa-release-source-54/archive-rollback.log)
+- Go 程序源码、Windows 主程序、两套 macOS 切片及 npm 生产依赖扫描未报告已知漏洞。Windows 和 Intel Mac 当前原生验收、正式签名与公证、在线更新和授权公网接口联调待完成。本轮为本地累计验收。[成品扫描](../build/bin/qa-release-source-54/binary-vulnerabilities.log) · [Go 扫描](../build/bin/qa-release-source-54/go-vulnerabilities.log) · [npm 扫描](../build/bin/qa-release-source-54/npm-audit.json) · [BMad 记录](../_bmad-output/plan-e13-local-candidate54-packages.md)
