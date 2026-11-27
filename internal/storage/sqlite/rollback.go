@@ -54,8 +54,14 @@ func PrepareRollbackCopy(source, output string, target int) error {
 		return err
 	}
 	defer os.RemoveAll(dir)
-	staged := filepath.Join(dir, "rollback.db")
-	if err := snapshotDatabase(source, staged); err != nil {
+	const stagedName = "rollback.db"
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	staged := filepath.Join(dir, stagedName)
+	if err := snapshotDatabase(source, root, stagedName); err != nil {
 		return fmt.Errorf("读取源数据库快照失败: %w", err)
 	}
 	if err := downgradeSnapshot(staged, target); err != nil {
@@ -72,7 +78,7 @@ func PrepareRollbackCopy(source, output string, target int) error {
 	return nil
 }
 
-func snapshotDatabase(source, staged string) error {
+func snapshotDatabase(source string, root *os.Root, staged string) error {
 	files, err := rollbackSourceFiles(source)
 	if err != nil {
 		return err
@@ -80,16 +86,16 @@ func snapshotDatabase(source, staged string) error {
 	// Opening even a read-only WAL database can create sidecars. Let SQLite
 	// open and, if necessary, recover a private copy of the durable file set.
 	for suffix := range files {
-		if err := copyDatabaseFile(source+suffix, staged+suffix); err != nil {
+		if err := copyDatabaseFile(source+suffix, root, staged+suffix); err != nil {
 			return err
 		}
 	}
 	for suffix := range files {
-		original, err := rollbackDigest(source + suffix)
+		original, err := rollbackDigest(os.Open(source + suffix))
 		if err != nil {
 			return err
 		}
-		copied, err := rollbackDigest(staged + suffix)
+		copied, err := rollbackDigest(root.Open(staged + suffix))
 		if err != nil {
 			return err
 		}
@@ -107,10 +113,10 @@ func snapshotDatabase(source, staged string) error {
 	return nil
 }
 
-func rollbackDigest(path string) (digest [sha256.Size]byte, err error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return digest, err
+func rollbackDigest(file *os.File, openErr error) ([sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+	if openErr != nil {
+		return digest, openErr
 	}
 	defer file.Close()
 	hash := sha256.New()

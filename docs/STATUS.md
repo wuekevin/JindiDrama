@@ -833,3 +833,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 随包 Windows PowerShell 校验命令复验 7 项通过。对实际下载的 Windows 主程序与 macOS 两个架构分别运行 Go 二进制漏洞扫描，未报告已知漏洞。[PowerShell 记录](../build/bin/github-smoke-20261127.52/evidence/windows-readme-checks.log) · [Go 二进制扫描](../build/bin/github-smoke-20261127.52/evidence/binary-vulnerabilities.log)
 - 推送同一提交触发的 Windows 与 macOS CI 均通过。每个平台完成 394 项 Playwright、122 项 Vitest、Go vet、Go 测试和桌面构建。[GitHub CI](https://github.com/wuekevin/JindiDrama/actions/runs/45955369636) · [Windows 日志](../build/bin/github-smoke-20261127.52/evidence/windows-ci.log) · [macOS 日志](../build/bin/github-smoke-20261127.52/evidence/macos-ci.log)
 - 本次覆盖到 .52 同一源提交。后续 SQLite 备份目录修复保留本地验收。真实 ExFAT、正式签名及公证、正式在线更新、授权公网片源与红果官方接口联调仍待完成。
+
+## E11 隔离 SQLite 备份恢复读取（2026-11-27）
+
+- 原版回归确认，恢复已关闭的 WAL 数据库会在源目录留下 `-wal` 和 `-shm`。现在先复制数据库及持久辅助文件，再由 SQLite 读取受保护的临时副本。文件复制和清理使用目录句柄。恢复需要额外的临时磁盘空间。[原版失败证据](../build/bin/qa-library-restore-input/before.log)
+- 当前及旧版备份、活动 WAL 已提交记录、备份损坏时保留当前收藏和历史、拒绝选中正在使用的数据库均通过回归。macOS 目录替换夹具确认替代目录未收到副本，原暂存目录完成清理。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 交叉编译通过。Windows 原生验收待运行，改动晚于 .52 打包。[专项](../build/bin/qa-library-restore-input/targeted.log) · [竞态](../build/bin/qa-library-restore-input/go-race.log) · [Windows 交叉编译](../build/bin/qa-library-restore-input/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e11-library-restore-input.md)

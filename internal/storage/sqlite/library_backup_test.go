@@ -37,7 +37,7 @@ func TestReadLibraryBackupAndRestoreMissing(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot, err := ReadLibraryBackup(file)
+			snapshot, err := readTestLibraryBackup(t, file)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,7 +169,7 @@ func TestReadLibraryBackupRejectsInvalidFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, path := range []string{root, plain, future} {
-		if result, err := ReadLibraryBackup(path); err == nil {
+		if result, err := readTestLibraryBackup(t, path); err == nil {
 			t.Errorf("accepted invalid backup: %+v", result)
 		}
 	}
@@ -214,7 +214,7 @@ func TestLicensedHistoryContextSurvivesBackupAndLegacyMigration(t *testing.T) {
 		path  string
 		count int
 	}{{backup, 3}, {legacy, 0}} {
-		snapshot, err := ReadLibraryBackup(fixture.path)
+		snapshot, err := readTestLibraryBackup(t, fixture.path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -254,7 +254,17 @@ func TestLicensedHistoryContextSurvivesBackupAndLegacyMigration(t *testing.T) {
 	if err := store.Backup(invalid); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ReadLibraryBackup(invalid); err == nil {
+	if _, err := readTestLibraryBackup(t, invalid); err == nil {
 		t.Fatal("accepted a count that cannot be represented safely in the desktop bridge")
 	}
+}
+
+func readTestLibraryBackup(t *testing.T, source string) (*LibraryState, error) {
+	t.Helper()
+	root, err := os.OpenRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	return ReadLibraryBackup(source, root, "staged.db")
 }

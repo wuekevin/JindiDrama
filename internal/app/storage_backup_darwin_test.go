@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"jindi-drama/internal/storage/sqlite"
 )
 
 func TestBackupScratchDoesNotInheritAccessACL(t *testing.T) {
@@ -76,5 +78,43 @@ func TestBackupScratchCleanupLeavesReplacementFilesAlone(t *testing.T) {
 	}
 	if files, err := os.ReadDir(moved); err != nil || len(files) > 0 {
 		t.Fatalf("original scratch still contains data: %v, %v", files, err)
+	}
+}
+
+func TestRestoreBackupScratchReplacementReceivesNoCopies(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	a := New()
+	if err := a.openStore(":memory:"); err != nil {
+		t.Fatal(err)
+	}
+	defer a.close()
+	source := filepath.Join(t.TempDir(), "source.db")
+	if err := a.store.Backup(source); err != nil {
+		t.Fatal(err)
+	}
+	var moved, replacement string
+	err := withPrivateDatabaseSnapshot(func(root *os.Root, file string) error {
+		replacement = root.Name()
+		moved = replacement + "-moved"
+		if err := os.Rename(replacement, moved); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Mkdir(replacement, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(replacement, "unrelated"), []byte("keep"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := sqlite.ReadLibraryBackup(source, root, file)
+		return err
+	})
+	if err == nil {
+		t.Fatal("restore read accepted a replaced scratch directory")
+	}
+	if files, err := os.ReadDir(moved); err != nil || len(files) != 0 {
+		t.Fatalf("original scratch still contains data: %v, %v", files, err)
+	}
+	if files, err := os.ReadDir(replacement); err != nil || len(files) != 1 || files[0].Name() != "unrelated" {
+		t.Fatalf("replacement received temporary data: %v, %v", files, err)
 	}
 }

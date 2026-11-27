@@ -40,7 +40,21 @@ func (a *App) restoreSelectedLibraryBackup(pick func() (string, error)) (*sqlite
 	if path == "" {
 		return nil, nil
 	}
-	state, err := sqlite.ReadLibraryBackup(path)
+	// Closing a raw descriptor for the live database can drop this process's
+	// SQLite file locks on Unix. Refuse the live file and any aliases to it.
+	if a.store.Path != ":memory:" {
+		live, liveErr := os.Stat(a.store.Path)
+		selected, selectedErr := os.Stat(path)
+		if liveErr == nil && selectedErr == nil && os.SameFile(live, selected) {
+			return nil, errors.New("请选择备份文件，当前数据库正在使用")
+		}
+	}
+	var state *sqlite.LibraryState
+	err = withPrivateDatabaseSnapshot(func(root *os.Root, filename string) error {
+		var err error
+		state, err = sqlite.ReadLibraryBackup(path, root, filename)
+		return err
+	})
 	if err != nil {
 		return nil, errors.New("无法读取所选备份，请选择金帝短剧生成的数据库备份")
 	}

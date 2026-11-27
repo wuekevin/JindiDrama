@@ -27,12 +27,18 @@ func verifyDesktopDatabase(path string, want int) error {
 		return err
 	}
 	defer os.RemoveAll(snapshot)
-	copyPath := filepath.Join(snapshot, "jindi.db")
-	if err := copyDatabaseFile(path, copyPath); err != nil {
+	root, err := os.OpenRoot(snapshot)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	const copyName = "jindi.db"
+	copyPath := filepath.Join(snapshot, copyName)
+	if err := copyDatabaseFile(path, root, copyName); err != nil {
 		return err
 	}
 	for _, suffix := range []string{"-wal", "-journal"} {
-		if err := copyDatabaseFile(path+suffix, copyPath+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := copyDatabaseFile(path+suffix, root, copyName+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}
 	}
@@ -121,7 +127,7 @@ WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY name`)
 	return nil
 }
 
-func copyDatabaseFile(source, target string) error {
+func copyDatabaseFile(source string, root *os.Root, name string) error {
 	from, err := os.Open(source)
 	if err != nil {
 		return err
@@ -134,7 +140,7 @@ func copyDatabaseFile(source, target string) error {
 	if !info.Mode().IsRegular() {
 		return errors.New("desktop database inputs must be regular files")
 	}
-	to, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	to, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package sqlite
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -80,17 +81,29 @@ func (s *Store) RestoreMissingLibrary(backup *LibraryState) (*LibraryRestore, er
 	}, nil
 }
 
-// ReadLibraryBackup reads user library rows from an application backup without
-// migrating it or copying settings and other tables into the live database.
-func ReadLibraryBackup(path string) (*LibraryState, error) {
-	info, err := os.Stat(path)
+// ReadLibraryBackup reads user library rows from a private copy. The caller
+// supplies an unused name in a private root and removes the copy and its sidecars.
+func ReadLibraryBackup(path string, root *os.Root, staged string) (*LibraryState, error) {
+	path, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() {
-		return nil, errors.New("备份必须是普通文件")
+	path, err = filepath.EvalSymlinks(path)
+	if err != nil {
+		return nil, err
 	}
-	db, err := openDatabase(path, "ro")
+	if err := snapshotDatabase(path, root, staged); err != nil {
+		return nil, err
+	}
+	original, err := root.Stat(".")
+	if err != nil {
+		return nil, err
+	}
+	current, err := os.Stat(root.Name())
+	if err != nil || !os.SameFile(original, current) {
+		return nil, errors.New("备份暂存目录已更换")
+	}
+	db, err := openDatabase(filepath.Join(root.Name(), staged), "ro")
 	if err != nil {
 		return nil, err
 	}

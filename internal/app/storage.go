@@ -203,7 +203,36 @@ func publishDatabaseBackup(dest string, snapshot func(string) error) error {
 	return err
 }
 
-func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) (result error) {
+func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) error {
+	return withPrivateDatabaseSnapshot(func(root *os.Root, filename string) error {
+		if err := snapshot(filepath.Join(root.Name(), filename)); err != nil {
+			return err
+		}
+		info, err := root.Lstat(filename)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("备份快照必须是普通文件")
+		}
+		source, err := root.Open(filename)
+		if err != nil {
+			return err
+		}
+		defer source.Close()
+		opened, err := source.Stat()
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(info, opened) {
+			return errors.New("备份快照已更换")
+		}
+		_, err = io.Copy(output, source)
+		return err
+	})
+}
+
+func withPrivateDatabaseSnapshot(use func(*os.Root, string) error) (result error) {
 	stage, err := createOutputStage(os.TempDir(), ".jindi-backup-snapshot-", privateSnapshotStage)
 	if err != nil {
 		return err
@@ -230,28 +259,16 @@ func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) (result
 			result = errors.Join(result, root.RemoveAll(name))
 		}
 	}()
-	if err := snapshot(filepath.Join(scratch, filename)); err != nil {
+	if err := use(root, filename); err != nil {
 		return err
 	}
-	info, err := root.Lstat(filename)
+	original, err := root.Stat(".")
 	if err != nil {
 		return err
 	}
-	if !info.Mode().IsRegular() {
-		return errors.New("备份快照必须是普通文件")
+	current, err := os.Stat(scratch)
+	if err != nil || !os.SameFile(original, current) {
+		return errors.New("备份暂存目录已更换")
 	}
-	source, err := root.Open(filename)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-	opened, err := source.Stat()
-	if err != nil {
-		return err
-	}
-	if !os.SameFile(info, opened) {
-		return errors.New("备份快照已更换")
-	}
-	_, err = io.Copy(output, source)
-	return err
+	return nil
 }
