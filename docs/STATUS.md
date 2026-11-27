@@ -806,3 +806,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Windows x64 安装器 22.54 MiB、便携程序 32.36 MiB。NSIS 内嵌主程序和 WebView2 引导程序与输入逐字节一致。macOS Universal ZIP 40.89 MiB，含 arm64 和 x86_64，两切片最低系统版本均为 macOS 13.0。两平台清单共 13 项通过项目工具、随包指令和归档后独立复验。[Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) · [归档复验](../build/bin/smoke-20261127.52/evidence/archived-checks.log)
 - Apple Silicon 从最终 ZIP 原生启动并正常退出，SQLite 完整性和成品回滚通过。Go 全量、vet 和 App/CMS/更新/开机启动/诊断竞态通过。Go 生产源码、三套二进制和 npm 生产依赖扫描未报告已知漏洞。Wails 重新格式化配置，JSON 内容复核一致后恢复隔离检出原文件。[原生证据](../build/bin/smoke-20261127.52/evidence/macos-native.log) · [二进制扫描](../build/bin/smoke-20261127.52/evidence/binary-vulnerabilities.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate52-packages.md)
 - .52 是本地 smoke，Windows 包未签名，macOS 包为隔离标识和临时签名。当前托管验收仍为 .51。本批 Windows 原生安装与托盘、Intel 启动、真实 ExFAT、正式签名和公证、正式在线更新以及授权公网片源仍待验收。
+
+## E12 macOS 锁定钥匙串验收（2026-11-27）
+
+- 在 Apple Silicon macOS 26.6.2 上，以 .52 相同的凭据库源码验收。隔离检出仅为查询指定临时文件型钥匙串，继续执行生产读写删除和进程交互保护。真实锁定后，读取返回存储不可用且不返回凭据，替换和新增也返回存储不可用。系统允许删除已锁定的合成条目，解锁后核实已删除且失败的新增没有留下条目。各操作结束后交互状态恢复，临时钥匙串已删除，默认钥匙串和搜索列表与验收前一致。[原生记录](../build/bin/qa-macos-locked-keychain/locked-keychain.log) · [配置复核](../build/bin/qa-macos-locked-keychain/keychain-state.log) · [BMad 记录](../_bmad-output/plan-e12-locked-keychain-acceptance.md)
+- 恢复原始源码后，以 macOS 13.0 部署目标运行凭据库竞态测试，无 CGO 退回及 Windows x64 凭据测试交叉编译通过。macOS 13 实机和正式签名应用跨版本访问仍待验证。红果正式账号仍需授权和接口联调。[竞态日志](../build/bin/qa-macos-locked-keychain/original-race.log) · [Apple 钥匙串实现](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
