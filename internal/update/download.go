@@ -85,6 +85,9 @@ func (a *Asset) Download(ctx context.Context, target io.Writer) error {
 }
 
 func (a *Asset) download(ctx context.Context, target io.Writer, client *http.Client, endpoint string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -94,7 +97,7 @@ func (a *Asset) download(ctx context.Context, target io.Writer, client *http.Cli
 	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(err, ctxErr) {
 			return ctxErr
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -111,12 +114,13 @@ func (a *Asset) download(ctx context.Context, target io.Writer, client *http.Cli
 	}
 	hash := sha256.New()
 	n, err := io.Copy(io.MultiWriter(assetStageWriter{target}, hash), io.LimitReader(resp.Body, a.size+1))
-	if ctxErr := ctx.Err(); ctxErr != nil {
+	if errors.Is(err, errWriteUpdateStage) {
+		return errWriteUpdateStage
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil && (err == nil || errors.Is(err, ctxErr)) {
 		return ctxErr
 	}
 	switch {
-	case errors.Is(err, errWriteUpdateStage):
-		return errWriteUpdateStage
 	case errors.Is(err, context.DeadlineExceeded):
 		return errAssetDownloadTimeout
 	case err != nil || n != a.size:

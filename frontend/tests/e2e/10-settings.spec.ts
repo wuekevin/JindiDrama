@@ -382,6 +382,7 @@ test('downloads a verified update through the desktop bridge and shows its path 
   let checks = 0
   let attempts = 0
   let cancelled = 0
+  const cleanupWarning = '安装包已校验并保存，但暂存目录清理失败，请检查所选目录'
   const writeFailure = '无法写入更新文件，请检查保存位置和可用空间'
   const savedPath = '/native/downloads/' + '带空格 的更新目录/'.repeat(12) + '金帝短剧.zip'
   let firstComplete!: (saved: string) => void
@@ -394,18 +395,18 @@ test('downloads a verified update through the desktop bridge and shows its path 
     return { current: 'v0.1.0', latest: next ? 'v1.2.4' : 'v1.2.3', channel: checks === 5 ? 'preview' : 'stable', hasUpdate: true, url: next ? nextURL : url, downloadName: 'JindiDrama-macos-universal.zip' }
   })
   await page.exposeFunction('downloadUpdateFixture', (release: string) => {
-    if (release === nextURL) return nextPath
+    if (release === nextURL) return { path: nextPath, warning: cleanupWarning }
     if (release !== url) throw new Error('wrong candidate')
     attempts++
-    if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve })
+    if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve }).then(path => ({ path }))
     if (attempts === 2) throw new Error(writeFailure)
-    return savedPath
+    return { path: savedPath }
   })
   await page.exposeFunction('cancelUpdateFixture', () => { cancelled++; firstComplete('') })
   await page.addInitScript(() => {
     const desktop = window as unknown as {
       checkUpdateFixture(): Promise<unknown>
-      downloadUpdateFixture(url: string): Promise<string>
+      downloadUpdateFixture(url: string): Promise<{ path: string; warning?: string }>
       cancelUpdateFixture(): Promise<void>
       copyUpdatePathFixture(value: string): Promise<boolean>
     }
@@ -419,7 +420,8 @@ test('downloads a verified update through the desktop bridge and shows its path 
         UpdateChannel: async () => 'stable',
         SetUpdateChannel: async () => {},
         CheckUpdate: desktop.checkUpdateFixture,
-        DownloadUpdateFile: desktop.downloadUpdateFixture,
+        DownloadUpdateWithStatus: desktop.downloadUpdateFixture,
+        DownloadUpdateFile: async () => "/native/downloads/legacy.zip",
         CancelUpdateDownload: desktop.cancelUpdateFixture,
       } } },
     })
@@ -486,13 +488,17 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await download.click()
   await expect(saved.getByRole('status')).toContainText('v1.2.4')
   await expect(saved.locator('code')).toHaveText(nextPath)
+  await expect(page.getByTestId('toast').last()).toContainText(cleanupWarning)
   await expect(copy).toBeInViewport()
+  await copy.click()
+  await expect.poll(() => copied).toBe(nextPath)
   const updateChannel = page.getByTestId('update-channel')
   await check.click()
   await expect(updateChannel).toHaveValue('preview')
   await expect(saved).toHaveCount(0)
+  await page.evaluate(() => { delete (window as unknown as { go: { app: { App: { DownloadUpdateWithStatus?: unknown } } } }).go.app.App.DownloadUpdateWithStatus })
   await download.click()
-  await expect(saved.locator('code')).toHaveText(nextPath)
+  await expect(saved.locator('code')).toHaveText('/native/downloads/legacy.zip')
   await updateChannel.selectOption('stable')
   await expect(saved).toHaveCount(0)
 })

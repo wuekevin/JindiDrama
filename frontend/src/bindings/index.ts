@@ -137,6 +137,7 @@ interface GoApp {
   AppVersion(): Promise<string>; CheckUpdate(): Promise<UpdateResult>; OpenReleasePage(url: string): Promise<void>
   DownloadUpdate?(releaseURL: string): Promise<boolean>
   DownloadUpdateFile?(releaseURL: string): Promise<string>
+  DownloadUpdateWithStatus?(releaseURL: string): Promise<UpdateDownloadResult>
   CancelUpdateDownload?(): Promise<void>
   UpdateChannel(): Promise<UpdateChannel>; SetUpdateChannel(channel: UpdateChannel): Promise<void>
   LogEvent(level: string, component: string, msg: string): Promise<void>; DiagnosticsTail(n: number): Promise<string[]>
@@ -1057,13 +1058,14 @@ export const appVersion = () => api()?.AppVersion() ?? Promise.resolve('v0.1.0')
 /** 检查更新：仅桌面端可用（浏览器预览返回 null）。 */
 export const checkUpdate = (): Promise<UpdateResult | null> => api()?.CheckUpdate() ?? Promise.resolve(null)
 export const openReleasePage = (url: string) => api()?.OpenReleasePage(url) ?? Promise.resolve()
+export interface UpdateDownloadResult { path: string; warning?: string }
 export function supportsUpdateDownload() {
   const bridge = api()
-  return !!((bridge?.DownloadUpdateFile || bridge?.DownloadUpdate) && bridge.CancelUpdateDownload)
+  return !!((bridge?.DownloadUpdateWithStatus || bridge?.DownloadUpdateFile || bridge?.DownloadUpdate) && bridge.CancelUpdateDownload)
 }
 export function downloadUpdate(url: string) {
   const bridge = api()
-  return bridge?.DownloadUpdateFile?.(url) ?? bridge?.DownloadUpdate?.(url) ?? Promise.resolve(false)
+  return bridge?.DownloadUpdateWithStatus?.(url) ?? bridge?.DownloadUpdateFile?.(url) ?? bridge?.DownloadUpdate?.(url) ?? Promise.resolve(false)
 }
 export const cancelUpdateDownload = () => api()?.CancelUpdateDownload?.() ?? Promise.resolve()
 

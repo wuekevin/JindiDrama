@@ -1114,3 +1114,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - .60 macOS 归档的 6 项 SHA-256 全部匹配，解包后的原始主程序通过字节核对和临时签名验证。在 Apple Silicon 使用隔离的 v10 资料目录启动，核对运行版本及架构。从原生设置打开系统文件选择器，取消及选择损坏备份均未改动现有收藏、历史、主题、启动页和搜索词。[归档清单](../build/bin/qa-restore-v6-60/archive.log) · [原程序](../build/bin/qa-restore-v6-60/identity.log) · [错误提示](../build/bin/qa-restore-v6-60/invalid-result.ax)
 - 选择留存的 v6 数据库后只恢复一项收藏和一条历史。恢复 7456 ms 旧记录并保留 14321 ms 和 9123 ms 的现有断点，收藏顺序、主题、启动页及搜索保持。重复恢复没有新增数据。重启显示三项收藏和三条历史，两个会话正常退出，SQLite 完整性及源备份 SHA-256 通过，源目录没有新增辅助文件。[恢复界面](../build/bin/qa-restore-v6-60/v6-result.ax) · [完整往返](../build/bin/qa-restore-v6-60/roundtrip.log) · [数据读回](../build/bin/qa-restore-v6-60/sqlite-readback.log)
 - App 与 SQLite 的恢复专项 Go 测试通过，恢复相关源码与 .60 打包提交匹配。本轮证据在本机 JindiDrama 主工作区的 `build/bin/`，仅覆盖 Apple Silicon 本地成品。[Go 回归](../build/bin/qa-restore-v6-60/go-restore.log) · [BMad](../_bmad-output/plan-e13-macos-v6-restore-60.md)
+
+## E13 更新下载暂存清理反馈（2026-11-27）
+
+- 下载取消且清理成功时保持静默。清理失败会显示检查目录的提示，校验或写入失败时保留原错误，底层暂存路径不会出现在新提示中。已校验落盘的安装包仍显示保存路径并支持复制，清理提示独立展示。若发布时目录移动，提示用户在原目录查找。
+- macOS 实际文件夹回归覆盖取消、校验失败、并发取消、成功落盘和发布后同名文件保留。Go 全量、vet、App 与 update 竞态和 Windows amd64 交叉编译通过，空间不足的全量测试在清理已归档的临时副本后重新通过。前端类型检查、生产构建、125 项 Vitest 和 Chromium、WebKit 设置页专项各 2 项通过。[Go 专项](../build/bin/qa-update-stage-cleanup/targeted.log) · [Chromium](../build/bin/qa-update-stage-cleanup/settings-chromium.log) · [WebKit](../build/bin/qa-update-stage-cleanup/settings-webkit.log) · [Windows 交叉编译](../build/bin/qa-update-stage-cleanup/windows-crosscompile.log)
+- Windows 原生及这一变更的成品验收留待累计批次。本地源码晚于 .60。macOS 发布前的暂存文件身份核查仍在 BMad 清单中。[BMad 记录](../_bmad-output/plan-e13-update-stage-cleanup.md) · [待处理记录](../_bmad-output/deferred-work.md)

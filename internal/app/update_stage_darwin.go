@@ -41,7 +41,8 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	dirFD, err := unix.Openat(destFD, dirName, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
 	if err != nil {
 		_ = unix.Close(destFD)
-		return nil, err
+		// Without an open handle, the entry may have been replaced.
+		return nil, outputStageSetupError(kind, err, err)
 	}
 	closeStageDirectory := func() error {
 		// Unlink only the original, empty directory entry. A renamed stage
@@ -65,8 +66,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	var info unix.Stat_t
 	if err := unix.Fstat(dirFD, &info); err != nil {
-		closeDirectory()
-		return nil, err
+		return nil, outputStageSetupError(kind, err, closeDirectory())
 	}
 	if info.Uid != uint32(os.Geteuid()) || info.Mode&0077 != 0 {
 		if kind == mediaOutputStage {
@@ -82,12 +82,10 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 				copyDirect: copyDirect,
 			}, nil
 		}
-		closeDirectory()
-		return nil, errors.New("update staging directory is not private")
+		return nil, outputStageSetupError(kind, errors.New("update staging directory is not private"), closeDirectory())
 	}
 	if err := fileprivacy.ClearDirectoryACL(dirFD); err != nil {
-		closeDirectory()
-		return nil, err
+		return nil, outputStageSetupError(kind, err, closeDirectory())
 	}
 	const name = "package"
 	flags := unix.O_WRONLY
@@ -96,16 +94,19 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	fd, err := unix.Openat(dirFD, name, flags|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
-		closeDirectory()
-		return nil, err
+		return nil, outputStageSetupError(kind, err, closeDirectory())
 	}
 	file := os.NewFile(uintptr(fd), filepath.Join(parent, dirName, name))
 	discarded := false
+	renamed := false
 	discard := func() error {
 		if discarded {
 			return nil
 		}
 		discarded = true
+		if renamed {
+			return file.Close()
+		}
 		removeErr := unix.Unlinkat(dirFD, name, 0)
 		if errors.Is(removeErr, unix.ENOENT) {
 			removeErr = nil // Successful publication already moved the staging file.
@@ -118,8 +119,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if kind == updateOutputStage {
 		quarantine := fmt.Appendf(nil, "0081;%x;JindiDrama;", time.Now().Unix())
 		if err := unix.Fsetxattr(fd, "com.apple.quarantine", quarantine, 0); err != nil {
-			cleanup()
-			return nil, errUpdateOrigin
+			return nil, outputStageSetupError(kind, errUpdateOrigin, cleanup())
 		}
 	}
 	return &stagedOutput{
@@ -128,6 +128,10 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 			return publishInUpdateDestination(destinationMatches, func() error {
 				destName := filepath.Base(target)
 				err := unix.RenameatxNp(dirFD, name, destFD, destName, unix.RENAME_EXCL)
+				if err == nil {
+					renamed = true
+					return nil
+				}
 				if errors.Is(err, unix.ENOTSUP) {
 					linkErr := unix.Linkat(dirFD, name, destFD, destName, 0)
 					if linkErr != nil && kind == mediaOutputStage {

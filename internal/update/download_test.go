@@ -106,15 +106,24 @@ func TestUpdateDownloadWriteFailure(t *testing.T) {
 	defer server.Close()
 	asset := Asset{size: 3}
 	for _, tc := range []struct {
-		name string
-		err  error
+		name   string
+		err    error
+		cancel bool
 	}{
-		{"write error", errors.New("write /private/staging: disk full")},
-		{"short write", nil},
+		{"write error", errors.New("write /private/staging: disk full"), false},
+		{"short write", nil, false},
+		{"write error with concurrent cancellation", errors.New("write /private/staging: disk full"), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			writer := downloadTestWriter(func([]byte) (int, error) { return 1, tc.err })
-			err := asset.download(context.Background(), writer, server.Client(), server.URL)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			writer := downloadTestWriter(func([]byte) (int, error) {
+				if tc.cancel {
+					cancel()
+				}
+				return 1, tc.err
+			})
+			err := asset.download(ctx, writer, server.Client(), server.URL)
 			if err == nil || err.Error() != "无法写入更新文件，请检查保存位置和可用空间" {
 				t.Fatalf("want safe write failure, got %v", err)
 			}
@@ -149,6 +158,16 @@ func TestUpdateDownloadNetworkFailure(t *testing.T) {
 			cancel()
 			if err := asset.download(ctx, io.Discard, client, "https://test.invalid/asset"); !errors.Is(err, context.Canceled) {
 				t.Fatalf("want cancellation, got %v", err)
+			}
+
+			concurrent, cancelConcurrent := context.WithCancel(context.Background())
+			defer cancelConcurrent()
+			client.Transport = downloadTestTransport(func(*http.Request) (*http.Response, error) {
+				cancelConcurrent()
+				return nil, tc.err
+			})
+			if err := asset.download(concurrent, io.Discard, client, "https://test.invalid/asset"); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q with cancellation, got %v", tc.want, err)
 			}
 		})
 	}

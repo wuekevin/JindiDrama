@@ -88,3 +88,39 @@ func TestSaveUpdateRejectsMovedDestination(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateCleanupPreservesFileCreatedAfterPublication(t *testing.T) {
+	parent := t.TempDir()
+	stage, err := createUpdateStage(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cleaned := false
+	defer func() {
+		if !cleaned {
+			_ = stage.cleanup()
+		}
+	}()
+	path := filepath.Join(parent, "update.zip")
+	originalName := stage.file.Name()
+	if _, err := io.WriteString(stage.file, "verified"); err != nil {
+		t.Fatal(err)
+	}
+	if err := stage.publish(path); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(originalName, []byte("unrelated"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	err = stage.cleanup()
+	cleaned = true
+	if !errors.Is(err, unix.ENOTEMPTY) {
+		t.Errorf("cleanup of non-empty staging directory: %v", err)
+	}
+	if payload, err := os.ReadFile(originalName); err != nil || string(payload) != "unrelated" {
+		t.Errorf("unrelated file changed: %q, %v", payload, err)
+	}
+	if payload, err := os.ReadFile(path); err != nil || string(payload) != "verified" {
+		t.Errorf("published package changed: %q, %v", payload, err)
+	}
+}

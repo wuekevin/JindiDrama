@@ -66,3 +66,79 @@ func TestUpdateReportsDestinationChangedDuringPublication(t *testing.T) {
 		t.Fatalf("published to original directory after selected path changed: %v", err)
 	}
 }
+
+func TestSaveUpdateReportsStageCleanupFailure(t *testing.T) {
+	verificationFailure := errors.New("invalid SHA-256")
+	cases := []struct {
+		name           string
+		cancelDownload bool
+		downloadErr    error
+		wantSaved      bool
+		wantMessage    string
+	}{
+		{"cancelled", true, context.Canceled, false, "暂存文件清理失败，请检查所选目录"},
+		{"unverified then cancelled", true, verificationFailure, false, "暂存文件清理失败，请检查所选目录"},
+		{"unverified", false, verificationFailure, false, "暂存文件清理失败，请检查所选目录"},
+		{"verified", false, nil, true, "安装包已校验并保存，但暂存目录清理失败，请检查所选目录"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			parent := t.TempDir()
+			path := filepath.Join(parent, "update.zip")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			const content = "fixture package"
+			var unrelated, stagedPackage string
+			download := func(_ context.Context, out io.Writer) error {
+				stagedPackage = out.(*os.File).Name()
+				unrelated = filepath.Join(filepath.Dir(stagedPackage), "unrelated")
+				if err := os.WriteFile(unrelated, []byte("keep"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := io.WriteString(out, content); err != nil {
+					t.Fatal(err)
+				}
+				if tc.cancelDownload {
+					cancel()
+				}
+				return tc.downloadErr
+			}
+			saved, err := saveUpdate(ctx, path, download, func(publish func() error) error { return publish() })
+			wantMessage := tc.wantMessage
+			if errors.Is(tc.downloadErr, verificationFailure) {
+				wantMessage = tc.downloadErr.Error() + "\n" + wantMessage
+			}
+			if saved != tc.wantSaved || err == nil || err.Error() != wantMessage {
+				t.Errorf("saveUpdate = %v, %v; want %v, %q", saved, err, tc.wantSaved, wantMessage)
+			}
+			if errors.Is(tc.downloadErr, verificationFailure) && !errors.Is(err, verificationFailure) {
+				t.Errorf("download failure lost: %v", err)
+			}
+			if payload, err := os.ReadFile(unrelated); err != nil || string(payload) != "keep" {
+				t.Errorf("unrelated file changed: %q, %v", payload, err)
+			}
+			if _, err := os.Lstat(stagedPackage); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("staged package remains: %v", err)
+			}
+			if tc.wantSaved {
+				if payload, err := os.ReadFile(path); err != nil || string(payload) != content {
+					t.Errorf("published package: %q, %v", payload, err)
+				}
+			} else if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("unverified or cancelled package was published: %v", err)
+			}
+		})
+	}
+}
+
+func TestUpdateDownloadResultKeepsVerifiedPathWithWarning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "verified.zip")
+	if result, err := updateDownloadResult(path, errUpdateSavedCleanup); err != nil ||
+		result.Path != path || result.Warning != errUpdateSavedCleanup.Error() {
+		t.Fatalf("verified download status: %+v, %v", result, err)
+	}
+	if result, err := updateDownloadResult("", errUpdateCleanup); !errors.Is(err, errUpdateCleanup) ||
+		result.Path != "" || result.Warning != "" {
+		t.Fatalf("failed download status: %+v, %v", result, err)
+	}
+}

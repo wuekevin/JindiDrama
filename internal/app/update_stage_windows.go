@@ -75,8 +75,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	handle, err := createUpdateObject(dir, name, access, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
 	if err != nil {
-		closeStageDirectory()
-		return nil, err
+		return nil, outputStageSetupError(kind, err, closeStageDirectory())
 	}
 	file := os.NewFile(uintptr(handle), filepath.Join(parent, dirName, name))
 	published := false
@@ -102,8 +101,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	if kind == updateOutputStage {
 		if err := markUpdateZone(dir, handle, name); err != nil {
-			cleanup()
-			return nil, errUpdateOrigin
+			return nil, outputStageSetupError(kind, errUpdateOrigin, cleanup())
 		}
 	}
 	destinationMatches := func() bool {
