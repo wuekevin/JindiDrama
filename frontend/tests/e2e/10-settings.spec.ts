@@ -371,7 +371,7 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await expect(backupButton).toBeFocused()
 })
 
-test('downloads a verified update through the desktop bridge and shows its path after cancellation and a write failure', async ({ page }, testInfo) => {
+test('downloads a verified update through the desktop bridge and shows its path after cancellation and a write failure', async ({ page, browserName }, testInfo) => {
   const url = 'https://github.com/wuekevin/JindiDrama/releases/tag/v1.2.3'
   let attempts = 0
   let cancelled = 0
@@ -441,7 +441,8 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await page.locator('html').evaluate((el) => el.style.setProperty('--user-zoom', '2.2'))
   await expect(page.getByTestId('page-settings')).toHaveClass(/\bcompact\b/)
   await page.getByTestId('privacy-notice').focus()
-  await page.keyboard.press('Tab')
+  const tabKey = browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
+  await page.keyboard.press(tabKey)
   await expect(copy).toBeFocused()
   await expect(copy).toBeInViewport()
   const savedBounds = (await saved.boundingBox())!
