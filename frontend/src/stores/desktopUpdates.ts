@@ -119,20 +119,32 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     }
   }
 
+  let unverifiedDownloadToast: number | undefined
+  function dismissUnverifiedDownloadToast() {
+    if (unverifiedDownloadToast === undefined) return
+    toast.dismiss(unverifiedDownloadToast)
+    unverifiedDownloadToast = undefined
+  }
+
   async function download() {
     const candidate = upd.value
     if (!candidate || !canDownload.value || checking.value || channelBusy.value || downloading.value) return
     downloading.value = true
     try {
       const saved = await downloadUpdate(candidate.url)
-      if (typeof saved === 'string' && saved) lastSavedUpdate.value = { path: saved, version: candidate.latest }
-      else if (saved === true) toast.push(`${candidate.latest} 安装包已校验并保存，可手动安装`, 'success')
-      else if (typeof saved === 'object' && saved.unverified) {
+      if (typeof saved === 'object' && saved.unverified) {
         lastSavedUpdate.value = null
-        toast.push(saved.unverified, 'error')
-      } else if (typeof saved === 'object' && saved.path) {
-        lastSavedUpdate.value = { path: saved.path, version: candidate.latest }
-        if (saved.warning) toast.push(saved.warning, 'info')
+        dismissUnverifiedDownloadToast()
+        unverifiedDownloadToast = toast.push(saved.unverified, 'error')
+        return
+      }
+      const path = typeof saved === 'string' ? saved : typeof saved === 'object' ? saved.path : ''
+      if (path || saved === true) dismissUnverifiedDownloadToast()
+      if (path) {
+        lastSavedUpdate.value = { path, version: candidate.latest }
+        if (typeof saved === 'object' && saved.warning) toast.push(saved.warning, 'info')
+      } else if (saved === true) {
+        toast.push(`${candidate.latest} 安装包已校验并保存，可手动安装`, 'success')
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '无法下载更新'
