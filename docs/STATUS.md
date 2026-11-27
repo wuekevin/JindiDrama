@@ -855,3 +855,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 在 macOS 挂载的真实可写 ExFAT 隔离卷上复现旧版行为。演示视频可以保存，本地片库视频和 PNG 截图在原子发布时失败。现在三者在原子发布不可用时共用目录句柄与独占创建。本地片库回退从同一已授权句柄的开头复制，并复核源文件大小和修改时间。更新包和数据库备份继续使用严格发布。[卷信息](../build/bin/qa-media-volume/volume.log) · [原版复现](../build/bin/qa-media-volume/before.log)
 - 用合成素材和指定测试路径验证三个保存入口。核对视频与 PNG 的完整字节、拒绝同名覆盖、仅播放片源拒绝保存，以及暂存清理。回退期间源文件变化的回归确认操作报错，已打开的目标文件被清空。直接写入中断时可能留下空文件。隔离 ExFAT 卷已卸载。[ExFAT 验收](../build/bin/qa-media-volume/exfat.log) · [卸载](../build/bin/qa-media-volume/volume-detach.log)
 - Go 全量、vet、App 竞态及 Windows amd64 App 交叉编译通过。首次并行测试遇到磁盘空间不足，清理已归档候选的重复暂存后串行通过。Windows 原生 ExFAT 待验收，本次源码晚于 .52。[Go 全量](../build/bin/qa-media-volume/go-test.log) · [App 竞态](../build/bin/qa-media-volume/go-race.log) · [BMad 记录](../_bmad-output/plan-e11-media-export-volume.md)
+
+## E11 固定 SQLite 快照源句柄（2026-11-27）
+
+- 旧版桌面校验打开无写入方的 Unix 命名管道会阻塞，通过符号链接选择含有效 WAL 的数据库时也可能漏读 WAL。现在桌面校验、恢复和回滚共用快照读取。Unix 先以非阻塞方式打开并拒绝非常规文件。复制与摘要核对使用同一源句柄，SQLite 只打开私有副本。[原版复现](../build/bin/qa-snapshot-source/before.log)
+- 复制前打开主库和持久辅助文件，记录已打开的文件身份。完成前复核所选路径、源身份、文件大小、修改时间、辅助文件集合和摘要。回归覆盖同大小同修改时间的文件替换、符号链接改指、大小变化、新增 WAL、稳定 WAL 与旧备份恢复。[专项](../build/bin/qa-snapshot-source/targeted.log)
+- Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 SQLite 交叉编译通过。首次 App 专项因磁盘空间不足失败，清理重复临时产物后用精简符号的测试二进制串行通过。Windows 原生待验收。普通文件读取仍受操作系统控制，本轮验证范围为文件类型、路径和身份变化。[竞态](../build/bin/qa-snapshot-source/go-race.log) · [Windows](../build/bin/qa-snapshot-source/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e11-snapshot-source-handles.md)

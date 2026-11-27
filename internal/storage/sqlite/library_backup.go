@@ -84,14 +84,6 @@ func (s *Store) RestoreMissingLibrary(backup *LibraryState) (*LibraryRestore, er
 // ReadLibraryBackup reads user library rows from a private copy. The caller
 // supplies an unused name in a private root and removes the copy and its sidecars.
 func ReadLibraryBackup(path string, root *os.Root, staged string) (*LibraryState, error) {
-	path, err := filepath.Abs(path)
-	if err != nil {
-		return nil, err
-	}
-	path, err = filepath.EvalSymlinks(path)
-	if err != nil {
-		return nil, err
-	}
 	if err := snapshotDatabase(path, root, staged); err != nil {
 		return nil, err
 	}

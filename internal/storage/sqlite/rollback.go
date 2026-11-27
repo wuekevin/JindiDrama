@@ -17,22 +17,7 @@ func PrepareRollbackCopy(source, output string, target int) error {
 	if target < 1 || target > len(migrations) {
 		return fmt.Errorf("无效的回滚目标版本 v%d", target)
 	}
-	source, err := filepath.Abs(source)
-	if err != nil {
-		return err
-	}
-	source, err = filepath.EvalSymlinks(source)
-	if err != nil {
-		return err
-	}
-	info, err := os.Stat(source)
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("源数据库必须是普通文件")
-	}
-	output, err = filepath.Abs(output)
+	output, err := filepath.Abs(output)
 	if err != nil {
 		return err
 	}
@@ -79,56 +64,127 @@ func PrepareRollbackCopy(source, output string, target int) error {
 }
 
 func snapshotDatabase(source string, root *os.Root, staged string) error {
-	files, err := rollbackSourceFiles(source)
+	selected, err := filepath.Abs(source)
 	if err != nil {
 		return err
 	}
-	// Opening even a read-only WAL database can create sidecars. Let SQLite
-	// open and, if necessary, recover a private copy of the durable file set.
-	for suffix := range files {
-		if err := copyDatabaseFile(source+suffix, root, staged+suffix); err != nil {
+	source, err = filepath.EvalSymlinks(selected)
+	if err != nil {
+		return err
+	}
+	// SQLite may create sidecars when it opens even a read-only WAL database.
+	// Keep it on a private copy of the durable file set.
+	inputs := make(map[string]*os.File, len(snapshotSuffixes))
+	originals := make(map[string]os.FileInfo, len(snapshotSuffixes))
+	for _, suffix := range snapshotSuffixes {
+		input, info, err := openSnapshotInput(source + suffix)
+		if suffix != "" && errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		defer input.Close()
+		inputs[suffix] = input
+		originals[suffix] = info
+	}
+	for suffix, input := range inputs {
+		output, err := root.OpenFile(staged+suffix, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return err
+		}
+		_, err = io.CopyN(output, input, originals[suffix].Size())
+		if err := errors.Join(err, output.Close()); err != nil {
 			return err
 		}
 	}
-	for suffix := range files {
-		original, err := rollbackDigest(os.Open(source + suffix))
+	for suffix, input := range inputs {
+		info := originals[suffix]
+		original, err := rollbackDigest(io.NewSectionReader(input, 0, info.Size()), info.Size())
 		if err != nil {
 			return err
 		}
-		copied, err := rollbackDigest(root.Open(staged + suffix))
+		copied, err := stagedSnapshotDigest(root, staged+suffix, info.Size())
 		if err != nil {
 			return err
 		}
-		if original != copied {
-			return errors.New("源数据库正在变化，请退出应用后重试")
+		actual, err := input.Stat()
+		if err != nil {
+			return err
 		}
+		if original != copied || !sameRollbackFile(info, actual) {
+			return errSnapshotChanged
+		}
+	}
+	return checkSnapshotSources(selected, source, originals)
+}
+
+func checkSnapshotSources(selected, source string, files map[string]os.FileInfo) error {
+	resolved, err := filepath.EvalSymlinks(selected)
+	if err != nil {
+		return errors.Join(errSnapshotChanged, err)
+	}
+	if resolved != source {
+		return errSnapshotChanged
 	}
 	after, err := rollbackSourceFiles(source)
 	if err != nil {
 		return err
 	}
 	if !maps.EqualFunc(files, after, sameRollbackFile) {
-		return errors.New("源数据库正在变化，请退出应用后重试")
+		return errSnapshotChanged
 	}
 	return nil
 }
 
-func rollbackDigest(file *os.File, openErr error) ([sha256.Size]byte, error) {
-	var digest [sha256.Size]byte
-	if openErr != nil {
-		return digest, openErr
+var errSnapshotChanged = errors.New("源数据库正在变化，请退出应用后重试")
+
+func openSnapshotInput(path string) (*os.File, os.FileInfo, error) {
+	input, err := os.OpenFile(path, snapshotReadFlags, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	info, err := input.Stat()
+	if err != nil {
+		input.Close()
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		input.Close()
+		return nil, nil, errors.New("源数据库及辅助文件必须是普通文件")
+	}
+	return input, info, nil
+}
+
+func stagedSnapshotDigest(root *os.Root, name string, size int64) ([sha256.Size]byte, error) {
+	file, err := root.OpenFile(name, snapshotReadFlags, 0)
+	if err != nil {
+		return [sha256.Size]byte{}, err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return [sha256.Size]byte{}, err
+	}
+	if !info.Mode().IsRegular() || info.Size() != size {
+		return [sha256.Size]byte{}, errSnapshotChanged
+	}
+	return rollbackDigest(file, size)
+}
+
+func rollbackDigest(file io.Reader, size int64) ([sha256.Size]byte, error) {
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return digest, err
+	if _, err := io.CopyN(hash, file, size); err != nil {
+		return [sha256.Size]byte{}, err
 	}
 	return [sha256.Size]byte(hash.Sum(nil)), nil
 }
 
+var snapshotSuffixes = [...]string{"", "-wal", "-journal"}
+
 func rollbackSourceFiles(source string) (map[string]os.FileInfo, error) {
 	files := make(map[string]os.FileInfo)
-	for _, suffix := range []string{"", "-wal", "-journal"} {
+	for _, suffix := range snapshotSuffixes {
 		info, err := os.Stat(source + suffix)
 		if suffix != "" && errors.Is(err, os.ErrNotExist) {
 			continue

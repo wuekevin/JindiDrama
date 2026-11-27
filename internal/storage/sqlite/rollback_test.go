@@ -302,3 +302,49 @@ func TestPrepareRollbackCopyDoesNotCreateClosedSourceSidecars(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCheckSnapshotSourcesRejectsChangedRegularFile(t *testing.T) {
+	for _, change := range []string{"replacement", "size", "new WAL"} {
+		t.Run(change, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "source.db")
+			if err := os.WriteFile(path, []byte("original"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			path, err := filepath.EvalSymlinks(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input, info, err := openSnapshotInput(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := input.Close(); err != nil {
+				t.Fatal(err)
+			}
+			switch change {
+			case "replacement":
+				if err := os.Rename(path, filepath.Join(dir, "old.db")); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("replaced"), 0o600); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Chtimes(path, info.ModTime(), info.ModTime()); err != nil {
+					t.Fatal(err)
+				}
+			case "size":
+				if err := os.Truncate(path, 4); err != nil {
+					t.Fatal(err)
+				}
+			case "new WAL":
+				if err := os.WriteFile(path+"-wal", nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := checkSnapshotSources(path, path, map[string]os.FileInfo{"": info}); !errors.Is(err, errSnapshotChanged) {
+				t.Fatalf("changed source was not rejected: %v", err)
+			}
+		})
+	}
+}

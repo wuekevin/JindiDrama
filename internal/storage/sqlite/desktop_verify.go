@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 )
@@ -34,13 +33,8 @@ func verifyDesktopDatabase(path string, want int) error {
 	defer root.Close()
 	const copyName = "jindi.db"
 	copyPath := filepath.Join(snapshot, copyName)
-	if err := copyDatabaseFile(path, root, copyName); err != nil {
+	if err := snapshotDatabase(path, root, copyName); err != nil {
 		return err
-	}
-	for _, suffix := range []string{"-wal", "-journal"} {
-		if err := copyDatabaseFile(path+suffix, root, copyName+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
-		}
 	}
 	// SQLite can rebuild the volatile -shm index in the temporary directory.
 	db, err := openDatabase(copyPath, "ro")
@@ -125,27 +119,6 @@ WHERE sql IS NOT NULL AND name NOT GLOB 'sqlite_*' ORDER BY name`)
 		}
 	}
 	return nil
-}
-
-func copyDatabaseFile(source string, root *os.Root, name string) error {
-	from, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer from.Close()
-	info, err := from.Stat()
-	if err != nil {
-		return err
-	}
-	if !info.Mode().IsRegular() {
-		return errors.New("desktop database inputs must be regular files")
-	}
-	to, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(to, from)
-	return errors.Join(err, to.Close())
 }
 
 func verifyDesktopBusinessSchema(tx *sql.Tx) error {
