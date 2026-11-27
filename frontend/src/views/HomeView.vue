@@ -135,7 +135,7 @@ const autoplay = computed(() => route.query.static === undefined)
   </div>
 </template>
 <style scoped lang="scss">
-.home { padding-top: 11px; min-height: 100%; }
+.home { padding-top: 11px; min-height: 100%; container: home-content / inline-size; }
 .sk-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 30px; }
 .cats { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 18px; min-height: 38px; padding-left: 4px; }
 .h-label, .more { flex: none; white-space: nowrap; }
@@ -162,4 +162,15 @@ const autoplay = computed(() => route.query.static === undefined)
 .rm { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; strong { font-size: 16px; margin-inline-end: 38px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } em { font-style: normal; font-size: 13px; color: var(--c-text-2); } }
 .pg { display: flex; align-items: center; gap: 10px; :deep(.bar) { flex: 1; } i { font-style: normal; font-size: 13px; color: var(--c-text-2); width: 36px; } }
 .pl { position: absolute; right: 14px; top: 14px; width: 30px; height: 30px; border-radius: 50%; background: rgba(255,255,255,.88); color: #2a1517; display: grid; place-items: center; }
+
+@container home-content (max-width: 860px) {
+  .sec-h { flex-wrap: wrap; }
+  .grid6, .rank-list { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .rank-list { row-gap: 14px; }
+  .resume { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container home-content (max-width: 540px) {
+  .rank-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .resume { grid-template-columns: minmax(0, 1fr); }
+}
 </style>

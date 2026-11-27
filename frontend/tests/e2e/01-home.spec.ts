@@ -291,3 +291,24 @@ test('a missing topic links back to the available tags and home keywords still m
   await page.getByTestId('cat-chongsheng').click()
   await expect(page.getByTestId('result-card').first()).toContainText('重生')
 })
+
+test('Tab keeps the home resume card visible at 220% in the minimum window', async ({ page, browserName }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.goto('/#/home?static')
+  await page.locator('html').evaluate(element => element.style.setProperty('--user-zoom', '2.2'))
+  const resume = page.getByTestId('resume-card').first()
+  await expect(resume).toBeEnabled()
+  const tabKey = browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
+  for (let step = 0; step < 100; step++) {
+    await page.keyboard.press(tabKey)
+    if (await resume.evaluate(element => document.activeElement === element)) break
+  }
+  await expect(resume).toBeFocused()
+  await expect(resume).toBeInViewport({ ratio: 0.9 })
+  const content = page.locator('main#content')
+  expect(await content.evaluate(element => element.scrollLeft)).toBe(0)
+  expect(await content.evaluate(element => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1)
+  await page.screenshot({ path: testInfo.outputPath('resume-focused.png') })
+  await page.keyboard.press('Enter')
+  await expect(page).toHaveURL(/#\/watch\/d1\/32/)
+})

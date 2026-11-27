@@ -755,3 +755,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 用 .50 应用源码与相同的生产前端验收。隔离构建注入合成片源网络响应和 WKWebView 自动化脚本，使用正常 Go 转发、Vue 播放状态与原生解码。真实顺序为先请求标记成 MP4 的 HTML 错误页，再请求备用 MP4。WKWebView 解码自制样片为 240×426，播放进度达到 1.33 秒。[播放界面结果](../build/bin/qa-native-cms-50/playback-ui.log) · [请求顺序](../build/bin/qa-native-cms-50/playback-verified.log)
 - 将同一剧目改为下架。用 macOS LaunchServices 打开原来的 `jindi:` 链接，显示未找到。返回首页，另一部上架剧目仍可浏览，目标剧目隐藏，下架阶段没有媒体请求。两个隔离应用会话正常退出后 SQLite 完整性均为 `ok`。初次系统辅助功能未能取得可操作窗口，最终通过测试构建的 Wails 脚本完成确认。实际授权公网片源仍待联调。[下架界面结果](../build/bin/qa-native-cms-50/withdrawn-ui.log) · [BMad 记录](../_bmad-output/plan-e12-cms-native-content-followup50.md)
+
+## E01 首页最小窗口键盘焦点（2026-11-27）
+
+- 在 1280×860、220% 缩放时，Tab 到「继续观看」曾使首页主滚动区水平偏移，焦点卡片只剩约 5% 可见。首页现在按实际内容宽度调整上新、榜单和继续观看的列数，窄布局允许区块标题与操作换行。Tab 到卡片时主区无横向溢出，按 Enter 可进入对应分集。[修复前](../build/bin/qa-home-zoom-keyboard/resume-focused-before.png) · [修复后](../build/bin/qa-home-zoom-keyboard/resume-focused-after.png)
+- Chromium 首页 21 项、最小窗口十个主要页面与面板的真实键盘焦点抽查、macOS WebKit 的 Option+Tab 专项和 122 项 Vitest 通过。1448×1086 默认首页截图逐字节一致。修复已纳入本地源码候选，晚于 .50 安装包。[十项焦点验证](../build/bin/qa-home-zoom-keyboard/keyboard-fixed.log) · [默认截图校验](../build/bin/qa-home-zoom-keyboard/baseline-sha256.log) · [Safari 键盘说明](https://support.apple.com/guide/safari/keyboard-shortcuts-and-gestures-cpsh003/mac) · [BMad 记录](../_bmad-output/plan-e01-home-zoom-keyboard.md)
