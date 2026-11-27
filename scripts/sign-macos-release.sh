@@ -65,6 +65,12 @@ run_interruptible() {
   return "$status"
 }
 
+read_notary_string() {
+  # Preserve invalid control bytes as '?' before command substitution can strip them.
+  /usr/bin/plutil -extract "$1" raw -expect string -n -o - "$2" 2>/dev/null |
+    LC_ALL=C /usr/bin/tr -c '[:alnum:] -' '?'
+}
+
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -93,11 +99,23 @@ else
   run_interruptible codesign --verify --deep --strict -R="$requirement" "$app"
   run_interruptible ditto -c -k --keepParent "$app" "$archive"
   response="$work/notary-response.json"
+  submit_status=0
   run_interruptible xcrun notarytool submit "$archive" --apple-id "$apple_id" --team-id "$team_id" \
-    --password "$apple_password" --wait --output-format json > "$response"
+    --password "$apple_password" --wait --output-format json > "$response" || submit_status=$?
   unset apple_password
-  if ! notary_status=$(/usr/bin/plutil -extract status raw -expect string -o - "$response" 2>/dev/null) ||
-     [[ $notary_status != Accepted ]]; then
+  if submission_id=$(read_notary_string id "$response") &&
+     [[ $submission_id =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]; then
+    printf 'Apple notarization submission ID: %s\n' "$submission_id"
+  fi
+  notary_status=$(read_notary_string status "$response") || notary_status=
+  case "$notary_status" in
+    Invalid|Rejected|"In Progress") printf 'Apple notarization status: %s\n' "$notary_status" >&2 ;;
+  esac
+  if (( submit_status != 0 )); then
+    printf 'Apple notarization request failed (notarytool exit %d)\n' "$submit_status" >&2
+    exit "$submit_status"
+  fi
+  if [[ $notary_status != Accepted ]]; then
     echo "Apple did not accept this notarization submission" >&2
     exit 1
   fi

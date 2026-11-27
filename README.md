@@ -133,6 +133,12 @@ node scripts/package-checksums.mjs --verify-smoke-archives "$version" "$repo" "$
 
 环境可按维护者安排要求人工审核。选择 `smoke` 时使用普通测试任务，无需配置签名环境。[GitHub 环境与保护规则](https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments)
 
+Apple 返回公证提交编号时，正式打包日志会显示 `Apple notarization submission ID`。维护者可用同一 Apple 团队已配置的 Keychain 档案查询。将下面命令中的编号和档案名替换为实际值。[Apple 公证文档](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution/)
+
+```sh
+xcrun notarytool log "<提交编号>" --keychain-profile "<档案名>"
+```
+
 #### 生成并核对交付包
 
 正式打包检查所选提交的完整 Git 历史。可先运行 `bash scripts/verify-distribution-source.sh`，再按照验收记录准备发行。

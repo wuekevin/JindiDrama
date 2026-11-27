@@ -7,6 +7,7 @@ import unittest
 
 
 SCRIPT = Path(__file__).with_name("sign-macos-release.sh").resolve()
+SUBMISSION_ID = "cd689e68-01e3-48ac-b961-09c5fdacebde"
 CREDENTIALS = {
     "MACOS_CERT_P12": "Zml4dHVyZQ==",
     "MACOS_CERT_PASSWORD": "fixture",
@@ -76,7 +77,8 @@ class MacOSReleaseSigningTest(unittest.TestCase):
                         RUNNER_TEMP=str(self.temporary), TOOL_LOG=str(self.log))
 
     def run_operation(self, operation, fail_tool="", cancel_tool="", cancel_signal=15,
-                      expected_status=None, error_message=None, notary_response=None, team_id=None):
+                      expected_status=None, error_message=None, notary_response=None, team_id=None,
+                      output_contains=(), output_excludes=()):
         self.log.unlink(missing_ok=True)
         prefix = "MACOS_" if operation == "sign" else "APPLE_"
         credentials = {key: value for key, value in CREDENTIALS.items() if key.startswith(prefix)}
@@ -94,6 +96,11 @@ class MacOSReleaseSigningTest(unittest.TestCase):
         self.assertEqual(result.returncode, expected_status, result.stderr)
         if error_message:
             self.assertIn(error_message, result.stderr)
+        output = result.stdout + result.stderr
+        for text in output_contains:
+            self.assertIn(text, output)
+        for text in output_excludes:
+            self.assertNotIn(text, output)
         return [json.loads(line) for line in self.log.read_text().splitlines()] if self.log.exists() else []
 
     def test_signs_with_explicit_keychain_and_removes_credentials(self):
@@ -120,7 +127,9 @@ class MacOSReleaseSigningTest(unittest.TestCase):
         ])
 
     def test_notarizes_and_validates_before_leaving(self):
-        calls = self.run_operation("notarize")
+        calls = self.run_operation("notarize",
+                                   notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Accepted"}),
+                                   output_contains=(SUBMISSION_ID,))
         self.assertEqual([args[:2] for key, args in calls], [
             ["--verify", "--deep"], ["notarytool", "submit"], ["stapler", "staple"],
             ["stapler", "validate"], ["--verify", "--deep"],
@@ -136,8 +145,36 @@ class MacOSReleaseSigningTest(unittest.TestCase):
         self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
 
     def test_notary_failure_cleans_archive_and_skips_staple(self):
-        calls = self.run_operation("notarize", "xcrun notarytool")
+        calls = self.run_operation(
+            "notarize", "xcrun notarytool",
+            notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Accepted"}),
+            output_contains=(SUBMISSION_ID, "notarytool exit 19"),
+        )
         self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+
+    def test_notary_rejection_reports_valid_submission_id_even_on_command_failure(self):
+        for fail_tool in ("", "xcrun notarytool"):
+            with self.subTest(fail_tool=fail_tool):
+                calls = self.run_operation(
+                    "notarize", fail_tool=fail_tool, expected_status=19 if fail_tool else 1,
+                    notary_response=json.dumps({"id": SUBMISSION_ID, "status": "Invalid", "message": "private service response"}),
+                    output_contains=(SUBMISSION_ID, "Invalid"),
+                    output_excludes=("private service response",),
+                )
+                self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
+
+    def test_does_not_log_unrecognized_submission_id_or_status(self):
+        for id_value, status_value, excluded in (
+            ("unexpected\nresponse-id", "unexpected\nresponse-status", ("response-id", "response-status")),
+            (SUBMISSION_ID + "\n", "Accepted\n", (SUBMISSION_ID, "Apple accepted")),
+        ):
+            with self.subTest(id_value=id_value, status_value=status_value):
+                calls = self.run_operation(
+                    "notarize", expected_status=1,
+                    notary_response=json.dumps({"id": id_value, "status": status_value}),
+                    output_excludes=excluded,
+                )
+                self.assertEqual([key for key, args in calls], ["codesign --verify", "xcrun notarytool"])
 
     def test_does_not_submit_an_app_outside_the_expected_developer_team(self):
         calls = self.run_operation("notarize", "codesign --verify")
