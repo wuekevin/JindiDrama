@@ -811,3 +811,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 在 Apple Silicon macOS 26.6.2 上，以 .52 相同的凭据库源码验收。隔离检出仅为查询指定临时文件型钥匙串，继续执行生产读写删除和进程交互保护。真实锁定后，读取返回存储不可用且不返回凭据，替换和新增也返回存储不可用。系统允许删除已锁定的合成条目，解锁后核实已删除且失败的新增没有留下条目。各操作结束后交互状态恢复，临时钥匙串已删除，默认钥匙串和搜索列表与验收前一致。[原生记录](../build/bin/qa-macos-locked-keychain/locked-keychain.log) · [配置复核](../build/bin/qa-macos-locked-keychain/keychain-state.log) · [BMad 记录](../_bmad-output/plan-e12-locked-keychain-acceptance.md)
 - 恢复原始源码后，以 macOS 13.0 部署目标运行凭据库竞态测试，无 CGO 退回及 Windows x64 凭据测试交叉编译通过。macOS 13 实机和正式签名应用跨版本访问仍待验证。红果正式账号仍需授权和接口联调。[竞态日志](../build/bin/qa-macos-locked-keychain/original-race.log) · [Apple 钥匙串实现](https://developer.apple.com/documentation/technotes/tn3137-on-mac-keychains)
+
+## E13 .52 正式分发校验的拒绝路径（2026-11-27）
+
+- 用已归档的 .52 macOS Universal ZIP 核对真实系统校验。测试模式的临时签名校验成功。正式模式在 `stapler validate` 因缺少公证票据被拒绝，独立执行 `syspolicy_check distribution` 也确认临时签名及缺票据。Windows 便携程序和安装器的 PE 内嵌 Authenticode 证书表为空。本次检查仅证明这些测试包在正式分发验收中的状态。[归档签名检查](../build/bin/qa-release-negative-52/archive-gate.log) · [macOS 分发策略](../build/bin/qa-release-negative-52/macos-policy.log) · [Windows 证书表](../build/bin/qa-release-negative-52/windows-certificate-table.log) · [Apple 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+- 当轮只读检查发现本机有效代码签名身份为 0，GitHub 签名环境、仓库级 Actions secrets 和 Release 均为 0。正式签名成品的正向验收仍需实际发行凭据。本轮 .52 的托管验收仍待确认。
