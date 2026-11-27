@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.54`，打包源提交为 `b41f03e8136d6b6f850bec806a2e5ca66efb0762`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.56`，打包源提交为 `e6d89d582e078330d4cd426161b018b48be72465`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .56 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.56/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.56/macos/SHA256SUMS.txt) |
 | .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 可见窗口、系统恢复选择器和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
 | .53 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.53/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.53/macos/SHA256SUMS.txt) |
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
@@ -954,3 +955,11 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 修正回滚说明中系统级和按用户安装路径与示例混用的问题。默认路径与 NSIS 的 64 位 Program Files 一致，按用户使用 LocalAppData，便携版和自选目录改用当前程序完整路径。增加找不到可执行文件的提示，并说明从托盘或菜单栏退出后再操作。
 - macOS 上运行 PowerShell 提取出的示例，以三种模拟 Windows 路径调用本地真实回滚 CLI。含中文和空格的路径均生成完整的 SQLite v2，保留精确断点。缺程序时未启动进程，文件无法执行时提示核对程序路径，目标已存在时原副本和源文件保持一致。Windows 原生执行仍待核验。[PowerShell](../build/bin/qa-windows-rollback-paths/powershell.log) · [SQLite](../build/bin/qa-windows-rollback-paths/sqlite.log)
 - 使用既有 .54 程序文件在隔离暂存目录生成两平台说明，随包回滚文档与源码字节一致，临时清单共 13 项 SHA-256 通过，相关 Node 测试 13 项通过。旧归档继续对应原清单，本次文档待下一批累计打包。[随包验证](../build/bin/qa-windows-rollback-paths/package-docs.log) · [BMad](../_bmad-output/plan-e13-windows-rollback-paths.md)
+
+## E13 .56 累计本地打包验收（2026-11-27）
+
+- Windows x64 和 macOS Universal 来自发行源码 e6d89d582e078330d4cd426161b018b48be72465。纳入 .54 后的成品 WAL 检查、正式发布复核、更新保存路径保留、设置页快捷键录制焦点和 Windows 回滚说明。相同前端产物通过 Chromium 394 项、WebKit 设置页 45 项、Vitest 125 项，构建前后文件摘要一致。Go 全量、vet、发行脚本 13 项通过。[Chromium](../build/bin/qa-release-source-56/chromium.log) · [WebKit](../build/bin/qa-release-source-56/webkit.log) · [发行脚本](../build/bin/qa-release-source-56/release-tests.log) · [前端摘要](../build/bin/qa-release-source-56/verified-frontend.sha256)
+- 初次 Windows 编译和后续 macOS 合并曾因磁盘空间不足失败。Windows 清出旧生成依赖后重跑成功。macOS 两套 .56 切片均已由 Wails 编译，通过版本与架构核对后重新合并、逐切片比对，并用相同 Wails 配置的既有包结构组装、重新临时签名。Windows 安装器内主程序与便携版相同，WebView2 引导程序与依赖一致。macOS 两套切片最低系统均为 13.0。[构建及合并日志](../build/bin/qa-release-source-56/package-build.log) · [静态验收](../build/bin/qa-release-source-56/package-static.log) · [包资源复核](../build/bin/qa-release-source-56/bundle-resources.log)
+- Windows 安装器 22.56 MiB、便携版 32.41 MiB，macOS Universal ZIP 40.93 MiB。归档后 Windows 7 项、macOS 6 项 SHA-256 全部匹配。两平台回滚文档与源码一致。[包大小](../build/bin/qa-release-source-56/package-sizes.log) · [归档校验](../build/bin/qa-release-source-56/archived-checks.log)
+- Apple Silicon 直接从 .56 ZIP 解包启动，实际窗口与 Wails 文档就绪、正常退出、SQLite 检查通过。归档程序的回滚探针保留仅在活动 WAL 提交的数据且源未变化。Go 源码、三套主程序架构及 npm 生产依赖扫描均未报告已知漏洞。[Apple Silicon 原生](../build/bin/qa-release-source-56/macos-native.log) · [成品扫描](../build/bin/qa-release-source-56/binary-vulnerabilities.log) · [BMad](../_bmad-output/plan-e13-local-candidate56-packages.md)
+- 本次为本地累计打包。Windows、Intel Mac 当前归档原生验收、正式签名与公证、从正式 GitHub 版本在线升级及授权公网接口联调待完成。既有 GitHub .52 记录仍对应 .52 源码。
