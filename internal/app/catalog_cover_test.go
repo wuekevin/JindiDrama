@@ -318,15 +318,116 @@ func TestCatalogCoverCapacity(t *testing.T) {
 	oldest := s.issue(first)
 	for i := range catalogCoverCapacity {
 		address := "https://catalog.example.com/" + strconv.Itoa(i) + ".png"
-		if token := s.issue(address); token == "" || s.lookup(token) != address {
+		if token := s.issue(address); token == "" || s.lookup(token).address != address {
 			t.Fatal("valid cover could not be issued")
 		}
 	}
-	if s.lookup(oldest) != "" || s.issue(first) == oldest {
+	if s.lookup(oldest).address != "" || s.issue(first) == oldest {
 		t.Fatal("oldest ticket was not evicted")
 	}
 	if s.issued.Len() != catalogCoverCapacity || len(s.byAddress) != catalogCoverCapacity || len(s.byToken) != catalogCoverCapacity {
 		t.Fatal("ticket indices exceeded the capacity")
+	}
+}
+
+func TestCatalogCoverCachesOnlyFreshPublicImages(t *testing.T) {
+	picture := catalogCoverFixturePNG(t, 2, 2)
+	for _, tc := range []struct {
+		name, policy, header, value, query string
+		wantCalls                          int
+	}{
+		{name: "fresh public", policy: "public, max-age=60, immutable", wantCalls: 1},
+		{name: "unmarked", wantCalls: 2},
+		{name: "private", policy: "public, max-age=60, private", wantCalls: 2},
+		{name: "no-store", policy: "public, max-age=60, no-store", wantCalls: 2},
+		{name: "no-cache", policy: "public, max-age=60, no-cache", wantCalls: 2},
+		{name: "ambiguous freshness", policy: "public, max-age=60, max-age=0", wantCalls: 2},
+		{name: "stale Age", policy: "public, max-age=60", header: "Age", value: "60", wantCalls: 2},
+		{name: "stale Date", policy: "public, max-age=60", header: "Date", value: time.Now().Add(-time.Minute).UTC().Format(http.TimeFormat), wantCalls: 2},
+		{name: "varies", policy: "public, max-age=60", header: "Vary", value: "Accept", wantCalls: 2},
+		{name: "cookie", policy: "public, max-age=60", header: "Set-Cookie", value: "session=example", wantCalls: 2},
+		{name: "signed URL", policy: "public, max-age=60", query: "?signed=example", wantCalls: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			reloaded := catalogCoverFixturePNG(t, 3, 2)
+			client := newCatalogMediaClient()
+			client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+				calls++
+				header := http.Header{"Content-Type": {"image/png"}}
+				if tc.policy != "" {
+					header.Set("Cache-Control", tc.policy)
+				}
+				if tc.header != "" {
+					header.Set(tc.header, tc.value)
+				}
+				body := picture
+				if tc.wantCalls == 1 && calls > 1 {
+					body = reloaded
+				}
+				return &http.Response{StatusCode: http.StatusOK, Header: header, Body: io.NopCloser(bytes.NewReader(body))}, nil
+			})
+			s := newCatalogCoverService(client)
+			t.Cleanup(s.close)
+			token := s.issue("https://catalog.example.com/cover.png" + tc.query)
+			handler := &catalogMediaRelay{host: "localhost:8080", covers: s}
+			path := catalogCoverPath + token
+			first := serveCoverRequest(handler, http.MethodGet, path)
+			second := serveCoverRequest(handler, http.MethodGet, path)
+			assertCatalogCoverJPEG(t, first, 2, 2)
+			assertCatalogCoverJPEG(t, second, 2, 2)
+			if calls != tc.wantCalls || !bytes.Equal(first.Body.Bytes(), second.Body.Bytes()) {
+				t.Fatalf("upstream requests: got %d, want %d, or JPEG changed", calls, tc.wantCalls)
+			}
+			if tc.wantCalls == 1 {
+				request := newCoverRequest(handler, http.MethodGet, path)
+				request.Header.Set("Cache-Control", "no-cache")
+				reply := httptest.NewRecorder()
+				handler.ServeHTTP(reply, request)
+				assertCatalogCoverJPEG(t, reply, 3, 2)
+				assertCatalogCoverJPEG(t, serveCoverRequest(handler, http.MethodGet, path), 3, 2)
+				if calls != 2 {
+					t.Fatal("reload did not fetch and replace the cached image")
+				}
+				request = newCoverRequest(handler, http.MethodGet, path)
+				request.Header.Set("Cache-Control", "no-store")
+				handler.ServeHTTP(httptest.NewRecorder(), request)
+				assertCatalogCoverJPEG(t, serveCoverRequest(handler, http.MethodGet, path), 3, 2)
+				if calls != 4 {
+					t.Fatal("no-store did not discard the cached image")
+				}
+			}
+		})
+	}
+}
+
+func TestCatalogCoverCacheBudgetAndExpiry(t *testing.T) {
+	s := newCatalogCoverService(newCatalogMediaClient())
+	t.Cleanup(s.close)
+	firstToken := s.issue("https://catalog.example.com/first.png")
+	secondToken := s.issue("https://catalog.example.com/second.png")
+	s.retain(firstToken, s.beginFetch(firstToken), make([]byte, 1, maxCachedCoverBytes), time.Now().Add(time.Minute))
+	s.retain(secondToken, s.beginFetch(secondToken), []byte{1}, time.Now().Add(time.Minute))
+	if len(s.lookup(firstToken).data) == 0 || len(s.lookup(secondToken).data) != 0 || s.cachedBytes != maxCachedCoverBytes {
+		t.Fatal("expected successful storage up to the limit, then a cache miss")
+	}
+	first := s.byToken[firstToken].Value.(catalogCoverTicket)
+	first.freshTo = time.Now().Add(-time.Second)
+	s.byToken[firstToken].Value = first
+	s.retain(secondToken, s.beginFetch(secondToken), []byte{1}, time.Now().Add(time.Minute))
+	if cap(s.lookup(secondToken).data) != 1 || len(s.lookup(firstToken).data) != 0 || s.cachedBytes != 1 {
+		t.Fatal("admission did not reclaim stale images")
+	}
+	older := s.beginFetch(secondToken)
+	newer := s.beginFetch(secondToken)
+	s.retain(secondToken, newer, []byte{2}, time.Now().Add(time.Minute))
+	s.retain(secondToken, older, []byte{1}, time.Now().Add(time.Minute))
+	if cached := s.lookup(secondToken).data; !bytes.Equal(cached, []byte{2}) {
+		t.Fatal("an older request replaced cached data from the latest request")
+	}
+	s.close()
+	if s.cachedBytes != 0 || len(s.lookup(secondToken).data) != 0 {
+		t.Fatal("closing the service retained images")
 	}
 }
 

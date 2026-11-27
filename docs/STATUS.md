@@ -787,3 +787,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 现有冒烟脚本增加 `-CloseScenario Tray -VerifyInteractiveTray`。测试者从 Windows 通知区显示窗口、重启 Explorer，再通过通知区退出。探针读取托盘线程拥有的弹出菜单，脚本核对恢复到原窗口、通知区进程已更换、应用退出码、SQLite 完整性、回滚副本及会话标记清理。[使用说明](../README.md) · [BMad 记录](../_bmad-output/plan-e11-windows-interactive-tray.md)
 - macOS 的 PowerShell 7.7 解析和模拟通过，覆盖菜单观察、原窗口、通知区进程变化和退出验收失败路径。Go App 与探针测试、Windows amd64 交叉 vet 和探针构建通过。真实交互仍需在未提升权限的 Windows 11 测试桌面运行 .51 成品。本次变更仅涉及验收脚本、探针和文档。[模拟验证](../build/bin/qa-windows-interactive-tray/powershell-interaction.log) · [Windows 探针](../build/bin/qa-windows-interactive-tray/windows-probe.log)
+
+## E12 苹果 CMS 公开封面复用（2026-11-27）
+
+- 同一有效封面票据可以复用明确允许公开缓存且仍新鲜的 JPEG。含查询参数的地址、需要区分请求的响应、带 Cookie 或缺少明确缓存许可的响应每次重新请求。缓存仅位于应用进程内，上限 8 MiB，WebView 仍收到 `no-store`。显式刷新更新或清除旧图，较早请求不能写回覆盖较新请求。缓存达到上限时先回收过期副本。[HTTP 新鲜度](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2.3)
+- 夹具验证同一公开封面连续请求两次只连接一次上游，刷新后继续使用新图。带签名参数、Cookie、Vary、过期标记和限额场景覆盖通过。Go 全量、vet、App 竞态及 Windows amd64 App 测试交叉编译通过。隔离检出补齐现有前端产物后全量成功。[封面专项](../build/bin/qa-cms-cover-freshness/cover-tests.log) · [BMad 记录](../_bmad-output/plan-e12-cover-freshness.md)
+- 本次源码改动晚于 .51 打包。公开封面缓存独立于远程下载队列，实际授权公网 CMS 联调及远程下载授权仍待处理。
