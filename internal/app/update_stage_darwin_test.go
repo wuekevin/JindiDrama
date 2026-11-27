@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"io"
 	"os"
@@ -122,5 +123,131 @@ func TestUpdateCleanupPreservesFileCreatedAfterPublication(t *testing.T) {
 	}
 	if payload, err := os.ReadFile(path); err != nil || string(payload) != "verified" {
 		t.Errorf("published package changed: %q, %v", payload, err)
+	}
+}
+
+func TestUpdateAPFSPublishesOpenFileWithQuarantine(t *testing.T) {
+	parent := t.TempDir()
+	var volume unix.Statfs_t
+	if err := unix.Statfs(parent, &volume); err != nil {
+		t.Fatal(err)
+	}
+	if unix.ByteSliceToString(volume.Fstypename[:]) != "apfs" {
+		t.Skip("requires APFS")
+	}
+
+	path := filepath.Join(parent, "update.zip")
+	const payload = "verified package fixture"
+	wantDigest := sha256.Sum256([]byte(payload))
+	var stagePath string
+	saved, err := saveUpdate(context.Background(), path, func(_ context.Context, out io.Writer) error {
+		stagePath = out.(*os.File).Name()
+		if _, err := os.Lstat(stagePath); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("download file has a directory entry: %v", err)
+		}
+		if err := os.WriteFile(stagePath, []byte("unrelated"), 0600); err != nil {
+			return err
+		}
+		_, err := io.WriteString(out, payload)
+		return err
+	}, func(publish func() error) error { return publish() })
+	if !saved || !errors.Is(err, errUpdateSavedCleanup) {
+		t.Errorf("published update result: %v, %v", saved, err)
+	}
+	if data, err := os.ReadFile(path); err != nil || sha256.Sum256(data) != wantDigest {
+		t.Errorf("saved update SHA-256: %x, %v", sha256.Sum256(data), err)
+	}
+	if data, err := os.ReadFile(stagePath); err != nil || string(data) != "unrelated" {
+		t.Errorf("independent file changed: %q, %v", data, err)
+	}
+	if size, err := unix.Getxattr(path, "com.apple.quarantine", nil); err != nil || size == 0 {
+		t.Errorf("download origin was not preserved: %d, %v", size, err)
+	}
+}
+
+// Run with TMPDIR on HFS+ to exercise the named staging path on a real volume.
+func TestUpdateNamedStagePreservesUnrelatedFile(t *testing.T) {
+	parent := t.TempDir()
+	var volume unix.Statfs_t
+	if err := unix.Statfs(parent, &volume); err != nil {
+		t.Fatal(err)
+	}
+	if unix.ByteSliceToString(volume.Fstypename[:]) != "hfs" {
+		t.Skip("requires HFS+")
+	}
+
+	for _, scenario := range []string{"verified", "changed", "cancelled"} {
+		t.Run(scenario, func(t *testing.T) {
+			path := filepath.Join(parent, scenario+".zip")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			const payload = "verified package fixture"
+			var stagePath string
+			saved, err := saveUpdate(ctx, path, func(_ context.Context, out io.Writer) error {
+				stagePath = out.(*os.File).Name()
+				if _, err := io.WriteString(out, payload); err != nil {
+					return err
+				}
+				if scenario == "verified" {
+					return nil
+				}
+				if err := os.Rename(stagePath, stagePath+".original"); err != nil {
+					return err
+				}
+				if scenario == "cancelled" {
+					cancel()
+				}
+				return os.WriteFile(stagePath, []byte("unrelated"), 0600)
+			}, func(publish func() error) error { return publish() })
+			if scenario == "verified" {
+				if !saved || err != nil {
+					t.Fatalf("verified save: %v, %v", saved, err)
+				}
+				if data, err := os.ReadFile(path); err != nil || string(data) != payload {
+					t.Errorf("saved update: %q, %v", data, err)
+				}
+				if size, err := unix.Getxattr(path, "com.apple.quarantine", nil); err != nil || size == 0 {
+					t.Errorf("download origin was not preserved: %d, %v", size, err)
+				}
+				return
+			}
+			if saved || !errors.Is(err, errUpdateCleanup) {
+				t.Errorf("save after staging entry changed: %v, %v", saved, err)
+			}
+			if scenario == "changed" && !errors.Is(err, errUpdateStageIdentity) {
+				t.Errorf("missing staging identity failure: %v", err)
+			}
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				t.Errorf("update path exists: %v", err)
+			}
+			if data, err := os.ReadFile(stagePath); err != nil || string(data) != "unrelated" {
+				t.Errorf("independent file changed: %q, %v", data, err)
+			}
+			if data, err := os.ReadFile(stagePath + ".original"); err != nil || string(data) != payload {
+				t.Errorf("original staged file changed: %q, %v", data, err)
+			}
+		})
+	}
+}
+
+func TestUpdatePreservesTargetCreatedBeforePublication(t *testing.T) {
+	parent := t.TempDir()
+	path := filepath.Join(parent, "update.zip")
+	const existing = "user's existing file"
+	saved, err := saveUpdate(context.Background(), path, func(_ context.Context, out io.Writer) error {
+		if _, err := io.WriteString(out, "verified"); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(existing), 0600)
+	}, func(publish func() error) error { return publish() })
+	if saved || err == nil || err.Error() != "目标文件已存在，请使用其他文件名" {
+		t.Errorf("save with competing target: %v, %v", saved, err)
+	}
+	if data, err := os.ReadFile(path); err != nil || string(data) != existing {
+		t.Errorf("existing file changed: %q, %v", data, err)
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil || len(entries) != 1 {
+		t.Errorf("staging not removed: %v, %v", entries, err)
 	}
 }

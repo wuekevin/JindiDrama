@@ -19,6 +19,15 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if err != nil {
 		return nil, err
 	}
+	cloneUpdate := false
+	if kind == updateOutputStage {
+		var volume unix.Statfs_t
+		if err := unix.Fstatfs(destFD, &volume); err != nil {
+			_ = unix.Close(destFD)
+			return nil, err
+		}
+		cloneUpdate = unix.ByteSliceToString(volume.Fstypename[:]) == "apfs"
+	}
 	destinationMatches := func() bool {
 		var original, selected unix.Stat_t
 		return unix.Fstat(destFD, &original) == nil && unix.Stat(parent, &selected) == nil &&
@@ -89,7 +98,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	const name = "package"
 	flags := unix.O_WRONLY
-	if kind == privateBackupOutputStage {
+	if kind == privateBackupOutputStage || cloneUpdate {
 		flags = unix.O_RDWR
 	}
 	fd, err := unix.Openat(dirFD, name, flags|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
@@ -98,14 +107,19 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	file := os.NewFile(uintptr(fd), filepath.Join(parent, dirName, name))
 	discarded := false
-	renamed := false
+	stageEntryRemoved := false
 	discard := func() error {
 		if discarded {
 			return nil
 		}
 		discarded = true
-		if renamed {
+		if stageEntryRemoved {
 			return file.Close()
+		}
+		if kind == updateOutputStage {
+			if err := checkUpdateFileIdentity(fd, dirFD, name); err != nil {
+				return errors.Join(err, file.Close())
+			}
 		}
 		removeErr := unix.Unlinkat(dirFD, name, 0)
 		if errors.Is(removeErr, unix.ENOENT) {
@@ -115,6 +129,20 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	cleanup := func() error {
 		return errors.Join(discard(), closeDirectory())
+	}
+	if cloneUpdate {
+		// Keep the download accessible only through this descriptor.
+		if err := checkUpdateFileIdentity(fd, dirFD, name); err != nil {
+			return nil, outputStageSetupError(kind, err, cleanup())
+		}
+		if err := unix.Unlinkat(dirFD, name, 0); err != nil {
+			return nil, outputStageSetupError(kind, err, cleanup())
+		}
+		stageEntryRemoved = true
+		var opened unix.Stat_t
+		if unix.Fstat(fd, &opened) != nil || opened.Nlink != 0 {
+			return nil, outputStageSetupError(kind, errUpdateStageIdentity, cleanup())
+		}
 	}
 	if kind == updateOutputStage {
 		quarantine := fmt.Appendf(nil, "0081;%x;JindiDrama;", time.Now().Unix())
@@ -127,17 +155,28 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		publish: func(target string) error {
 			return publishInUpdateDestination(destinationMatches, func() error {
 				destName := filepath.Base(target)
+				if cloneUpdate {
+					return unix.Fclonefileat(fd, destFD, destName, unix.CLONE_NOOWNERCOPY)
+				}
+				if kind == updateOutputStage {
+					if err := checkUpdateFileIdentity(fd, dirFD, name); err != nil {
+						return err
+					}
+				}
 				err := unix.RenameatxNp(dirFD, name, destFD, destName, unix.RENAME_EXCL)
 				if err == nil {
-					renamed = true
-					return nil
-				}
-				if errors.Is(err, unix.ENOTSUP) {
+					stageEntryRemoved = true
+				} else if errors.Is(err, unix.ENOTSUP) {
 					linkErr := unix.Linkat(dirFD, name, destFD, destName, 0)
 					if linkErr != nil && kind == mediaOutputStage {
 						return errors.Join(err, linkErr)
 					}
-					return linkErr
+					err = linkErr
+				}
+				if err == nil && kind == updateOutputStage {
+					if err := checkUpdateFileIdentity(fd, destFD, destName); err != nil {
+						return errUpdatePublishedIdentity
+					}
 				}
 				return err
 			})
@@ -150,4 +189,14 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 			return copyDirect(target, write)
 		},
 	}, nil
+}
+
+func checkUpdateFileIdentity(fd, dirFD int, name string) error {
+	var opened, entry unix.Stat_t
+	if unix.Fstat(fd, &opened) != nil ||
+		unix.Fstatat(dirFD, name, &entry, unix.AT_SYMLINK_NOFOLLOW) != nil ||
+		opened.Dev != entry.Dev || opened.Ino != entry.Ino || entry.Mode&unix.S_IFMT != unix.S_IFREG {
+		return errUpdateStageIdentity
+	}
+	return nil
 }

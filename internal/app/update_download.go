@@ -127,6 +127,8 @@ var (
 	errUpdateCleanup                      = errors.New("暂存文件清理失败，请检查所选目录")
 	errUpdateMovedCleanup                 = errors.New("暂存目录清理失败，请在原目录检查")
 	errUpdateSavedCleanup                 = errors.New("安装包已校验并保存，但暂存目录清理失败，请检查所选目录")
+	errUpdateStageIdentity                = errors.New("更新暂存文件已变更，请重新下载")
+	errUpdatePublishedIdentity            = errors.New("无法确认已保存安装包，请勿使用目标文件并重新下载")
 	errUpdateOrigin                       = errors.New("当前保存位置无法标记文件来源，请选择其他位置或前往发布页下载")
 	errUpdateDestinationMoved             = errors.New("安装包保存目录已移动或替换，请重新选择保存位置")
 	errUpdateDestinationMovedAfterPublish = errors.New("安装包已保存到原目录，但该目录已移动或替换，请在原目录查找安装包")
@@ -147,7 +149,7 @@ func saveUpdate(ctx context.Context, path string, download func(context.Context,
 		return false, errors.New(saveError)
 	}
 	stage, err := createUpdateStage(filepath.Dir(path))
-	if errors.Is(err, errUpdateOrigin) {
+	if errors.Is(err, errUpdateOrigin) || errors.Is(err, errUpdateStageIdentity) {
 		return false, err
 	}
 	if err != nil {
@@ -191,7 +193,8 @@ func saveUpdate(ctx context.Context, path string, download func(context.Context,
 	if errors.Is(err, fs.ErrExist) {
 		return false, errors.New("目标文件已存在，请使用其他文件名")
 	}
-	if errors.Is(err, errUpdateDestinationMoved) || errors.Is(err, errUpdateDestinationMovedAfterPublish) {
+	if errors.Is(err, errUpdateDestinationMoved) || errors.Is(err, errUpdateDestinationMovedAfterPublish) ||
+		errors.Is(err, errUpdateStageIdentity) || errors.Is(err, errUpdatePublishedIdentity) {
 		return false, err
 	}
 	if err != nil {

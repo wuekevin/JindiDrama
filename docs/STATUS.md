@@ -1120,3 +1120,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 下载取消且清理成功时保持静默。清理失败会显示检查目录的提示，校验或写入失败时保留原错误，底层暂存路径不会出现在新提示中。已校验落盘的安装包仍显示保存路径并支持复制，清理提示独立展示。若发布时目录移动，提示用户在原目录查找。
 - macOS 实际文件夹回归覆盖取消、校验失败、并发取消、成功落盘和发布后同名文件保留。Go 全量、vet、App 与 update 竞态和 Windows amd64 交叉编译通过，空间不足的全量测试在清理已归档的临时副本后重新通过。前端类型检查、生产构建、125 项 Vitest 和 Chromium、WebKit 设置页专项各 2 项通过。[Go 专项](../build/bin/qa-update-stage-cleanup/targeted.log) · [Chromium](../build/bin/qa-update-stage-cleanup/settings-chromium.log) · [WebKit](../build/bin/qa-update-stage-cleanup/settings-webkit.log) · [Windows 交叉编译](../build/bin/qa-update-stage-cleanup/windows-crosscompile.log)
 - Windows 原生及这一变更的成品验收留待累计批次。本地源码晚于 .60。macOS 发布前的暂存文件身份核查仍在 BMad 清单中。[BMad 记录](../_bmad-output/plan-e13-update-stage-cleanup.md) · [待处理记录](../_bmad-output/deferred-work.md)
+
+## E13 macOS 更新安装包文件身份（2026-11-27）
+
+- APFS 在下载前摘除暂存文件的目录项，确认打开文件已无链接。校验成功后从同一打开句柄独占克隆到目标。实际 .60 归档经新路径落盘，42,934,650 字节的 SHA-256 与清单一致，macOS 隔离标记保留。回归覆盖取消、校验失败、抢先创建同名目标以及保留无关文件。[APFS 回归及成品 ZIP](../build/bin/qa-macos-update-identity/apfs-regression.log) · [目标冲突](../build/bin/qa-macos-update-identity/arrival-collision.log) · [Apple 克隆接口](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/man/man2/clonefile.2)
+- HFS+ 仍可用。实际挂载的隔离卷验证正常落盘及隔离标记、暂存对象改变时拒绝保存、取消时保留无关文件，随后正常卸载。兼容卷发布前后检查文件身份。快审确认同账户进程并发替换目录项仍存在检查与操作之间的边界，HFS+ 等兼容卷的同文件内容变更也待核查。[HFS+ 挂载](../build/bin/qa-macos-update-identity/hfs-mount.log) · [兼容卷回归](../build/bin/qa-macos-update-identity/hfs-regression.log) · [待处理记录](../_bmad-output/deferred-work.md)
+- Go 全量、vet、App 竞态和 Windows amd64 测试交叉编译通过。清理旧隔离测试产物后解决空间不足造成的链接和 SQLite I/O 失败。本轮验证的是 macOS 本地源码保存路径及既有 .60 ZIP，正式签名、公证及新候选成品验收仍待完成。[Go 全量](../build/bin/qa-macos-update-identity/go-test.log) · [App 竞态](../build/bin/qa-macos-update-identity/go-race.log) · [BMad](../_bmad-output/plan-e13-macos-update-identity.md)
