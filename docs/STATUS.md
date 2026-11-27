@@ -2,12 +2,13 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，`v0.1.0-smoke.20261127.50` 是最新本地候选，打包源提交为 `33a7600d68d1951e4c8ecaea6b8fffeb35d75454`。下方记录包含历史验收，各版本的证据按对应提交使用。
+截至 2026-11-27，`v0.1.0-smoke.20261127.51` 是最新 GitHub 测试候选，打包源提交为 `a2b442ff0e1cd80ad5a3cb5a4a3fd61cedf0647b`。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
-| .50 本地构建 | 两平台 13 项 SHA-256、392 项浏览器测试和 Apple Silicon 成品启动及回滚通过 | [Windows 校验清单](../build/bin/smoke-20261127.50/windows/SHA256SUMS.txt) · [macOS 校验清单](../build/bin/smoke-20261127.50/macos/SHA256SUMS.txt) |
-| .50 GitHub 原生验收 | 等待独立测试分支推送授权。上一轮 .44 的 Windows、Apple Silicon、Intel Mac 通过 | 当前候选的四项冒烟任务全部成功，并下载复验两份归档和内部清单。[GitHub .44 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45878896269) |
+| .51 本地源码回归 | 393 项 Chromium、122 项 Vitest、WebKit 专项及 Go 全量、vet 和竞态通过 | [浏览器日志](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log) |
+| .51 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项打包与复验任务通过 | 两份原始归档 SHA-256 与 GitHub 摘要相符，两平台内部清单 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45946619517) · [本地复验日志](../build/bin/github-smoke-20261127.51/evidence/archived-checks.log) |
+| .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
 | Windows 正式签名 | 托管打包要求签名 PFX。证书库脚本可使用 Windows 上的硬件密钥，已通过本地夹具 | 确认维护者实际可用的签名路径；正式成品的便携程序、安装器和卸载器通过原生验签及时间戳检查。[签名说明](../README.md#windows-证书库签名) |
 | macOS 正式签名与公证 | 本地成品为临时签名 | 为 `release-macos` 配置 Developer ID Application 和公证凭据；双架构归档通过票据验证与分发策略检查。[签名环境](../README.md#签名环境) |
 | 正式发布版在线更新 | .49 的 Apple Silicon 系统保存、校验、重试与剪贴板已通过隔离验收 | 发布签名安装包后，用旧版实际验证 GitHub 版本发现与下载校验。[原生更新日志](../build/bin/qa-native-update-download-49/verify.log) |
@@ -766,3 +767,13 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 从发行源码 `a2b442ff0e1cd80ad5a3cb5a4a3fd61cedf0647b` 独立检出，包含 .50 的三项修复和之后的首页键盘焦点修复。Node 22 锁文件重装、类型检查和生产构建通过。393 项 Chromium、122 项 Vitest 与 macOS WebKit 首页键盘专项通过。被测前端的逐项摘要与构建输出一致。同环境下 1448×1086 首页截图按像素匹配修改前基线。[浏览器回归](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log)
 - Go 依赖校验、vet、全量测试和 App/诊断/CMS/更新竞态通过。Go 生产标签扫描及 npm 生产依赖审计未报告已知漏洞。macOS 13 对应的 Safari 支持首页使用的尺寸容器查询。最低公开支持系统的真实 WKWebView 环境仍需实机验证。[WebKit 支持记录](https://webkit.org/blog/13399/webkit-features-in-safari-16-1/) · [BMad 记录](../_bmad-output/plan-e13-current-local-regression51.md)
 - 本轮验证源码，现有可下载安装包仍为 .50。GitHub `package.yml` 已启用，最新已完成托管包仍为 .44，.51 独立分支待确认。仓库正式发行和签名环境均为 0，正式签名及授权片源联调的前置条件仍待满足。[工作流状态](../build/bin/qa-release-source-51/hosted-status.log)
+
+## E13 .51 累计候选托管打包（2026-11-27）
+
+- 将累计发行源码 `a2b442ff0e1cd80ad5a3cb5a4a3fd61cedf0647b` 推送到独立测试分支 `codex/smoke-20261127-51`。`v0.1.0-smoke.20261127.51` 的 Windows x64、Apple Silicon、Intel Mac 和 Windows 下载复验四项任务首轮通过。[打包运行](https://github.com/wuekevin/JindiDrama/actions/runs/45946619517)
+- Windows 安装版与便携版均通过原生启动及 SQLite 回滚。安装器通过占用时中止和释放后升级的检查。Windows Shell 打开已注册的 `jindi:` CMS 分享链接后恢复原应用窗口，卸载后协议被移除。托管环境走了托盘不可用时的最小化回退。Apple Silicon 与 Intel 从同一 Universal ZIP 验证原生启动、退出和回滚。[Windows 成品日志](../build/bin/github-smoke-20261127.51/evidence/windows-native.log) · [Apple Silicon 日志](../build/bin/github-smoke-20261127.51/evidence/macos-arm64-native.log) · [Intel 日志](../build/bin/github-smoke-20261127.51/evidence/macos-intel-native.log)
+- 下载两个原始 Actions ZIP，字节数和 SHA-256 均与 GitHub 元数据相符。用对应提交的项目校验器验证版本、提交、运行编号和尝试次数，并用 `shasum` 独立复算 Windows 7 项与 macOS 6 项。移动归档后再次复验通过。[Windows 清单](../build/bin/github-smoke-20261127.51/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/github-smoke-20261127.51/macos/SHA256SUMS.txt) · [原始 ZIP 清单](../build/bin/github-smoke-20261127.51/raw/SHA256SUMS.txt) · [归档复验](../build/bin/github-smoke-20261127.51/evidence/archived-checks.log)
+- Windows x64 NSIS 安装器 22.54 MiB，x64 便携程序 32.32 MiB，macOS Universal ZIP 40.88 MiB。Universal ZIP 内的应用包含 arm64 和 x86_64，两切片最低系统版本均为 macOS 13.0。本轮 macOS 原生运行使用 GitHub 托管系统。[包结构](../build/bin/github-smoke-20261127.51/evidence/package-layout.log) · [macOS 切片](../build/bin/github-smoke-20261127.51/evidence/macos-layout.log)
+- GitHub 默认分支的 Dependabot 仍有 35 项告警，其中严重 8 项、高危 8 项。候选的生产依赖扫描结果见上节。候选 Windows 和 macOS 主程序的 Go 构建信息均无 Echo 模块。默认分支待升级并重新核对告警。正式签名与公证、签名包在线更新、授权公网片源以及 Windows 用户会话的真实托盘仍待验收。[默认分支告警](https://github.com/wuekevin/JindiDrama/security/dependabot) · [候选主程序依赖](../build/bin/github-smoke-20261127.51/evidence/built-dependency-versions.log)
+- 同提交的首轮 CI 中，Windows 393 项浏览器用例全部通过。macOS 在 220% 设置页的复制路径用例失败，其余 392 项通过。推迟设置页尺寸通知可复现原测试先移动焦点、随后紧凑布局把按钮移出视口的时序。测试现在等紧凑布局生效，用 Tab 验证焦点、视口和剪贴板，并检查在 220% 重新下载后的按钮可见性。macOS WebKit 专项使用 Option+Tab。测试修复提交 `bc6296cd3611ae35894146bc6da24795c0b086b7` 的唯一改动是设置页端到端测试，沿用已校验的 .51 成品。[首轮 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45946620074) · [时序复现](../build/bin/github-smoke-20261127.51/evidence/settings-resize-experiment.log) · [专项截图](../build/bin/github-smoke-20261127.51/evidence/update-saved-220.png) · [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232)
+- 修复后，本地 393 项 Chromium、设置页 44 项、复制路径 12 次重复测试和 macOS WebKit 专项通过。最终 GitHub CI 的 Windows、macOS 均通过 393 项 Playwright、122 项 Vitest、Go vet、Go 全量和 Wails 构建。以 `a2b442f` 构建的 .51 包仍对应原始打包运行，`bc6296c` 用于回归测试。[本地全量](../build/bin/github-smoke-20261127.51/evidence/e2e-after-fix.log) · [WebKit 专项](../build/bin/github-smoke-20261127.51/evidence/settings-webkit-fixed.log) · [Windows CI 日志](../build/bin/github-smoke-20261127.51/evidence/windows-ci-final.log) · [macOS CI 日志](../build/bin/github-smoke-20261127.51/evidence/macos-ci-final.log)
