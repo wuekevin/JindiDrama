@@ -64,6 +64,42 @@ func TestSaveUpdateRejectsRetargetedWindowsDestination(t *testing.T) {
 	}
 }
 
+func TestStagedExportRejectsRetargetedWindowsDestination(t *testing.T) {
+	root := t.TempDir()
+	original := filepath.Join(root, "original")
+	replacement := filepath.Join(root, "replacement")
+	selected := filepath.Join(root, "selected")
+	for _, dir := range []string{original, replacement} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(original, selected); err != nil {
+		if errors.Is(err, windows.ERROR_PRIVILEGE_NOT_HELD) {
+			t.Skip("creating a directory symlink requires Windows Developer Mode or elevation")
+		}
+		t.Fatal(err)
+	}
+	err := writeStagedExport(filepath.Join(selected, "capture.png"), func(file io.Writer) error {
+		if _, err := io.WriteString(file, "capture"); err != nil {
+			return err
+		}
+		if err := os.Remove(selected); err != nil {
+			return err
+		}
+		return os.Symlink(replacement, selected)
+	})
+	if !errors.Is(err, errUpdateDestinationMoved) {
+		t.Fatalf("retargeted export: %v", err)
+	}
+	for _, dir := range []string{original, replacement} {
+		entries, err := os.ReadDir(dir)
+		if err != nil || len(entries) != 0 {
+			t.Fatalf("%s retained staged or published files: %v, %v", dir, entries, err)
+		}
+	}
+}
+
 func TestSaveUpdateRejectsWindowsDestinationCreatedDuringDownload(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "update.exe")

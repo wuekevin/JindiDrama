@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"testing"
 	"testing/fstest"
 
@@ -14,6 +16,118 @@ import (
 	"jindi-drama/internal/provider"
 	"jindi-drama/internal/provider/licensed"
 )
+
+func TestStagedExportLeavesReplacementDirectoryAlone(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows retargeting is exercised with a directory link")
+	}
+	root := t.TempDir()
+	directory := filepath.Join(root, "chosen")
+	moved := filepath.Join(root, "moved")
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(directory, "capture.png")
+	var replacement string
+	err := writeStagedExport(target, func(out io.Writer) error {
+		if _, err := io.WriteString(out, "captured data"); err != nil {
+			return err
+		}
+		stagingPath, err := filepath.Rel(directory, out.(*os.File).Name())
+		if err != nil {
+			return err
+		}
+		if err := os.Rename(directory, moved); err != nil {
+			return err
+		}
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			return err
+		}
+		replacement = filepath.Join(directory, stagingPath)
+		if err := os.MkdirAll(filepath.Dir(replacement), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(replacement, []byte("unrelated content"), 0o600)
+	})
+	if !errors.Is(err, errUpdateDestinationMoved) {
+		t.Fatalf("expected destination-change error, got %v", err)
+	}
+	if data, err := os.ReadFile(replacement); err != nil || string(data) != "unrelated content" {
+		t.Fatalf("replacement contents changed: %q, %v", data, err)
+	}
+	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("unexpected output in replacement directory: %v", err)
+	}
+	if entries, err := os.ReadDir(moved); err != nil || len(entries) != 0 {
+		t.Fatalf("temporary data remained in the moved directory: %v, %v", entries, err)
+	}
+}
+
+func TestStagedExportReportsCleanupFailureAfterPublishing(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "capture.png")
+	var otherFile string
+	err := writeStagedExport(target, func(out io.Writer) error {
+		otherFile = filepath.Join(filepath.Dir(out.(*os.File).Name()), "unrelated")
+		if err := os.WriteFile(otherFile, []byte("unrelated content"), 0o600); err != nil {
+			return err
+		}
+		_, err := io.WriteString(out, "captured data")
+		return err
+	})
+	if !errors.Is(err, errExportCleanup) {
+		t.Fatalf("expected cleanup failure after publication, got %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "captured data" {
+		t.Fatalf("published data lost: %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(otherFile); err != nil || string(data) != "unrelated content" {
+		t.Fatalf("unrelated file changed: %q, %v", data, err)
+	}
+}
+
+func TestDemoDirectExportRemainsInSelectedDirectory(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows can reject renaming a directory containing an open file")
+	}
+	root := t.TempDir()
+	selected := filepath.Join(root, "selected")
+	moved := filepath.Join(root, "moved")
+	if err := os.Mkdir(selected, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	name := "episode.mp4"
+	target := filepath.Join(selected, name)
+	asset := "demo/episode.mp4"
+	payload := []byte("embedded demo")
+	fallback, changed := false, false
+	assets := observedDemoAssets{FS: fstest.MapFS{asset: {Data: payload}}}
+	assets.beforeRead = func() error {
+		if !fallback || changed {
+			return nil
+		}
+		changed = true
+		if err := os.Rename(selected, moved); err != nil {
+			return err
+		}
+		if err := os.Mkdir(selected, 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(target, []byte("existing data"), 0o600)
+	}
+	err := exportDemoAsset(assets, asset, target, func(*stagedOutput, string) error {
+		fallback = true
+		return errors.ErrUnsupported
+	})
+	if !errors.Is(err, errUpdateDestinationMovedAfterPublish) {
+		t.Fatalf("expected moved-after-saving error, got %v", err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "existing data" {
+		t.Fatalf("replacement file changed: %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(moved, name)); err != nil || string(data) != string(payload) {
+		t.Fatalf("original directory lost the saved video: %q, %v", data, err)
+	}
+}
 
 func TestDemoExportUsesPlaybackAssetAndPreservesExistingFile(t *testing.T) {
 	a := New()
@@ -132,8 +246,8 @@ func TestDemoExportFallbackCopiesWithoutReplacingDestination(t *testing.T) {
 			expected := "embedded demo"
 			assets := fstest.MapFS{asset: {Data: []byte(expected)}}
 			var staged string
-			publish := func(from, to string) error {
-				staged = from
+			publish := func(stage *stagedOutput, to string) error {
+				staged = stage.file.Name()
 				if collision {
 					expected = "other program"
 					if err := os.WriteFile(to, []byte(expected), 0o600); err != nil {
@@ -176,7 +290,7 @@ func TestDemoExportFallbackFailureClearsOnlyOpenFile(t *testing.T) {
 		}
 		return nil
 	}
-	err := exportDemoAsset(assets, asset, target, func(string, string) error {
+	err := exportDemoAsset(assets, asset, target, func(*stagedOutput, string) error {
 		useFallback = true
 		return errors.ErrUnsupported
 	})

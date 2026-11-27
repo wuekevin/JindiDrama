@@ -13,6 +13,7 @@ import (
 )
 
 var errDemoDirectCopy = errors.New("当前保存位置仅支持直接写入，演示视频保存中断")
+var errExportCleanup = errors.New("文件已保存，但暂存目录清理失败")
 
 func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bool, error) {
 	if a.ctx == nil || a.assets == nil {
@@ -42,6 +43,9 @@ func (a *App) ExportDemoEpisode(dramaID string, episode int, quality string) (bo
 	if err := exportAsset(a.assets, asset, path); err != nil {
 		if errors.Is(err, fs.ErrExist) {
 			return false, errors.New("目标文件已存在，请使用其他文件名")
+		}
+		if destinationErr := exportDestinationError(err); destinationErr != nil {
+			return false, destinationErr
 		}
 		if errors.Is(err, errDemoDirectCopy) {
 			return false, errDemoDirectCopy
@@ -133,9 +137,25 @@ func (a *App) exportLicensedEpisode(dramaID string, episode int, pick func(runti
 		if errors.Is(err, fs.ErrExist) {
 			return false, errors.New("目标文件已存在，请使用其他文件名")
 		}
+		if destinationErr := exportDestinationError(err); destinationErr != nil {
+			return false, destinationErr
+		}
 		return false, errors.New("本地片库视频保存失败，请确认源文件仍可读取并检查保存位置")
 	}
 	return true, nil
+}
+
+func exportDestinationError(err error) error {
+	switch {
+	case errors.Is(err, errUpdateDestinationMoved):
+		return errors.New("保存目录已移动或替换，请重新选择保存位置")
+	case errors.Is(err, errUpdateDestinationMovedAfterPublish):
+		return errors.New("保存目录已移动或替换，请在原目录查找已保存的文件")
+	case errors.Is(err, errExportCleanup):
+		return errExportCleanup
+	default:
+		return nil
+	}
 }
 
 func exportLicensedFile(source *os.File, expected os.FileInfo, target string) error {
@@ -155,36 +175,46 @@ func exportLicensedFile(source *os.File, expected os.FileInfo, target string) er
 }
 
 func writeStagedExport(target string, write func(io.Writer) error) error {
-	return stageExport(target, write, publishExport)
+	return stageExport(target, write, func(stage *stagedOutput, target string) error { return stage.publish(target) })
 }
 
-func stageExport(target string, write func(io.Writer) error, publish func(string, string) error) (result error) {
+func stageExport(target string, write func(io.Writer) error, publish func(*stagedOutput, string) error) (result error) {
 	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
 		if err == nil {
 			return fs.ErrExist
 		}
 		return err
 	}
-	staged, err := os.CreateTemp(filepath.Dir(target), ".jindidrama-export-*")
+	stage, err := createOutputStage(filepath.Dir(target), ".jindidrama-export-", false)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		if err := os.Remove(staged.Name()); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			result = errors.Join(result, err)
+		if err := stage.cleanup(); err != nil {
+			if result == nil {
+				result = errExportCleanup
+			}
+			// Cleanup errors must not be mistaken for a publication collision.
+			result = errors.Join(result, fmt.Errorf("清理暂存失败（%v）", err))
 		}
 	}()
-	if err := errors.Join(write(staged), staged.Close()); err != nil {
+	if stage.file == nil {
+		return publish(stage, target)
+	}
+	if err := write(stage.file); err != nil {
 		return err
 	}
-	return publish(staged.Name(), target)
+	if err := stage.file.Sync(); err != nil {
+		return err
+	}
+	return publish(stage, target)
 }
 
 func exportAsset(assets fs.FS, path, target string) error {
-	return exportDemoAsset(assets, path, target, publishExport)
+	return exportDemoAsset(assets, path, target, func(stage *stagedOutput, target string) error { return stage.publish(target) })
 }
 
-func exportDemoAsset(assets fs.FS, path, target string, publish func(string, string) error) error {
+func exportDemoAsset(assets fs.FS, path, target string, publish func(*stagedOutput, string) error) error {
 	copyAsset := func(output io.Writer) error {
 		source, err := assets.Open(path)
 		if err != nil {
@@ -195,25 +225,17 @@ func exportDemoAsset(assets fs.FS, path, target string, publish func(string, str
 		return err
 	}
 
-	allowCopyFallback := false
-	err := stageExport(target, copyAsset, func(staged, target string) error {
-		err := publish(staged, target)
+	return stageExport(target, copyAsset, func(stage *stagedOutput, target string) error {
+		err := publish(stage, target)
 		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
-			allowCopyFallback = true
-			return nil
+			return stage.copyDirect(target, copyAsset)
 		}
 		return err
 	})
-	if err != nil || !allowCopyFallback {
-		return err
-	}
+}
 
-	// The temporary copy is already gone so the destination only needs space for one file.
-	file, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		return err
-	}
-	if err := copyAsset(file); err != nil {
+func completeDirectExport(file *os.File, write func(io.Writer) error) error {
+	if err := write(file); err != nil {
 		// Acting on the open file keeps any replacement at the same path intact.
 		return errors.Join(errDemoDirectCopy, err, file.Truncate(0), file.Close())
 	}

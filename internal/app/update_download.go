@@ -85,10 +85,15 @@ func (a *App) CancelUpdateDownload() {
 	}
 }
 
-type stagedUpdate struct {
-	file    *os.File
-	publish func(string) error
-	cleanup func()
+type stagedOutput struct {
+	file       *os.File
+	publish    func(string) error
+	cleanup    func() error
+	copyDirect func(string, func(io.Writer) error) error
+}
+
+func createUpdateStage(parent string) (*stagedOutput, error) {
+	return createOutputStage(parent, ".jindidrama-update-", true)
 }
 
 var (

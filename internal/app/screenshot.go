@@ -63,6 +63,9 @@ func (a *App) exportDemoScreenshot(dramaID string, episode int, quality string, 
 		if errors.Is(err, fs.ErrExist) {
 			return false, errors.New("目标文件已存在，请使用其他文件名")
 		}
+		if destinationErr := exportDestinationError(err); destinationErr != nil {
+			return false, destinationErr
+		}
 		return false, errors.New("截图保存失败")
 	}
 	return true, nil

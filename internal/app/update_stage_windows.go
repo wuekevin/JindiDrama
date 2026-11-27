@@ -13,14 +13,17 @@ import (
 
 const updateFileShares = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 
-func createUpdateStage(parent string) (*stagedUpdate, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
-		return nil, err
-	}
-	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")")
-	if err != nil {
-		return nil, err
+func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, error) {
+	var descriptor *windows.SECURITY_DESCRIPTOR
+	if markOrigin {
+		user, err := windows.GetCurrentProcessToken().GetTokenUser()
+		if err != nil {
+			return nil, err
+		}
+		descriptor, err = windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")")
+		if err != nil {
+			return nil, err
+		}
 	}
 	// For a directory, FILE_WRITE_DATA and FILE_APPEND_DATA grant creation of
 	// files and subdirectories respectively.
@@ -30,17 +33,15 @@ func createUpdateStage(parent string) (*stagedUpdate, error) {
 		return nil, err
 	}
 
-	dirName := ".jindidrama-update-" + rand.Text()
+	dirName := prefix + rand.Text()
 	const stagingAccess = windows.FILE_WRITE_DATA | windows.FILE_TRAVERSE | windows.DELETE
 	dir, err := createUpdateObject(dest, dirName, stagingAccess, updateFileShares, windows.FILE_DIRECTORY_FILE, descriptor)
 	if err != nil {
 		_ = windows.CloseHandle(dest)
 		return nil, err
 	}
-	closeStageDirectory := func() {
-		deleteUpdateObject(dir)
-		_ = windows.CloseHandle(dir)
-		_ = windows.CloseHandle(dest)
+	closeStageDirectory := func() error {
+		return errors.Join(deleteUpdateObject(dir), windows.CloseHandle(dir), windows.CloseHandle(dest))
 	}
 
 	const name = "package"
@@ -51,16 +52,26 @@ func createUpdateStage(parent string) (*stagedUpdate, error) {
 	}
 	file := os.NewFile(uintptr(handle), filepath.Join(parent, dirName, name))
 	published := false
-	cleanup := func() {
-		if !published {
-			deleteUpdateObject(handle)
+	discarded := false
+	discard := func() error {
+		if discarded {
+			return nil
 		}
-		_ = file.Close()
-		closeStageDirectory()
+		discarded = true
+		var err error
+		if !published {
+			err = deleteUpdateObject(handle)
+		}
+		return errors.Join(err, file.Close())
 	}
-	if err := markUpdateZone(dir, handle, name); err != nil {
-		cleanup()
-		return nil, errUpdateOrigin
+	cleanup := func() error {
+		return errors.Join(discard(), closeStageDirectory())
+	}
+	if markOrigin {
+		if err := markUpdateZone(dir, handle, name); err != nil {
+			cleanup()
+			return nil, errUpdateOrigin
+		}
 	}
 	destinationMatches := func() bool {
 		selected, err := openUpdateDirectory(parent, windows.FILE_READ_ATTRIBUTES)
@@ -70,7 +81,7 @@ func createUpdateStage(parent string) (*stagedUpdate, error) {
 		defer windows.CloseHandle(selected)
 		return sameUpdateObject(dest, selected)
 	}
-	return &stagedUpdate{
+	return &stagedOutput{
 		file: file,
 		publish: func(target string) error {
 			return publishInUpdateDestination(destinationMatches, func() error {
@@ -82,6 +93,22 @@ func createUpdateStage(parent string) (*stagedUpdate, error) {
 			})
 		},
 		cleanup: cleanup,
+		copyDirect: func(target string, write func(io.Writer) error) error {
+			return publishInUpdateDestination(destinationMatches, func() error {
+				if err := discard(); err != nil {
+					return err
+				}
+				name := filepath.Base(target)
+				if !filepath.IsLocal(name) {
+					return windows.ERROR_INVALID_NAME
+				}
+				handle, err := createUpdateObject(dest, name, windows.GENERIC_WRITE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, nil)
+				if err != nil {
+					return err
+				}
+				return completeDirectExport(os.NewFile(uintptr(handle), target), write)
+			})
+		},
 	}, nil
 }
 
@@ -117,9 +144,9 @@ func updateWindowsError(err error) error {
 	return err
 }
 
-func deleteUpdateObject(handle windows.Handle) {
+func deleteUpdateObject(handle windows.Handle) error {
 	deleteFile := byte(1)
-	_ = windows.SetFileInformationByHandle(handle, windows.FileDispositionInfo, &deleteFile, 1)
+	return windows.SetFileInformationByHandle(handle, windows.FileDispositionInfo, &deleteFile, 1)
 }
 
 func sameUpdateObject(left, right windows.Handle) bool {

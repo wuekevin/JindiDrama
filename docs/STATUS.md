@@ -793,3 +793,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 同一有效封面票据可以复用明确允许公开缓存且仍新鲜的 JPEG。含查询参数的地址、需要区分请求的响应、带 Cookie 或缺少明确缓存许可的响应每次重新请求。缓存仅位于应用进程内，上限 8 MiB，WebView 仍收到 `no-store`。显式刷新更新或清除旧图，较早请求不能写回覆盖较新请求。缓存达到上限时先回收过期副本。[HTTP 新鲜度](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2.3)
 - 夹具验证同一公开封面连续请求两次只连接一次上游，刷新后继续使用新图。带签名参数、Cookie、Vary、过期标记和限额场景覆盖通过。Go 全量、vet、App 竞态及 Windows amd64 App 测试交叉编译通过。隔离检出补齐现有前端产物后全量成功。[封面专项](../build/bin/qa-cms-cover-freshness/cover-tests.log) · [BMad 记录](../_bmad-output/plan-e12-cover-freshness.md)
 - 本次源码改动晚于 .51 打包。公开封面缓存独立于远程下载队列，实际授权公网 CMS 联调及远程下载授权仍待处理。
+
+## E11 视频导出和截图固定保存目录（2026-11-27）
+
+- 原版回归复现视频或截图暂存期间替换所选目录后仍报告保存成功。现在演示视频、授权本地片库导出与截图复用目录句柄和独占发布。替换目录不会承接结果或暂存清理。演示视频回退先结束暂存再从原目录独占创建文件。若复制时原路径改变，已保存的数据保留在原目录并提示查找位置。成功保存后遇到清理失败会单独提示。[原版回归](../build/bin/qa-media-export-destination/before.log) · [BMad 记录](../_bmad-output/plan-e11-export-destination.md)
+- macOS Go 测试覆盖替换目录中的同名暂存文件、直接复制时移动目录、目标冲突、清理失败保留正式文件和外部文件，以及截图和更新安装包旧路径。Go 全量、vet 和 App 竞态通过，Windows 与 Linux amd64 App 测试交叉编译通过。真实 ExFAT 卷的兼容测试因系统拒绝创建镜像未执行。Windows GUI 验收待运行，本次源码晚于 .51 打包。[专项日志](../build/bin/qa-media-export-destination/targeted.log) · [交叉编译](../build/bin/qa-media-export-destination/architectures.log)
