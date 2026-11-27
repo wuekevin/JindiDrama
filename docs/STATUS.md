@@ -994,3 +994,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 评审复现了暂停重新定位后回到旧断点，以及切源缓冲期间主动暂停后备用线路自动播放。修复后保持最新定位和暂停状态，未播放的定位不产生观看历史。[原版缺少控件](../build/bin/qa-cms-manual-source/baseline.log) · [断点回归复现](../build/bin/qa-cms-manual-source/paused-baseline.log) · [暂停回归复现](../build/bin/qa-cms-manual-source/cancel-baseline.log)
 - 生产构建、Vitest 125 项、Chromium Provider 播放全套 69 项和 WebKit 切源 4 项通过。实际样片验证切源，并用 HTTP 404 响应触发播放器原生错误后回退。对照默认窗口和 220% 放大截图，播放源控件与原有操作均完整，键盘焦点可见。[构建](../build/bin/qa-cms-manual-source/build-final.log) · [Vitest](../build/bin/qa-cms-manual-source/unit-final.log) · [Chromium](../build/bin/qa-cms-manual-source/chromium-verified.log) · [WebKit](../build/bin/qa-cms-manual-source/webkit-verified.log) · [默认窗口](../build/bin/qa-cms-manual-source/cms-source-default.png) · [220% 窗口](../build/bin/qa-cms-manual-source/cms-source-220.png)
 - 本轮使用本地样片和模拟 CMS 票据验收。桌面成品待下一次累计打包，公网片源待授权 HTTPS 端点联调。[BMad](../_bmad-output/plan-e04-cms-manual-source.md)
+
+## E04 Apple Silicon 原生 CMS 手动切源（2026-11-27）
+
+- 用候选源码 `0e83db98ac84c022091cc3b505df57fd199c9f13` 的 .57 临时签名构建，在 macOS 26.6.2 验证 Wails、WKWebView、苹果 CMS Go Provider 和媒体代理。夹具提供相同合成样片的两条可播线路和一条返回 HTTP 404 的线路。逐项核对签名 Mach-O 内 69 个前端文件的字节与生产构建 SHA-256。[构建身份](../build/bin/qa-native-cms-manual-source/identity.log) · [嵌入资源 SHA-256](../build/bin/qa-native-cms-manual-source/embedded-match.log) · [Go 媒体请求](../build/bin/qa-native-cms-manual-source/process.log)
+- 从第一条线路暂停定位在 7.000 秒，手动切换到第二条后断点不变且观看历史为空。继续播放后选中第三条，404 触发回退。第一条线路在同一票据内恢复静音播放，原生辅助功能识别「播放源」并报告「线路 1」。[运行记录](../build/bin/qa-native-cms-manual-source/native.log) · [辅助功能树](../build/bin/qa-native-cms-manual-source/player.ax)
+- 播放中退出前，SQLite 保存着第 1 集 7.250 秒。触发系统退出后，SQLite 断点更新为 10.080 秒，完整性检查通过，辅助文件和运行会话标记已清理。此行记录对应 Apple Silicon 测试构建。Windows、Intel Mac 和授权公网片源的生产配置仍待验收。[验收条件](../build/bin/qa-native-cms-manual-source/acceptance.txt) · [BMad](../_bmad-output/plan-e04-cms-manual-source-native.md)
