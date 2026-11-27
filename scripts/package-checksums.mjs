@@ -185,6 +185,8 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
   const required = [
     ['package-release (windows-latest)', [
       'verify distribution source history',
+      'verify frontend release regressions',
+      'verify native Go release regressions',
       'build (windows, NSIS installer)',
       'confirm dependency files stayed unchanged',
       'sign application and installer (windows release)',
@@ -193,6 +195,8 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
     ]],
     ['package-release (macos-latest)', [
       'verify distribution source history',
+      'verify frontend release regressions',
+      'verify native Go release regressions',
       'build and verify deployment target (macos)',
       'confirm dependency files stayed unchanged',
       'sign application (macos release)',

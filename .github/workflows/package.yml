@@ -97,8 +97,44 @@ jobs:
       - name: build the frontend from its lockfile
         working-directory: frontend
         run: npm ci && npm run build
+      - name: verify frontend release regressions
+        if: inputs.mode == 'release'
+        working-directory: frontend
+        shell: bash
+        env:
+          JINDI_E2E_PREBUILT: '1'
+        run: |
+          frontend_sha=$(node ../scripts/package-frontend-digest.mjs dist)
+          npm run typecheck
+          npm test
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+          # The visual tests regenerate tracked screenshots in this disposable checkout.
+          git -C .. restore --source=HEAD --worktree -- design/rendered
+          changes=$(git -C .. status --porcelain)
+          if [[ -n "$changes" ]]; then
+            printf '%s\n' "$changes"
+            exit 1
+          fi
+          verified_sha=$(node ../scripts/package-frontend-digest.mjs dist)
+          if [[ "$verified_sha" != "$frontend_sha" ]]; then
+            echo 'The frontend build changed during frontend verification'
+            exit 1
+          fi
+          printf 'JD_TESTED_FRONTEND_SHA=%s\n' "$frontend_sha" >> "$GITHUB_ENV"
       - name: verify Go dependencies
         run: go mod download && go mod verify
+      - name: verify native Go release regressions
+        if: inputs.mode == 'release'
+        shell: bash
+        run: |
+          go vet ./...
+          go test -count=1 ./...
+          frontend_sha=$(node scripts/package-frontend-digest.mjs frontend/dist)
+          if [[ "$frontend_sha" != "$JD_TESTED_FRONTEND_SHA" ]]; then
+            echo 'The frontend build changed after browser verification'
+            exit 1
+          fi
       - run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
       - name: install NSIS (windows)
         if: runner.os == 'Windows'

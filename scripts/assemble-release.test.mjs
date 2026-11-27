@@ -142,6 +142,8 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const jobs = [
     ['package-release (windows-latest)', [
       'verify distribution source history',
+      'verify frontend release regressions',
+      'verify native Go release regressions',
       'build (windows, NSIS installer)',
       'confirm dependency files stayed unchanged',
       'sign application and installer (windows release)',
@@ -150,6 +152,8 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     ]],
     ['package-release (macos-latest)', [
       'verify distribution source history',
+      'verify frontend release regressions',
+      'verify native Go release regressions',
       'build and verify deployment target (macos)',
       'confirm dependency files stayed unchanged',
       'sign application (macos release)',
@@ -180,7 +184,7 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
-  assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs and 17 required steps/)
+  assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs and 21 required steps/)
   assert.match(validDraft.stdout, /artifact 321 matches the original ZIP and all 11 handoff files/)
   const withChangedJob = (name, update) => jobs.map((job) => job.name === name ? update(job) : job)
   const macSigning = 'package-release (macos-latest)'
@@ -259,6 +263,28 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     assert.match(rejected.stderr, /Release job assemble-release must have succeeded/)
   }
   assert.match(validDraft.stdout, new RegExp('GitHub release tag .* matches build commit ' + sha))
+  for (const jobIndex of [0, 1]) {
+    const original = jobs[jobIndex]
+    for (const gate of ['verify frontend release regressions', 'verify native Go release regressions']) {
+      const omitted = original.steps.filter((step) => step.name !== gate)
+      const failed = original.steps.map((step) => step.name === gate ? { ...step, conclusion: 'failure' } : step)
+      const skipped = original.steps.map((step) => step.name === gate ? { ...step, conclusion: 'skipped' } : step)
+      for (const steps of [omitted, failed, skipped]) {
+        const releaseJobs = jobs.map((job, index) => index === jobIndex ? { ...job, steps } : job)
+        const rejected = await checkDraft(draft, { releaseJobs })
+        assert.equal(rejected.status, 1, rejected.stdout)
+        assert.match(rejected.stderr, new RegExp(gate))
+      }
+    }
+    for (const gate of ['verify frontend release regressions', 'verify native Go release regressions']) {
+      const nativeBuild = original.steps.find((step) => step.name.startsWith('build '))
+      const late = original.steps.map((step) => step.name === gate ? { ...step, number: nativeBuild.number + 1 } : step)
+      const releaseJobs = jobs.map((job, index) => index === jobIndex ? { ...job, steps: late } : job)
+      const rejected = await checkDraft(draft, { releaseJobs })
+      assert.equal(rejected.status, 1, rejected.stdout)
+      assert.match(rejected.stderr, /steps must have succeeded in order/)
+    }
+  }
   const normalizedDraft = await checkDraft({ ...draft, body: body.trimEnd().replace(/\n/g, '\r\n') })
   assert.equal(normalizedDraft.status, 0, normalizedDraft.stderr)
   for (const invalidBody of [null, body + '\nUnverified change']) {

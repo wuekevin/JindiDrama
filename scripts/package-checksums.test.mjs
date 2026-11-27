@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
@@ -43,6 +43,39 @@ for (const platform of ['macos', 'windows']) {
     assert.equal(verification.stdout.trim().split('\n').length, platform === 'windows' ? 7 : 6)
   })
 }
+
+test('fingerprints all embedded frontend file paths and bytes', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'jindi-frontend-digest-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const digestScript = fileURLToPath(new URL('./package-frontend-digest.mjs', import.meta.url))
+  const directory = join(root, 'dist')
+  await mkdir(join(directory, 'assets'), { recursive: true })
+  const missing = runNode(digestScript, directory)
+  assert.equal(missing.status, 1)
+  assert.match(missing.stderr, /missing index.html/)
+
+  const nested = join(directory, 'assets', '.embedded')
+  await writeFile(join(directory, 'index.html'), 'index')
+  await writeFile(nested, 'asset')
+  function fingerprint() {
+    const result = runNode(digestScript, directory)
+    assert.equal(result.status, 0, result.stderr)
+    assert.match(result.stdout.trim(), /^[0-9a-f]{64}$/)
+    return result.stdout.trim()
+  }
+  const original = fingerprint()
+  assert.equal(fingerprint(), original)
+  await writeFile(nested, 'other')
+  assert.notEqual(fingerprint(), original)
+  await writeFile(nested, 'asset')
+  assert.equal(fingerprint(), original)
+  const moved = join(directory, '.embedded')
+  await rename(nested, moved)
+  const changedPath = fingerprint()
+  assert.notEqual(changedPath, original)
+  await rm(moved)
+  assert.notEqual(fingerprint(), changedPath)
+})
 
 test('verifies both original smoke ZIPs and rejects mismatched attempts and archive bytes', async (t) => {
   const root = await mkdtemp(join(tmpdir(), 'jindi-smoke-archives-'))
