@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,16 +20,20 @@ func (a *App) DownloadUpdate(releaseURL string) (bool, error) {
 }
 
 type UpdateDownloadResult struct {
-	Path    string `json:"path"`
-	Warning string `json:"warning,omitempty"`
+	Path       string `json:"path"`
+	Warning    string `json:"warning,omitempty"`
+	Unverified string `json:"unverified,omitempty"`
 }
 
-// DownloadUpdateWithStatus preserves the verified path when only stage cleanup fails.
+// DownloadUpdateWithStatus returns a verified path or a warning about an unverified output.
 func (a *App) DownloadUpdateWithStatus(releaseURL string) (UpdateDownloadResult, error) {
 	return updateDownloadResult(a.DownloadUpdateFile(releaseURL))
 }
 
 func updateDownloadResult(path string, err error) (UpdateDownloadResult, error) {
+	if errors.Is(err, errUpdatePublishedIdentity) {
+		return UpdateDownloadResult{Unverified: err.Error()}, nil
+	}
 	if path != "" && errors.Is(err, errUpdateSavedCleanup) {
 		return UpdateDownloadResult{Path: path, Warning: err.Error()}, nil
 	}
@@ -84,7 +89,7 @@ func (a *App) DownloadUpdateFile(releaseURL string) (string, error) {
 	if !current {
 		return "", errors.New("安装包已变更，请重新检查更新")
 	}
-	saved, err := saveUpdate(ctx, path, asset.Download, func(publish func() error) error {
+	saved, err := saveUpdate(ctx, path, asset.Download, asset.VerifySaved, func(publish func() error) error {
 		a.updateMu.Lock()
 		defer a.updateMu.Unlock()
 		return publish()
@@ -104,10 +109,11 @@ func (a *App) CancelUpdateDownload() {
 }
 
 type stagedOutput struct {
-	file       *os.File
-	publish    func(string) error
-	cleanup    func() error
-	copyDirect func(string, func(io.Writer) error) error
+	file                 *os.File
+	publish              func(string) error
+	cleanup              func() error
+	copyDirect           func(string, func(io.Writer) error) error
+	checkPublishedUpdate func(string, func() error) error
 }
 
 type outputStageKind uint8
@@ -141,7 +147,7 @@ func outputStageSetupError(kind outputStageKind, cause, cleanupErr error) error 
 	return cause
 }
 
-func saveUpdate(ctx context.Context, path string, download func(context.Context, io.Writer) error, commit func(func() error) error) (saved bool, result error) {
+func saveUpdate(ctx context.Context, path string, download func(context.Context, io.Writer) error, verify func(context.Context, io.Reader) error, commit func(func() error) error) (saved bool, result error) {
 	const saveError = "无法保存安装包，请检查保存位置和可用空间"
 	if _, err := os.Lstat(path); err == nil {
 		return false, errors.New("目标文件已存在，请使用其他文件名")
@@ -181,12 +187,36 @@ func saveUpdate(ctx context.Context, path string, download func(context.Context,
 	if err := stage.file.Sync(); err != nil {
 		return false, errors.New(saveError)
 	}
+	verifyOpenedFile := func(ctx context.Context) error {
+		return verify(ctx, io.NewSectionReader(stage.file, 0, math.MaxInt64))
+	}
+	if stage.checkPublishedUpdate != nil {
+		if err := verifyOpenedFile(ctx); err != nil {
+			if contextErr := ctx.Err(); contextErr != nil && errors.Is(err, contextErr) {
+				return false, nil
+			}
+			return false, err
+		}
+	}
 	err = commit(func() error {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return stage.publish(path)
 	})
+	// Once published, complete the readback even if the user cancels meanwhile.
+	// It runs after commit releases the update mutex.
+	if stage.checkPublishedUpdate != nil && (err == nil || errors.Is(err, errUpdateDestinationMovedAfterPublish)) {
+		verifyErr := stage.checkPublishedUpdate(path, func() error {
+			return verifyOpenedFile(context.WithoutCancel(ctx))
+		})
+		if errors.Is(verifyErr, errUpdateDestinationMovedAfterPublish) {
+			return false, verifyErr
+		}
+		if verifyErr != nil {
+			return false, errors.Join(errUpdatePublishedIdentity, verifyErr)
+		}
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return false, nil
 	}

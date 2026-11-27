@@ -24,7 +24,7 @@ func TestSaveUpdateOnlyPublishesVerifiedFile(t *testing.T) {
 			return nil
 		},
 	} {
-		saved, err := saveUpdate(ctx, path, download, commit)
+		saved, err := saveTestUpdate(ctx, path, download, commit)
 		if saved || (ctx.Err() == nil && !errors.Is(err, failure)) || (ctx.Err() != nil && err != nil) {
 			t.Fatalf("failed or cancelled download: saved=%v err=%v", saved, err)
 		}
@@ -36,7 +36,7 @@ func TestSaveUpdateOnlyPublishesVerifiedFile(t *testing.T) {
 	verified := func(_ context.Context, w io.Writer) error { _, err := io.WriteString(w, "verified"); return err }
 	final, cancelFinal := context.WithCancel(context.Background())
 	defer cancelFinal()
-	if saved, err := saveUpdate(final, path, verified, func(publish func() error) error {
+	if saved, err := saveTestUpdate(final, path, verified, func(publish func() error) error {
 		cancelFinal()
 		return publish()
 	}); saved || err != nil {
@@ -45,10 +45,10 @@ func TestSaveUpdateOnlyPublishesVerifiedFile(t *testing.T) {
 	if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("cancelled update was published: %v", err)
 	}
-	if saved, err := saveUpdate(context.Background(), path, verified, commit); !saved || err != nil {
+	if saved, err := saveTestUpdate(context.Background(), path, verified, commit); !saved || err != nil {
 		t.Fatalf("successful download: %v %v", saved, err)
 	}
-	if saved, err := saveUpdate(context.Background(), path, verified, commit); saved || err == nil {
+	if saved, err := saveTestUpdate(context.Background(), path, verified, commit); saved || err == nil {
 		t.Fatalf("overwriting existing update was allowed: %v %v", saved, err)
 	}
 	if b, err := os.ReadFile(path); err != nil || string(b) != "verified" {
@@ -103,7 +103,7 @@ func TestSaveUpdateReportsStageCleanupFailure(t *testing.T) {
 				}
 				return tc.downloadErr
 			}
-			saved, err := saveUpdate(ctx, path, download, func(publish func() error) error { return publish() })
+			saved, err := saveTestUpdate(ctx, path, download, func(publish func() error) error { return publish() })
 			wantMessage := tc.wantMessage
 			if errors.Is(tc.downloadErr, verificationFailure) {
 				wantMessage = tc.downloadErr.Error() + "\n" + wantMessage
@@ -137,8 +137,17 @@ func TestUpdateDownloadResultKeepsVerifiedPathWithWarning(t *testing.T) {
 		result.Path != path || result.Warning != errUpdateSavedCleanup.Error() {
 		t.Fatalf("verified download status: %+v, %v", result, err)
 	}
+	if result, err := updateDownloadResult("", errUpdatePublishedIdentity); err != nil ||
+		result.Path != "" || result.Warning != "" || result.Unverified != errUpdatePublishedIdentity.Error() {
+		t.Fatalf("unverified persisted download status: %+v, %v", result, err)
+	}
 	if result, err := updateDownloadResult("", errUpdateCleanup); !errors.Is(err, errUpdateCleanup) ||
 		result.Path != "" || result.Warning != "" {
 		t.Fatalf("failed download status: %+v, %v", result, err)
 	}
+}
+
+// These fixtures exercise saving, cancellation and cleanup independently of release checks.
+func saveTestUpdate(ctx context.Context, path string, download func(context.Context, io.Writer) error, commit func(func() error) error) (bool, error) {
+	return saveUpdate(ctx, path, download, func(context.Context, io.Reader) error { return nil }, commit)
 }

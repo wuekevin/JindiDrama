@@ -1058,7 +1058,7 @@ export const appVersion = () => api()?.AppVersion() ?? Promise.resolve('v0.1.0')
 /** 检查更新：仅桌面端可用（浏览器预览返回 null）。 */
 export const checkUpdate = (): Promise<UpdateResult | null> => api()?.CheckUpdate() ?? Promise.resolve(null)
 export const openReleasePage = (url: string) => api()?.OpenReleasePage(url) ?? Promise.resolve()
-export interface UpdateDownloadResult { path: string; warning?: string }
+export interface UpdateDownloadResult { path: string; warning?: string; unverified?: string }
 export function supportsUpdateDownload() {
   const bridge = api()
   return !!((bridge?.DownloadUpdateWithStatus || bridge?.DownloadUpdateFile || bridge?.DownloadUpdate) && bridge.CancelUpdateDownload)

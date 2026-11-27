@@ -132,6 +132,37 @@ func (a *Asset) download(ctx context.Context, target io.Writer, client *http.Cli
 	return ctx.Err()
 }
 
+// VerifySaved checks the installed bytes against the release asset metadata.
+func (a *Asset) VerifySaved(ctx context.Context, source io.Reader) error {
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(updateReadback{ctx, source}, a.size+1))
+	if err != nil {
+		if contextErr := ctx.Err(); contextErr != nil && errors.Is(err, contextErr) {
+			return contextErr
+		}
+		return errors.New("无法回读更新安装包")
+	}
+	if n != a.size {
+		return errors.New("更新文件大小校验失败")
+	}
+	if [sha256.Size]byte(hash.Sum(nil)) != a.digest {
+		return errors.New("更新文件 SHA-256 校验失败")
+	}
+	return ctx.Err()
+}
+
+type updateReadback struct {
+	ctx    context.Context
+	source io.Reader
+}
+
+func (r updateReadback) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.source.Read(p)
+}
+
 func assetResponseError(resp *http.Response) error {
 	status := resp.StatusCode
 	switch {

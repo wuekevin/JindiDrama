@@ -19,15 +19,16 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if err != nil {
 		return nil, err
 	}
-	cloneUpdate := false
+	var filesystem string
 	if kind == updateOutputStage {
 		var volume unix.Statfs_t
 		if err := unix.Fstatfs(destFD, &volume); err != nil {
 			_ = unix.Close(destFD)
 			return nil, err
 		}
-		cloneUpdate = unix.ByteSliceToString(volume.Fstypename[:]) == "apfs"
+		filesystem = unix.ByteSliceToString(volume.Fstypename[:])
 	}
+	cloneUpdate := filesystem == "apfs"
 	destinationMatches := func() bool {
 		var original, selected unix.Stat_t
 		return unix.Fstat(destFD, &original) == nil && unix.Stat(parent, &selected) == nil &&
@@ -98,7 +99,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	const name = "package"
 	flags := unix.O_WRONLY
-	if kind == privateBackupOutputStage || cloneUpdate {
+	if kind == privateBackupOutputStage || kind == updateOutputStage {
 		flags = unix.O_RDWR
 	}
 	fd, err := unix.Openat(dirFD, name, flags|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
@@ -150,6 +151,51 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 			return nil, outputStageSetupError(kind, errUpdateOrigin, cleanup())
 		}
 	}
+	var checkPublishedUpdate func(string, func() error) error
+	if kind == updateOutputStage && !cloneUpdate {
+		checkPublishedUpdate = func(target string, verify func() error) error {
+			destName := filepath.Base(target)
+			var selectedMatches bool
+			var generation uint32
+			err := verifyDarwinUpdateReadback(fd, func() error {
+				var before, after unix.Stat_t
+				if unix.Fstat(fd, &before) != nil || checkUpdateFileIdentity(fd, destFD, destName) != nil {
+					return errUpdateStageIdentity
+				}
+				if filesystem == "hfs" {
+					value, err := fileprivacy.WriteGeneration(fd)
+					if err != nil || value == 0 {
+						return errUpdateStageIdentity
+					}
+					generation = value
+				}
+				if err := verify(); err != nil {
+					return err
+				}
+				if unix.Fstat(fd, &after) != nil || before.Size != after.Size ||
+					before.Mtim != after.Mtim || before.Ctim != after.Ctim ||
+					checkUpdateFileIdentity(fd, destFD, destName) != nil {
+					return errUpdateStageIdentity
+				}
+				selectedMatches = destinationMatches()
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			// Check HFS+ mapped writes after the final vnode event poll.
+			if filesystem == "hfs" {
+				value, err := fileprivacy.WriteGeneration(fd)
+				if err != nil || value != generation {
+					return errUpdateStageIdentity
+				}
+			}
+			if !selectedMatches {
+				return errUpdateDestinationMovedAfterPublish
+			}
+			return nil
+		}
+	}
 	return &stagedOutput{
 		file: file,
 		publish: func(target string) error {
@@ -181,7 +227,8 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 				return err
 			})
 		},
-		cleanup: cleanup,
+		cleanup:              cleanup,
+		checkPublishedUpdate: checkPublishedUpdate,
 		copyDirect: func(target string, write func(io.Writer) error) error {
 			if err := discard(); err != nil {
 				return err
@@ -196,6 +243,31 @@ func checkUpdateFileIdentity(fd, dirFD int, name string) error {
 	if unix.Fstat(fd, &opened) != nil ||
 		unix.Fstatat(dirFD, name, &entry, unix.AT_SYMLINK_NOFOLLOW) != nil ||
 		opened.Dev != entry.Dev || opened.Ino != entry.Ino || entry.Mode&unix.S_IFMT != unix.S_IFREG {
+		return errUpdateStageIdentity
+	}
+	return nil
+}
+
+// HFS+ timestamps can have one-second precision, so also watch for writes
+// while the open file is being checked.
+func verifyDarwinUpdateReadback(fd int, verify func() error) error {
+	queue, err := unix.Kqueue()
+	if err != nil {
+		return errUpdateStageIdentity
+	}
+	defer unix.Close(queue)
+	unix.CloseOnExec(queue)
+	var event unix.Kevent_t
+	unix.SetKevent(&event, fd, unix.EVFILT_VNODE, unix.EV_ADD|unix.EV_CLEAR)
+	event.Fflags = unix.NOTE_WRITE | unix.NOTE_EXTEND | unix.NOTE_DELETE | unix.NOTE_RENAME | unix.NOTE_REVOKE
+	timeout := unix.Timespec{}
+	if _, err := unix.Kevent(queue, []unix.Kevent_t{event}, nil, &timeout); err != nil {
+		return errUpdateStageIdentity
+	}
+	if err := verify(); err != nil {
+		return err
+	}
+	if n, err := unix.Kevent(queue, nil, []unix.Kevent_t{event}, &timeout); err != nil || n != 0 {
 		return errUpdateStageIdentity
 	}
 	return nil

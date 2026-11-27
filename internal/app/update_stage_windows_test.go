@@ -17,7 +17,7 @@ import (
 func TestUpdatePublicationPreservesWindowsDownloadZone(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "update.exe")
-	saved, err := saveUpdate(context.Background(), final, func(_ context.Context, file io.Writer) error {
+	saved, err := saveTestUpdate(context.Background(), final, func(_ context.Context, file io.Writer) error {
 		_, err := io.WriteString(file, "verified")
 		return err
 	}, func(publish func() error) error { return publish() })
@@ -46,7 +46,7 @@ func TestSaveUpdateRejectsRetargetedWindowsDestination(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	saved, err := saveUpdate(t.Context(), filepath.Join(selected, "update.exe"), func(_ context.Context, file io.Writer) error {
+	saved, err := saveTestUpdate(t.Context(), filepath.Join(selected, "update.exe"), func(_ context.Context, file io.Writer) error {
 		if _, err := io.WriteString(file, "verified"); err != nil {
 			return err
 		}
@@ -105,7 +105,7 @@ func TestStagedExportRejectsRetargetedWindowsDestination(t *testing.T) {
 func TestSaveUpdateRejectsWindowsDestinationCreatedDuringDownload(t *testing.T) {
 	dir := t.TempDir()
 	final := filepath.Join(dir, "update.exe")
-	saved, err := saveUpdate(t.Context(), final, func(_ context.Context, file io.Writer) error {
+	saved, err := saveTestUpdate(t.Context(), final, func(_ context.Context, file io.Writer) error {
 		if _, err := io.WriteString(file, "verified"); err != nil {
 			return err
 		}

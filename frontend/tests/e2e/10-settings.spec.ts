@@ -381,8 +381,10 @@ test('downloads a verified update through the desktop bridge and shows its path 
   const nextPath = '/native/downloads/JindiDrama-v1.2.4.zip'
   let checks = 0
   let attempts = 0
+  let nextAttempts = 0
   let cancelled = 0
   const cleanupWarning = '安装包已校验并保存，但暂存目录清理失败，请检查所选目录'
+  const unverifiedFailure = '无法确认已保存安装包，请勿使用目标文件并重新下载'
   const writeFailure = '无法写入更新文件，请检查保存位置和可用空间'
   const savedPath = '/native/downloads/' + '带空格 的更新目录/'.repeat(12) + '金帝短剧.zip'
   let firstComplete!: (saved: string) => void
@@ -395,7 +397,10 @@ test('downloads a verified update through the desktop bridge and shows its path 
     return { current: 'v0.1.0', latest: next ? 'v1.2.4' : 'v1.2.3', channel: checks === 5 ? 'preview' : 'stable', hasUpdate: true, url: next ? nextURL : url, downloadName: 'JindiDrama-macos-universal.zip' }
   })
   await page.exposeFunction('downloadUpdateFixture', (release: string) => {
-    if (release === nextURL) return { path: nextPath, warning: cleanupWarning }
+    if (release === nextURL) {
+      if (++nextAttempts === 2) return { path: '', unverified: unverifiedFailure }
+      return { path: nextPath, warning: cleanupWarning }
+    }
     if (release !== url) throw new Error('wrong candidate')
     attempts++
     if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve }).then(path => ({ path }))
@@ -406,7 +411,7 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await page.addInitScript(() => {
     const desktop = window as unknown as {
       checkUpdateFixture(): Promise<unknown>
-      downloadUpdateFixture(url: string): Promise<{ path: string; warning?: string }>
+      downloadUpdateFixture(url: string): Promise<{ path: string; warning?: string; unverified?: string }>
       cancelUpdateFixture(): Promise<void>
       copyUpdatePathFixture(value: string): Promise<boolean>
     }
@@ -492,6 +497,10 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await expect(copy).toBeInViewport()
   await copy.click()
   await expect.poll(() => copied).toBe(nextPath)
+  await download.click()
+  await expect(page.getByTestId('toast').last()).toContainText(unverifiedFailure)
+  await expect(saved).toHaveCount(0)
+  await expect(copy).toHaveCount(0)
   const updateChannel = page.getByTestId('update-channel')
   await check.click()
   await expect(updateChannel).toHaveValue('preview')

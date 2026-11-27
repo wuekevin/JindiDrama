@@ -211,3 +211,35 @@ func TestUpdateRedirectPolicy(t *testing.T) {
 		}
 	}
 }
+
+func TestVerifySavedChecksReleaseBytes(t *testing.T) {
+	asset := Asset{size: 3, digest: sha256.Sum256([]byte("zip"))}
+	for _, tc := range []struct {
+		body, failure string
+	}{
+		{"zip", ""},
+		{"bad", "SHA-256"},
+		{"zi", "大小"},
+		{"zipp", "大小"},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			source := strings.NewReader(tc.body)
+			err := asset.VerifySaved(t.Context(), source)
+			if tc.failure == "" && err != nil || tc.failure != "" && (err == nil || !strings.Contains(err.Error(), tc.failure)) {
+				t.Errorf("verification error: %v, want %q", err, tc.failure)
+			}
+		})
+	}
+	source := strings.NewReader("zip and ignored rest")
+	if err := asset.VerifySaved(t.Context(), source); err == nil || source.Len() != len("and ignored rest") {
+		t.Errorf("readback did not stop after size + 1: %v, remaining=%d", err, source.Len())
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := asset.VerifySaved(ctx, source); !errors.Is(err, context.Canceled) {
+		t.Errorf("cancelled readback: %v", err)
+	}
+	if err := asset.VerifySaved(t.Context(), iotest.ErrReader(errors.New("/private/path"))); err == nil || err.Error() != "无法回读更新安装包" {
+		t.Errorf("read failure: %v", err)
+	}
+}

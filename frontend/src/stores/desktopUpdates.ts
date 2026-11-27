@@ -127,7 +127,10 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
       const saved = await downloadUpdate(candidate.url)
       if (typeof saved === 'string' && saved) lastSavedUpdate.value = { path: saved, version: candidate.latest }
       else if (saved === true) toast.push(`${candidate.latest} 安装包已校验并保存，可手动安装`, 'success')
-      else if (typeof saved === 'object' && saved.path) {
+      else if (typeof saved === 'object' && saved.unverified) {
+        lastSavedUpdate.value = null
+        toast.push(saved.unverified, 'error')
+      } else if (typeof saved === 'object' && saved.path) {
         lastSavedUpdate.value = { path: saved.path, version: candidate.latest }
         if (saved.warning) toast.push(saved.warning, 'info')
       }
