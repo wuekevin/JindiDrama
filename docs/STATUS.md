@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，`v0.1.0-smoke.20261127.51` 是最新 GitHub 测试候选，打包源提交为 `a2b442ff0e1cd80ad5a3cb5a4a3fd61cedf0647b`。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.52`，打包源提交为 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4`。最新 GitHub 测试候选为 `.51`。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
 | .51 本地源码回归 | 393 项 Chromium、122 项 Vitest、WebKit 专项及 Go 全量、vet 和竞态通过 | [浏览器日志](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log) |
 | .51 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项打包与复验任务通过 | 两份原始归档 SHA-256 与 GitHub 摘要相符，两平台内部清单 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45946619517) · [本地复验日志](../build/bin/github-smoke-20261127.51/evidence/archived-checks.log) |
 | .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
@@ -798,3 +799,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 原版回归复现视频或截图暂存期间替换所选目录后仍报告保存成功。现在演示视频、授权本地片库导出与截图复用目录句柄和独占发布。替换目录不会承接结果或暂存清理。演示视频回退先结束暂存再从原目录独占创建文件。若复制时原路径改变，已保存的数据保留在原目录并提示查找位置。成功保存后遇到清理失败会单独提示。[原版回归](../build/bin/qa-media-export-destination/before.log) · [BMad 记录](../_bmad-output/plan-e11-export-destination.md)
 - macOS Go 测试覆盖替换目录中的同名暂存文件、直接复制时移动目录、目标冲突、清理失败保留正式文件和外部文件，以及截图和更新安装包旧路径。Go 全量、vet 和 App 竞态通过，Windows 与 Linux amd64 App 测试交叉编译通过。真实 ExFAT 卷的兼容测试因系统拒绝创建镜像未执行。Windows GUI 验收待运行，本次源码晚于 .51 打包。[专项日志](../build/bin/qa-media-export-destination/targeted.log) · [交叉编译](../build/bin/qa-media-export-destination/architectures.log)
+
+## E13 .52 累计候选本地打包（2026-11-27）
+
+- 从独立发行源码 `57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4` 构建 `v0.1.0-smoke.20261127.52`，包含实际解码状态、CMS 公开封面复用和媒体保存目录保护。验收源码也包含 Windows 交互托盘脚本。Node 22 按锁文件重建。浏览器与桌面构建使用的前端逐项摘要一致。Chromium 394 项、Vitest 122 项、WebKit 3 项通过。[浏览器回归](../build/bin/smoke-20261127.52/evidence/e2e.log) · [WebKit 点验](../build/bin/smoke-20261127.52/evidence/webkit.log)
+- Windows x64 安装器 22.54 MiB、便携程序 32.36 MiB。NSIS 内嵌主程序和 WebView2 引导程序与输入逐字节一致。macOS Universal ZIP 40.89 MiB，含 arm64 和 x86_64，两切片最低系统版本均为 macOS 13.0。两平台清单共 13 项通过项目工具、随包指令和归档后独立复验。[Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) · [归档复验](../build/bin/smoke-20261127.52/evidence/archived-checks.log)
+- Apple Silicon 从最终 ZIP 原生启动并正常退出，SQLite 完整性和成品回滚通过。Go 全量、vet 和 App/CMS/更新/开机启动/诊断竞态通过。Go 生产源码、三套二进制和 npm 生产依赖扫描未报告已知漏洞。Wails 重新格式化配置，JSON 内容复核一致后恢复隔离检出原文件。[原生证据](../build/bin/smoke-20261127.52/evidence/macos-native.log) · [二进制扫描](../build/bin/smoke-20261127.52/evidence/binary-vulnerabilities.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate52-packages.md)
+- .52 是本地 smoke，Windows 包未签名，macOS 包为隔离标识和临时签名。当前托管验收仍为 .51。本批 Windows 原生安装与托盘、Intel 启动、真实 ExFAT、正式签名和公证、正式在线更新以及授权公网片源仍待验收。
