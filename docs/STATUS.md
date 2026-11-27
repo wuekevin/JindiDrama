@@ -2,7 +2,7 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新本地测试候选为 `v0.1.0-smoke.20261127.54`，打包源提交为 `b41f03e8136d6b6f850bec806a2e5ca66efb0762`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.54`，打包源提交为 `b41f03e8136d6b6f850bec806a2e5ca66efb0762`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
@@ -942,3 +942,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 原版在 macOS Playwright WebKit 中点击录制按钮后未聚焦，输入新键或按 Esc 仍停在录制状态。激活后显式聚焦该按钮，保持滚动位置。另三个原版用例使用 Option+Tab 后即通过，已统一这类 WebKit 按钮遍历测试的用键。[原版对照](../build/bin/qa-settings-shortcut-focus/baseline.log)
 - Chromium 与 WebKit 设置页各 45 项通过，涵盖快捷键录入、冲突、取消、重载及恢复默认。Vitest 125 项、生产前端构建、Go 全量和 vet 通过。[Chromium](../build/bin/qa-settings-shortcut-focus/chromium.log) · [WebKit](../build/bin/qa-settings-shortcut-focus/webkit.log) · [BMad](../_bmad-output/plan-e10-settings-shortcut-focus.md)
 - Apple Silicon 本地临时签名 Wails 应用启动和正常退出通过，系统辅助功能可观察到录制按钮获焦。原归档的辅助功能激活也可使按钮获焦。操作系统的合成键盘事件未能验证快捷键写入。改动待下一个累计安装包和原生手动键盘验收。[原生焦点](../build/bin/qa-settings-shortcut-focus/native-fixed-focus.log) · [输入验证待完成](../build/bin/qa-settings-shortcut-focus/native-hid-input.log)
+
+## E13 Apple Silicon 旧包本地升级与回滚往返（2026-11-27）
+
+- 旧版 macOS 归档 `v0.1.0-smoke.20261125.1` 的 6 项 SHA-256 通过。旧程序与 Apple Silicon 本地构建 `v0.1.0-smoke.20261127.55` 分别核对二进制和临时签名。新版构建源码为 `b999bfa70696689038ad98b93902abf709bf875d`。用同一隔离安装路径和资料目录运行旧包、新版、回滚后的旧包、还原后的新版。四次实际界面核对版本、2 项收藏及 2 条历史，均正常退出。[归档清单](../build/bin/qa-macos-upgrade-roundtrip/archive.log) · [程序身份](../build/bin/qa-macos-upgrade-roundtrip/programs.log) · [升级界面](../build/bin/qa-macos-upgrade-roundtrip/upgraded-settings.ax)
+- 旧包创建 v6 库，当前构建打开后迁移到 v10。两条精确断点、收藏顺序、搜索和关键设置均保留。新版 CLI 从 v10 生成权限 0600 的 v6 副本，源摘要一致，源和副本均未新增 WAL、SHM 或 journal。原归档打开该副本并通过核对。恢复新版还保留当前样例在 v10 库中的分集总数，旧包原库和回滚副本的 SHA-256 均未变。[往返记录](../build/bin/qa-macos-upgrade-roundtrip/roundtrip.log) · [回滚命令](../build/bin/qa-macos-upgrade-roundtrip/rollback-cli.log) · [BMad](../_bmad-output/plan-e13-macos-upgrade-roundtrip.md)
+- 这是 Apple Silicon 的本地应用替换和 SQLite 兼容验证。当前构建使用临时签名。Intel Mac、正式带签名归档安装和从 GitHub 实际下载升级待验收。
