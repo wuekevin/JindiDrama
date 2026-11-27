@@ -867,3 +867,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - macOS 复现旧命令在父目录存在继承 ACL 时，最终 `0600` 回滚副本仍带有 `everyone` 读取项。现在先验证暂存目录为空，再清理 macOS ACL 或设置 Windows 仅当前用户与 SYSTEM 可继承的受保护 DACL，之后才写入 SQLite 文件。使用应用已有的平台权限定义，保留独占硬链接发布。[原版复现](../build/bin/qa-rollback-acl/before.log)
 - macOS 原生夹具验证对照文件会继承权限，受保护暂存目录、辅助文件样本和实际回滚副本不会继承，v2 副本完整性通过。另验收已有同名内容及被替换目录的内容保留。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 两套测试交叉编译通过。Windows 原生 DACL 验收待执行。[专项](../build/bin/qa-rollback-acl/targeted.log) · [Windows 编译](../build/bin/qa-rollback-acl/windows-crosscompile.log)
 - macOS 源码回滚工具需要 CGO。关闭 CGO 时已实测在写入前明确失败，输出目录无残留。回滚过程中的路径重解析仍需句柄级发布验收，尤其是能被第三方并发改名的输出目录。本次源码晚于 .52。[无 CGO 验收](../build/bin/qa-rollback-acl/no-cgo.log) · [BMad 记录](../_bmad-output/plan-e13-rollback-private-acl.md)
+
+## E13 固定回滚副本的发布目录（2026-11-27）
+
+- 旧版只在开始前检查目标文件。夹具复现降级期间新增同名 WAL 后仍发布了副本。现在 SQLite 在用户缓存的私有工作区降级并检查完整性，之后才将成品复制入原目标卷的私有暂存区。从已打开的源和目标目录创建独占硬链接，保留现有文件。工作区和目标卷各需要一份副本的空间。[原版复现](../build/bin/qa-rollback-publish/before.log) · [回滚说明](RELEASE-ROLLBACK.md)
+- 实际 macOS 文件系统测试覆盖降级期间替换目标路径、晚出现的 WAL、同名冲突、源与目标目录句柄被改名及硬链接时目录变化。发布前看见冲突则拒绝写入。若变化恰好发生在独占创建期间，命令报告失败，已生成的副本只留在原目录，同名辅助文件和替换目录中的数据保留。目标目录的变动不会重定向工作区内的 SQLite 操作。[专项](../build/bin/qa-rollback-publish/targeted.log)
+- macOS 回滚 CLI 实际生成 v2，`quick_check` 通过，源库 SHA-256 保持一致。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 两套测试交叉编译通过。Windows NTFS 原生发布仍待验收。用户缓存工作区需维持系统的私有权限。源码晚于 .52。[CLI](../build/bin/qa-rollback-publish/cli.log) · [竞态](../build/bin/qa-rollback-publish/go-race.log) · [Windows 交叉编译](../build/bin/qa-rollback-publish/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e13-rollback-pinned-publication.md)

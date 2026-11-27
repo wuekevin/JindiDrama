@@ -348,3 +348,31 @@ func TestCheckSnapshotSourcesRejectsChangedRegularFile(t *testing.T) {
 		})
 	}
 }
+
+func TestPrepareRollbackCopyDetectsLateOutputSidecar(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "source.db")
+	store, err := Open(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output := filepath.Join(t.TempDir(), "rollback.db")
+	sidecar := output + "-wal"
+	err = prepareRollbackCopy(source, output, 2, func(path string, version int) error {
+		if err := downgradeSnapshot(path, version); err != nil {
+			return err
+		}
+		return os.WriteFile(sidecar, []byte("new attachment"), 0o600)
+	})
+	if err == nil {
+		t.Error("published a copy after a late WAL appeared")
+	}
+	if _, err := os.Stat(output); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("unexpected output: %v", err)
+	}
+	if data, err := os.ReadFile(sidecar); err != nil || string(data) != "new attachment" {
+		t.Fatalf("late WAL changed: %q %v", data, err)
+	}
+}
