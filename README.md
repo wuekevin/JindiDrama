@@ -128,6 +128,17 @@ gh api repos/wuekevin/JindiDrama/actions/artifacts/567890123/zip > release-hando
 node scripts/package-checksums.mjs --verify-release-draft v0.1.0 "<解压目录>" release-draft.json release-jobs.json release-handoff.zip release-artifact.json
 ```
 
+#### 发布后复验
+
+正式版发布后，用未登录的公开 API 请求检查客户端稳定频道看到的版本。预发布版按标签查询，将下方地址的 `/latest` 换成 `/tags/实际标签`。继续使用发布前核验的交付目录、任务记录和原始 ZIP。
+
+```sh
+curl -q --fail --silent --show-error https://api.github.com/repos/wuekevin/JindiDrama/releases/latest > release-public.json
+node scripts/package-checksums.mjs --verify-release-published v0.1.0 "<解压目录>" release-public.json release-jobs.json release-handoff.zip release-artifact.json
+```
+
+命令校验公开版本的发布状态、频道、版本页、下载地址及每项附件的 SHA-256。还需从上一版桌面应用实际发现并下载新包，核对安装升级。[GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
+
 #### Windows 证书库签名
 
 托管正式打包使用签发方许可且与 Windows 证书库兼容的 PFX。公开受信任的代码签名私钥通常由硬件或托管签名服务保护。若签发方提供的是不可导出的密钥，应先确认可用的签名方式。当前本机脚本支持 Windows 证书库中可访问的硬件密钥，托管正式交付仍需相应的签名工作流和原生验收。[CA/Browser Forum 代码签名要求](https://cabforum.org/working-groups/code-signing/requirements/)

@@ -919,3 +919,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 两个平台的成品冒烟入口添加已提交 WAL 夹具。现有桌面资料库照常回滚并核对；独立生成合成主库和活动 WAL，然后用同一个成品程序生成 v2，核对收藏顺序、集数、断点、进度和观看时间。源主库与持久辅助文件逐字节比较。反例只提供主库，成功生成结构正确的 v2 仍因记录缺失被判失败。[探针测试](../build/bin/qa-packaged-wal/probe-test.log)
 - 对 SHA-256 核验过的 .54 macOS ZIP 实跑新增探针。归档程序保留已提交 WAL 内容，资料库摘要一致，两个临时工作区已清理。Go 全量、vet、竞态、Windows x64 测试交叉编译、PowerShell 解析和 7 项 macOS 冒烟脚本测试通过。Windows 与 Intel Mac 的此次新增场景仍待原生执行。[归档实跑](../build/bin/qa-packaged-wal/archive-wal.log) · [Windows 编译](../build/bin/qa-packaged-wal/windows-compile.log) · [macOS 脚本测试](../build/bin/qa-packaged-wal/macos-smoke-tests.log) · [BMad](../_bmad-output/plan-e13-packaged-rollback-wal.md)
+
+## E13 正式发布后复核交付包（2026-11-27）
+
+- 新增 `--verify-release-published`。用公开 Releases 元数据与已验证交付包对照，核对发布状态、频道及 UTC 发布时间、公告正文、远程标签、两类公开下载地址、每项附件摘要、签名打包任务和原始 Actions ZIP。README 提供稳定频道公开查询方式和预发布查询说明。[操作说明](../README.md#发布后复验) · [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
+- 13 项发行脚本测试通过。发布状态、频道、日期、下载地址、附件 ID、大小和摘要的反例均可检测。既有草稿验证通过，本地 .54 两平台清单也通过复核。仓库公开 API 的稳定频道返回 404，发布列表为空。正式版本和旧客户端实际下载与安装升级待发布后验收。[脚本测试](../build/bin/qa-published-release/release-tests.log) · [公开状态](../build/bin/qa-published-release/public-latest-status.log) · [公开列表](../build/bin/qa-published-release/public-list-status.log) · [BMad 记录](../_bmad-output/plan-e13-verify-published-release.md)

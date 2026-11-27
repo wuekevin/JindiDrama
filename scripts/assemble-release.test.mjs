@@ -68,7 +68,7 @@ function git(cwd, ...args) {
   return result.stdout.trim()
 }
 
-test('verifies the handoff against GitHub release jobs, tags, draft notes and uploaded assets', async (t) => {
+test('verifies the handoff against GitHub release jobs, tags, draft and published metadata, and uploaded assets', async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), 'jindi-release-tag-'))
   t.after(() => rm(cwd, { recursive: true, force: true }))
   git(cwd, 'init', '--quiet', '--object-format=sha1')
@@ -147,12 +147,15 @@ test('verifies the handoff against GitHub release jobs, tags, draft notes and up
     run_url: 'https://api.github.com/repos/' + repository + '/actions/runs/' + runID,
     status: 'completed', conclusion: 'success',
   }))
-  async function checkDraft(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact } = {}) {
+  async function checkRelease(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false } = {}) {
     await writeFile(draftFile, JSON.stringify(data))
     await writeFile(jobsFile, JSON.stringify({ total_count: total, jobs: releaseJobs }))
     await writeFile(artifactFile, JSON.stringify(releaseArtifact))
-    return run(checksums, ['--verify-release-draft', version, output, draftFile, jobsFile, archiveFile, artifactFile], { cwd })
+    const option = published ? '--verify-release-published' : '--verify-release-draft'
+    return run(checksums, [option, version, output, draftFile, jobsFile, archiveFile, artifactFile], { cwd })
   }
+  const checkDraft = checkRelease
+  const checkPublished = (data) => checkRelease(data, { published: true })
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
@@ -239,6 +242,51 @@ test('verifies the handoff against GitHub release jobs, tags, draft notes and up
     assert.equal(result.status, 1)
     assert.ok(result.stderr.includes('mismatch: ' + name), result.stderr)
   }
+  const publicPage = `https://github.com/${repository}/releases`
+  const published = {
+    ...draft, draft: false, published_at: '2026-11-27T08:00:00Z',
+    html_url: `${publicPage}/tag/${version}`,
+    assets: assets.map((asset) => ({
+      ...asset,
+      url: `https://api.github.com/repos/${repository}/releases/assets/${asset.id}`,
+      browser_download_url: `${publicPage}/download/${version}/${asset.name}`,
+    })),
+  }
+  const validPublished = await checkPublished(published)
+  assert.equal(validPublished.status, 0, validPublished.stderr)
+  assert.match(validPublished.stdout, /GitHub published release 123 matches all 11 handoff files/)
+  assert.match((await checkDraft(published)).stderr, /repository, tag, and release channel/)
+  assert.match((await checkPublished(draft)).stderr, /repository, tag, and release channel/)
+  assert.match((await checkPublished({ ...published, prerelease: false })).stderr, /repository, tag, and release channel/)
+  assert.match((await checkPublished({ ...published, tag_name: 'v0.1.0-rc.2' })).stderr, /repository, tag, and release channel/)
+  const encodedPage = await checkPublished({ ...published, html_url: `${publicPage}/tag/%76${version.slice(1)}` })
+  assert.equal(encodedPage.status, 0, encodedPage.stderr)
+  for (const wrong of [
+    { published_at: null }, { published_at: '2026' }, { published_at: '2026-02-30T08:00:00Z' },
+    { html_url: `${publicPage}/tag/v0.1.0` },
+    { html_url: `${publicPage}/tag/${version}?view=1` },
+    { html_url: `${publicPage}/tag/%ZZ` },
+  ]) {
+    assert.match((await checkPublished({ ...published, ...wrong })).stderr, /publication time or has an unexpected public release page/)
+  }
+  const changeInstaller = (wrong) => ({
+    ...published,
+    assets: published.assets.map((asset) => asset.name === 'JindiDrama-amd64-installer.exe' ? { ...asset, ...wrong } : asset),
+  })
+  for (const wrong of [
+    { url: 'https://api.github.com/repos/example/Other/releases/assets/101' },
+    { browser_download_url: `${publicPage}/download/${version}/JindiDrama.exe` },
+    { browser_download_url: `https://example.com/download/${version}/JindiDrama-amd64-installer.exe` },
+  ]) {
+    assert.match((await checkPublished(changeInstaller(wrong))).stderr, /download URL mismatch: JindiDrama-amd64-installer.exe/)
+  }
+  const otherAsset = published.assets.find((asset) => asset.name !== 'JindiDrama-amd64-installer.exe')
+  assert.match((await checkPublished(changeInstaller({ id: otherAsset.id, url: otherAsset.url }))).stderr,
+    /asset ID, upload state, size or SHA-256 mismatch/)
+  assert.match((await checkPublished(changeInstaller({ digest: 'sha256:' + '0'.repeat(64) }))).stderr,
+    /SHA-256 mismatch: JindiDrama-amd64-installer.exe/)
+  assert.match((await checkPublished({ ...published, assets: published.assets.filter(({ name }) => name !== 'SHA256SUMS.txt') })).stderr,
+    /Missing published release asset: SHA256SUMS.txt/)
   await writeFile(join(output, 'JindiDrama.exe'), 'changed')
   assert.match(check().stderr, /SHA-256 mismatch: JindiDrama.exe/)
 })

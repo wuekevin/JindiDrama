@@ -222,37 +222,71 @@ async function verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, fil
   console.log(`GitHub Actions artifact ${artifact.id} matches the original ZIP and all ${Object.keys(files).length} handoff files`)
 }
 
-async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile, archiveFile, artifactFile) {
+function matchesReleasePath(value, repository, expected) {
+  const prefix = `https://github.com/${repository}/releases/`
+  if (typeof value !== 'string' || !value.startsWith(prefix)) return false
+  const segments = value.slice(prefix.length).split('/')
+  try {
+    return segments.length === expected.length &&
+      expected.every((segment, index) => decodeURIComponent(segments[index]) === segment)
+  } catch {
+    return false
+  }
+}
+
+function validPublicationTime(value) {
+  if (typeof value !== 'string') return false
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.\d+)?Z$/.exec(value)
+  if (!match) return false
+  const date = new Date(match[1] + 'Z')
+  return Number.isFinite(date.getTime()) && date.toISOString().slice(0, 19) === match[1]
+}
+
+async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile, archiveFile, artifactFile) {
+  const label = draft ? 'draft' : 'published release'
+  const releaseLabel = draft ? 'GitHub Release draft' : 'GitHub published release'
+  const assetLabel = draft ? 'Draft' : 'Published release'
   const handoff = await verifyReleaseTag(tag, directory)
   const { checksums, manifestFile, repository, revision, notes } = handoff
-  const draft = JSON.parse(await readFile(metadataFile, 'utf8'))
+  const release = JSON.parse(await readFile(metadataFile, 'utf8'))
   const prerelease = tag.split('+', 1)[0].includes('-')
-  if (draft?.draft !== true || draft.tag_name !== tag || draft.prerelease !== prerelease ||
-      !Number.isSafeInteger(draft.id) || draft.id < 1 ||
-      typeof draft.url !== 'string' || draft.url.toLowerCase() !== `https://api.github.com/repos/${repository.toLowerCase()}/releases/${draft.id}`) {
-    throw new Error('GitHub Release draft does not match the repository, tag, and release channel')
+  const api = `https://api.github.com/repos/${repository}`.toLowerCase()
+  if (release?.draft !== draft || release.tag_name !== tag || release.prerelease !== prerelease ||
+      !Number.isSafeInteger(release.id) || release.id < 1 ||
+      typeof release.url !== 'string' || release.url.toLowerCase() !== `${api}/releases/${release.id}`) {
+    throw new Error(`${releaseLabel} does not match the repository, tag, and release channel`)
   }
-  if (typeof draft.body !== 'string' || normalizedReleaseBody(draft.body) !== normalizedReleaseBody(notes)) {
-    throw new Error('GitHub Release draft body does not match RELEASE-NOTES.md')
+  if (!draft && (!validPublicationTime(release.published_at) ||
+      !matchesReleasePath(release.html_url, repository, ['tag', tag]))) {
+    throw new Error('Published release is missing a publication time or has an unexpected public release page')
   }
-  if (!Array.isArray(draft.assets)) throw new Error('Missing GitHub Release draft assets')
+  if (typeof release.body !== 'string' || normalizedReleaseBody(release.body) !== normalizedReleaseBody(notes)) {
+    throw new Error(`${releaseLabel} body does not match RELEASE-NOTES.md`)
+  }
+  if (!Array.isArray(release.assets)) throw new Error(`Missing ${releaseLabel} assets`)
 
   checksums.set(manifest, manifestFile.digest)
   const files = new Map()
-  for (const asset of draft.assets) {
+  const assetIDs = new Set()
+  for (const asset of release.assets) {
     const name = asset?.name
     if (!checksums.has(name) || files.has(name)) {
-      throw new Error(`Unexpected or duplicate draft asset: ${JSON.stringify(name)}`)
+      throw new Error(`Unexpected or duplicate ${label} asset: ${JSON.stringify(name)}`)
     }
     const { size } = name === manifest ? manifestFile : await stat(join(directory, name))
-    if (!Number.isSafeInteger(asset.id) || asset.id < 1 || asset.state !== 'uploaded' ||
+    if (!Number.isSafeInteger(asset.id) || asset.id < 1 || assetIDs.has(asset.id) || asset.state !== 'uploaded' ||
         size !== asset.size || asset.digest !== 'sha256:' + checksums.get(name)) {
-      throw new Error(`Draft asset ID, upload state, size or SHA-256 mismatch: ${name}`)
+      throw new Error(`${assetLabel} asset ID, upload state, size or SHA-256 mismatch: ${name}`)
     }
+    if (!draft && (typeof asset.url !== 'string' || asset.url.toLowerCase() !== `${api}/releases/assets/${asset.id}` ||
+        !matchesReleasePath(asset.browser_download_url, repository, ['download', tag, name]))) {
+      throw new Error(`Published release download URL mismatch: ${name}`)
+    }
+    assetIDs.add(asset.id)
     files.set(name, { size, digest: checksums.get(name) })
   }
   for (const name of checksums.keys()) {
-    if (!files.has(name)) throw new Error(`Missing draft asset: ${name}`)
+    if (!files.has(name)) throw new Error(`Missing ${label} asset: ${name}`)
   }
   await verifyReleaseJobs(jobsFile, handoff)
   await verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, Object.fromEntries(files))
@@ -260,7 +294,7 @@ async function verifyReleaseDraft(tag, directory, metadataFile, jobsFile, archiv
     throw new Error('GitHub release tag does not match the handoff build commit')
   }
   console.log('GitHub release tag ' + tag + ' matches build commit ' + revision)
-  console.log(`GitHub Release draft ${draft.id} matches all ${files.size} handoff files`)
+  console.log(`${releaseLabel} ${release.id} matches all ${files.size} handoff files`)
 }
 
 function isMainModule(entry) {
@@ -282,11 +316,11 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verifyHostedPackage(directory, platform)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
-  } else if (first === '--verify-release-draft' && platform && directory && extra.length === 4) {
-    await verifyReleaseDraft(platform, directory, ...extra)
+  } else if ((first === '--verify-release-draft' || first === '--verify-release-published') && platform && directory && extra.length === 4) {
+    await verifyGitHubRelease(first === '--verify-release-draft', platform, directory, ...extra)
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | --verify-release-draft <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | <--verify-release-draft|--verify-release-published> <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
   }
 }
