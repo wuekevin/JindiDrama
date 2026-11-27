@@ -6,7 +6,7 @@
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
-| .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 文档就绪、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
+| .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 可见窗口、系统恢复选择器和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
 | .53 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、退出和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.53/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.53/macos/SHA256SUMS.txt) |
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
 | .52 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项任务通过 | 两份 GitHub 原始归档摘要及内部清单共 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [本地复验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) |
@@ -924,3 +924,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 新增 `--verify-release-published`。用公开 Releases 元数据与已验证交付包对照，核对发布状态、频道及 UTC 发布时间、公告正文、远程标签、两类公开下载地址、每项附件摘要、签名打包任务和原始 Actions ZIP。README 提供稳定频道公开查询方式和预发布查询说明。[操作说明](../README.md#发布后复验) · [GitHub Releases API](https://docs.github.com/en/rest/releases/releases)
 - 13 项发行脚本测试通过。发布状态、频道、日期、下载地址、附件 ID、大小和摘要的反例均可检测。既有草稿验证通过，本地 .54 两平台清单也通过复核。仓库公开 API 的稳定频道返回 404，发布列表为空。正式版本和旧客户端实际下载与安装升级待发布后验收。[脚本测试](../build/bin/qa-published-release/release-tests.log) · [公开状态](../build/bin/qa-published-release/public-latest-status.log) · [公开列表](../build/bin/qa-published-release/public-list-status.log) · [BMad 记录](../_bmad-output/plan-e13-verify-published-release.md)
+
+## E13 .54 原包窗口、系统选择器与更新提示（2026-11-27）
+
+- 桌面会话可交互后复核 .54 macOS ZIP 的 6 项 SHA-256、归档内主程序字节和 ad-hoc 签名。使用该归档的原始应用，在 Apple Silicon 上实际观察到 Wails 文档就绪和可见原生窗口。测试资料配置为推荐首页，避免默认续播主动更新测试历史。[归档身份](../build/bin/qa-archive54-native-ui/archive-identity.log) · [窗口可见](../build/bin/qa-archive54-native-ui/app-visibility.log)
+- 用真实设置页完成备份失败提示、排除障碍后重试、系统文件选择及取消。备份包含只在 WAL 提交的断点，成品权限为 `0600`，无继承 ACL。恢复补回 1 项收藏及 1 条历史，保留较新的当前断点及其他记录。重复导入保持结果，重启后界面显示各 3 条。源备份 SHA-256 一致，退出后 SQLite 完整性通过。[完整往返](../build/bin/qa-archive54-native-ui/roundtrip.log) · [系统选择器](../build/bin/qa-archive54-native-ui/picker-open.ax) · [取消前系统窗口](../build/bin/qa-archive54-native-ui/picker-before-cancel.ax)
+- 同一 .54 成品实际检查公开稳定频道，界面显示暂无正式发布版本，界面未提供安装包下载。正式发布后的真实下载、校验与安装升级仍待验收。Windows 和 Intel Mac 原生验收另待运行。[更新界面](../build/bin/qa-archive54-native-ui/check-public-update.ax) · [BMad 记录](../_bmad-output/plan-e13-candidate54-native-ui.md)
