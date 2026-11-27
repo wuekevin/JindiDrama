@@ -750,3 +750,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Windows x64 安装器 22.54 MiB、便携版 32.34 MiB。Windows PE 版本正确，NSIS 内嵌主程序和 WebView2 引导程序与输入逐字节一致。macOS Universal ZIP 40.88 MiB，两个切片最低系统版本均为 13.0。两平台 13 项 SHA-256 通过项目校验器、系统命令、随包命令和归档复验。[Windows 清单](../build/bin/smoke-20261127.50/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.50/macos/SHA256SUMS.txt)
 - Apple Silicon 从最终 ZIP 启动，正常退出并通过 SQLite 完整性与回滚。签名脚本夹具和 Go 源码、三个二进制切片及 npm 生产依赖扫描通过。macOS 随包说明首次生成时找不到中间应用，补齐路径后以同一份 ZIP 完成校验。Wails 改写配置格式，已核实 JSON 内容一致并恢复隔离检出的原文件。[原生验收](../build/bin/smoke-20261127.50/evidence/macos-native.log) · [BMad 记录](../_bmad-output/plan-e13-local-candidate50-packages.md)
 - .50 是本地 smoke。Windows 测试包未签名，macOS 为临时签名。GitHub 当前 Release、签名环境和仓库级 Actions secrets 均为 0。本批 Windows 与 Intel Mac 原生、正式签名与公证、签名版在线更新和授权公网片源仍待验收。[发行前置条件](../build/bin/smoke-20261127.50/evidence/release-prerequisites.log)
+
+## E12 .50 Apple Silicon 原生直链回退与下架验收（2026-11-27）
+
+- 用 .50 应用源码与相同的生产前端验收。隔离构建注入合成片源网络响应和 WKWebView 自动化脚本，使用正常 Go 转发、Vue 播放状态与原生解码。真实顺序为先请求标记成 MP4 的 HTML 错误页，再请求备用 MP4。WKWebView 解码自制样片为 240×426，播放进度达到 1.33 秒。[播放界面结果](../build/bin/qa-native-cms-50/playback-ui.log) · [请求顺序](../build/bin/qa-native-cms-50/playback-verified.log)
+- 将同一剧目改为下架。用 macOS LaunchServices 打开原来的 `jindi:` 链接，显示未找到。返回首页，另一部上架剧目仍可浏览，目标剧目隐藏，下架阶段没有媒体请求。两个隔离应用会话正常退出后 SQLite 完整性均为 `ok`。初次系统辅助功能未能取得可操作窗口，最终通过测试构建的 Wails 脚本完成确认。实际授权公网片源仍待联调。[下架界面结果](../build/bin/qa-native-cms-50/withdrawn-ui.log) · [BMad 记录](../_bmad-output/plan-e12-cms-native-content-followup50.md)
