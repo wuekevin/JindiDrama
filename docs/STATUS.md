@@ -987,3 +987,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 在 macOS 26.6.2 的本地临时签名 .57 构建上，用合成 CMS 目录和 H.264/AAC 样片验证真实 Wails、WKWebView 与 Go 媒体转发。临时构建只注入片源响应与观察脚本。产物生产前端摘要保持一致，画中画使用系统原有 API。[构建和环境](../build/bin/qa-native-cms-picture-in-picture/identity.log)
 - 系统辅助功能触发播放页按钮，浏览器记录真实点击和有效用户激活。WKWebView 对样片返回 NotSupportedError，应用显示不支持提示，画面继续在页面播放，按钮保持未开启。返回详情后移除播放器，两处均记录系统模式为 inline，活动画中画为空。只观察到原主窗口。应用正常退出，无残留会话标记和 SQLite 辅助文件，隔离库检查及关闭专项测试通过。[应用原生结果](../build/bin/qa-native-cms-picture-in-picture/native.log) · [浏览器事件](../build/bin/qa-native-cms-picture-in-picture/runtime-events.log) · [数据库关闭测试](../build/bin/qa-native-cms-picture-in-picture/store-close-test.log)
 - 同机独立 WKWebView 对同一文件也解码成功并返回相同错误。当前证据覆盖原生拒绝与降级处理。真实系统浮窗的开启、切集关闭和媒体兼容性仍需在支持该能力的桌面及样片上验证。[独立对照](../build/bin/qa-native-cms-picture-in-picture/control.log) · [BMad](../_bmad-output/plan-e04-cms-pip-native.md)
+
+## E04 苹果 CMS 手动切换播放源（2026-11-27）
+
+- 苹果 CMS 单集有多条可用线路时，播放页可手动切换。仅在线路票据提供可识别的画质标识时显示对应名称。切换前后沿用原授权票据，恢复当前断点、播放或暂停状态及音视频偏好。选中线路失败时自动改用本轮其余可用线路，失败线路显示不可用。
+- 评审复现了暂停重新定位后回到旧断点，以及切源缓冲期间主动暂停后备用线路自动播放。修复后保持最新定位和暂停状态，未播放的定位不产生观看历史。[原版缺少控件](../build/bin/qa-cms-manual-source/baseline.log) · [断点回归复现](../build/bin/qa-cms-manual-source/paused-baseline.log) · [暂停回归复现](../build/bin/qa-cms-manual-source/cancel-baseline.log)
+- 生产构建、Vitest 125 项、Chromium Provider 播放全套 69 项和 WebKit 切源 4 项通过。实际样片验证切源，并用 HTTP 404 响应触发播放器原生错误后回退。对照默认窗口和 220% 放大截图，播放源控件与原有操作均完整，键盘焦点可见。[构建](../build/bin/qa-cms-manual-source/build-final.log) · [Vitest](../build/bin/qa-cms-manual-source/unit-final.log) · [Chromium](../build/bin/qa-cms-manual-source/chromium-verified.log) · [WebKit](../build/bin/qa-cms-manual-source/webkit-verified.log) · [默认窗口](../build/bin/qa-cms-manual-source/cms-source-default.png) · [220% 窗口](../build/bin/qa-cms-manual-source/cms-source-220.png)
+- 本轮使用本地样片和模拟 CMS 票据验收。桌面成品待下一次累计打包，公网片源待授权 HTTPS 端点联调。[BMad](../_bmad-output/plan-e04-cms-manual-source.md)

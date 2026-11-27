@@ -1,6 +1,8 @@
 import type { HistoryEntry } from '@/types'
 
-export function resumePosition(checkpoint: HistoryEntry | undefined, episode: number, duration: number) {
+export type PlaybackBookmark = Pick<HistoryEntry, 'episode' | 'percent' | 'positionSec' | 'durationSec'>
+
+export function resumePosition(checkpoint: PlaybackBookmark | undefined, episode: number, duration: number) {
   if (!checkpoint || checkpoint.episode !== episode || checkpoint.percent >= 100) return 0
   const previousPosition = checkpoint.positionSec ?? 0
   const previousDuration = checkpoint.durationSec ?? 0

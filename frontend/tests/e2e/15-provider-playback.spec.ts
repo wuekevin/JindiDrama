@@ -1378,6 +1378,137 @@ test('CMS picture-in-picture closes a timed-out WebKit transition for an old epi
   await expect(pip).toHaveAttribute('aria-pressed', 'false')
 })
 
+test('CMS manual source choice preserves pause, playback and fallback to an earlier source', async ({ page }, testInfo) => {
+  await cmsLibraryFixture(page)
+  await page.goto(cmsRoute)
+  await page.evaluate(() => {
+    type Playback = (id: string, episode: number) => Promise<{ sources: { quality?: string }[] }>
+    const desktop = window as unknown as { go: { app: { App: { CatalogPlayback: Playback } } } }
+    const runtime = desktop.go.app.App
+    const resolve = runtime.CatalogPlayback.bind(runtime)
+    runtime.CatalogPlayback = async (id, episode) => {
+      const ticket = await resolve(id, episode)
+      ticket.sources[0].quality = 'hd'
+      return ticket
+    }
+  })
+  await page.getByRole('button', { name: '第1集', exact: true }).click()
+  const video = historyVideo(page, 1)
+  const source = page.getByRole('combobox', { name: '播放源' })
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
+  await expect(source).toBeVisible({ timeout: 5000 })
+  await expect(source.locator('option')).toHaveText(['线路 1 · 高清', '线路 2'])
+  await expect(video).toHaveJSProperty('paused', true)
+  await video.evaluate((media: HTMLVideoElement) => { media.currentTime = 7 })
+  await expect.poll(() => position(video)).toBe(7)
+  await expect(video).toHaveJSProperty('seeking', false)
+  await source.selectOption('1')
+  await expect(video).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => position(video)).toBe(7)
+  await expect(video).toHaveJSProperty('paused', true)
+  await source.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('cms-source-default.png') })
+
+  await video.evaluate(async (media: HTMLVideoElement) => { media.muted = true; await media.play() })
+  await expect.poll(() => position(video)).toBeGreaterThan(7.2)
+  await source.selectOption('0')
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await expect(video).toHaveJSProperty('paused', false)
+  await expect(video).toHaveJSProperty('muted', true)
+  await expect.poll(() => position(video)).toBeGreaterThan(7.2)
+  await source.selectOption('1')
+  await expect(video).toHaveAttribute('src', /\/1$/)
+  await expect(video).toHaveJSProperty('paused', false)
+  await video.dispatchEvent('error')
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await expect(video).toHaveJSProperty('paused', false)
+  await expect.poll(() => position(video)).toBeGreaterThan(7.2)
+  await expect(source.locator('option').nth(1)).toBeDisabled()
+
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate((html) => html.style.setProperty('--user-zoom', '2.2'))
+  await source.focus()
+  await expect(source).toBeInViewport()
+  await expect(source).toBeFocused()
+  await page.screenshot({ path: testInfo.outputPath('cms-source-220.png') })
+  await video.dispatchEvent('error')
+  await expect(page.getByTestId('error')).toContainText('媒体加载失败')
+  await expect(source).toHaveCount(0)
+})
+
+test('CMS fallback preserves a newer paused seek after manual source selection', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page)
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  const source = page.getByRole('combobox', { name: '播放源' })
+  const seekWhilePaused = async (seconds: number) => {
+    await expect(video).toHaveJSProperty('paused', true)
+    await video.evaluate((media: HTMLVideoElement, seconds) => new Promise<void>((resolve) => {
+      media.addEventListener('seeked', () => resolve(), { once: true })
+      media.currentTime = seconds
+    }), seconds)
+    await expect.poll(() => position(video)).toBe(seconds)
+  }
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
+  await seekWhilePaused(7)
+  await source.selectOption('1')
+  await expect(video).toHaveAttribute('src', /\/1$/)
+  await expect.poll(() => position(video)).toBe(7)
+  await seekWhilePaused(12)
+  await video.dispatchEvent('error')
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await expect.poll(() => position(video)).toBe(12)
+  await expect(video).toHaveJSProperty('paused', true)
+  expect(desktop.rows()).toEqual([])
+})
+
+test('CMS fallback stays paused when playback is cancelled during a manual switch', async ({ page }) => {
+  await cmsLibraryFixture(page)
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    HTMLMediaElement.prototype.play = function () {
+      if (!this.getAttribute('src')?.endsWith('/1')) return play.call(this)
+      this.dataset.playRequested = 'true'
+      return new Promise<void>((_, reject) => {
+        this.addEventListener('pause', () => reject(new DOMException('Playback was paused', 'AbortError')), { once: true })
+      })
+    }
+  })
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  const source = page.getByRole('combobox', { name: '播放源' })
+  await playHistoryVideo(video)
+  await source.selectOption('1')
+  await expect(video).toHaveAttribute('data-play-requested', 'true')
+  await video.evaluate((media: HTMLVideoElement) => {
+    media.dispatchEvent(new Event('pause'))
+    media.dispatchEvent(new Event('error'))
+  })
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await expect(source.locator('option').nth(1)).toBeDisabled()
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
+  await expect(video).toHaveJSProperty('paused', true)
+  await expect(page.getByText('已切换到备用源，请点击播放。')).toHaveCount(0)
+})
+
+test('CMS returns to the previous source when the selected media request fails', async ({ page }) => {
+  await cmsLibraryFixture(page)
+  await page.route(mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/1', (route) => route.fulfill({ status: 404 }))
+  await page.goto(cmsRoute + '/play/1')
+  const video = historyVideo(page, 1)
+  const source = page.getByRole('combobox', { name: '播放源' })
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
+  const failedResponse = page.waitForResponse((response) =>
+    response.url() === mediaURL + '/catalog-media/' + 'A'.repeat(26) + '/1' && response.status() === 404)
+  await source.selectOption('1')
+  await failedResponse
+  await expect(source.locator('option').nth(1)).toBeDisabled()
+  await expect(video).toHaveAttribute('src', /\/0$/)
+  await expect.poll(() => durationMs(video)).toBeGreaterThan(10_000)
+  await expect(video).toHaveJSProperty('paused', true)
+  expect(await calls(page)).toEqual(['catalog:' + cmsId + ':1'])
+})
+
 test('CMS native volume carries across a fallback and a manual episode change', async ({ page }) => {
   await cmsLibraryFixture(page)
   await page.goto(cmsRoute + '/play/1')

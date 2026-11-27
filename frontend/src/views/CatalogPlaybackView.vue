@@ -13,9 +13,9 @@ import DanmakuSettings from '@/components/player/DanmakuSettings.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { useLocalEpisodeDanmaku } from '@/composables/useLocalEpisodeDanmaku'
 import { getDetail, type DramaDetail } from '@/mocks/provider'
-import { demoQualityId } from '@/player/demoMedia'
+import { DEMO_QUALITIES, demoQualityId } from '@/player/demoMedia'
 import { usePictureInPicture } from '@/player/pictureInPicture'
-import { resumePosition, seekablePosition } from '@/player/playbackBookmark'
+import { resumePosition, seekablePosition, type PlaybackBookmark } from '@/player/playbackBookmark'
 import { isPlaybackSpeed, normalizePlaybackVolume, playbackEndAction } from '@/player/preferences'
 import { usePlaybackShortcuts } from '@/player/usePlaybackShortcuts'
 import { availableCatalogEpisode, beginStartupPlayback, catalogPlaybackRoute, detailRoute, takeCMSStartupFallback } from '@/router/libraryRoutes'
@@ -23,7 +23,6 @@ import { useAppSettings } from '@/stores/appSettings'
 import { useCommentStore } from '@/stores/comments'
 import { useSettingsStore } from '@/stores/player'
 import { useLibraryStore } from '@/stores/library'
-import type { HistoryEntry } from '@/types'
 import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-contracts'
 
 const hlsType = 'application/vnd.apple.mpegurl'
@@ -80,6 +79,7 @@ function syncDanmakuClock() {
 watch([video, () => mine.value.length, () => settings.danmaku.enabled], syncDanmakuClock)
 const sources = ref<MediaSource[]>([])
 const selected = ref(0)
+const failedSources = ref(new Set<number>())
 const source = computed(() => sources.value[selected.value])
 let generation = 0
 let playbackPath = ''
@@ -97,7 +97,7 @@ type MediaHistory = {
   target: WatchTarget
   media: HTMLVideoElement
   source: MediaSource
-  checkpoint?: HistoryEntry
+  checkpoint?: PlaybackBookmark
   pending: boolean
   restoring: boolean
   endHandled: boolean
@@ -110,9 +110,10 @@ type MediaHistory = {
   saved?: Progress
 }
 type Advance = { fromGeneration: number; path: string; muted: boolean }
-type AutoStart = { reason: 'next' | 'fallback'; muted: boolean }
+type AutoStart = { reason: 'next' | 'fallback' | 'source'; muted: boolean }
 let watchTarget: WatchTarget | undefined
 let mediaHistory: MediaHistory | undefined
+let nextSourceBookmark: PlaybackBookmark | undefined
 let preferenceMedia: HTMLVideoElement | undefined
 let nextEpisode: Advance | undefined
 const autoStart = shallowRef<AutoStart>()
@@ -188,13 +189,16 @@ function startWhenReady(current: MediaHistory) {
       media.readyState < HTMLMediaElement.HAVE_METADATA || closing || !isCurrentHistory(current)) return
   current.autoAttempted = true
   media.muted = start.muted
-  startMedia(current, start.reason === 'next' ? '已切换到下一集，请点击播放。' : '已切换到备用源，请点击播放。')
+  const message = start.reason === 'next' ? '已切换到下一集，请点击播放。' :
+    start.reason === 'source' ? '已切换播放源，请点击播放。' : '已切换到备用源，请点击播放。'
+  startMedia(current, message)
 }
 
 function startMedia(current: MediaHistory, fallback: string) {
-  void current.media.play().catch(() => {
+  void current.media.play().catch((cause: unknown) => {
     if (closing || !isCurrentHistory(current) || !current.media.paused || current.media.error) return
     autoStart.value = undefined
+    if (cause instanceof DOMException && cause.name === 'AbortError') return
     playbackNotice.value = fallback
   })
 }
@@ -236,7 +240,18 @@ function onSeeked(event: Event) {
     startWhenReady(current)
     return
   }
+  if (!current.pending) current.checkpoint = mediaBookmark(current) ?? current.checkpoint
   saveProgress(true)
+}
+
+function mediaBookmark(current: MediaHistory): PlaybackBookmark | undefined {
+  const { currentTime, duration, ended } = current.media
+  if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(currentTime)) return
+  const positionSec = Math.max(0, Math.min(currentTime, duration))
+  return {
+    episode: current.target.episode, positionSec, durationSec: duration,
+    percent: ended ? 100 : Math.min(99, Math.floor(positionSec * 100 / duration)),
+  }
 }
 
 function captureProgress(current: MediaHistory, failed: boolean) {
@@ -276,6 +291,9 @@ function saveProgress(force: boolean, failed = false) {
 function onProgress(event: Event) {
   const current = currentHistory(event)
   if (!closing && current) {
+    if (event.type === 'pause' && current.autoAttempted && current.media.paused) {
+      autoStart.value = undefined
+    }
     syncDanmakuClock()
     watchPlaybackProgress(current)
     saveProgress(event.type !== 'timeupdate')
@@ -485,7 +503,9 @@ async function load() {
   stopMedia()
   releaseLease()
   watchTarget = undefined
+  nextSourceBookmark = undefined
   sources.value = []
+  failedSources.value.clear()
   selected.value = 0
   error.value = ''
   playbackNotice.value = ''
@@ -537,6 +557,32 @@ async function load() {
   }
 }
 
+function sourceLabel(choice: MediaSource, index: number) {
+  const quality = DEMO_QUALITIES.find((item) => item.id === choice.quality)?.label
+  return ['线路 ' + (index + 1), quality, failedSources.value.has(index) ? '不可用' : null].filter(Boolean).join(' · ')
+}
+
+function selectPlaybackSource(event: Event) {
+  const control = event.currentTarget as HTMLSelectElement
+  const index = Number(control.value)
+  const current = mediaHistory
+  if (!current || !isCurrentHistory(current) || closing || index === selected.value ||
+      !sources.value[index] || failedSources.value.has(index)) {
+    control.value = String(selected.value)
+    return
+  }
+  const { media } = current
+  const { paused, ended, muted } = media
+  const bookmark = current.pending || current.restoring ? current.checkpoint : mediaBookmark(current) ?? current.checkpoint
+  if (!paused && !ended) autoStart.value = { reason: 'source', muted }
+  else if (current.autoAttempted || (!current.pending && !current.restoring)) autoStart.value = undefined
+  startupFallback = undefined
+  playbackNotice.value = ''
+  stopMedia()
+  nextSourceBookmark = bookmark
+  selected.value = index
+}
+
 function failMedia(media: HTMLVideoElement, choice: MediaSource) {
   if (!isCurrentSource(media, choice, playbackPath, generation)) return
   if (expiresAt <= Date.now()) {
@@ -545,10 +591,15 @@ function failMedia(media: HTMLVideoElement, choice: MediaSource) {
   }
   const resumeBackup = watchTarget && !closing && !manualNavigation && !media.paused && !media.ended
   const muted = media.muted
+  const current = mediaHistory
   stopMedia(true)
-  if (selected.value + 1 < sources.value.length) {
+  failedSources.value.add(selected.value)
+  const alternative = sources.value.findIndex((_, index) => !failedSources.value.has(index))
+  if (alternative !== -1) {
+    if (current?.autoAttempted && !resumeBackup) autoStart.value = undefined
     if (resumeBackup && !autoStart.value) autoStart.value = { reason: 'fallback', muted }
-    selected.value++
+    nextSourceBookmark = current?.saved ? undefined : current?.checkpoint ?? nextSourceBookmark
+    selected.value = alternative
     return
   }
   state.value = 'error'
@@ -575,7 +626,9 @@ watch([video, source], async ([media, choice]) => {
     preferenceMedia = media
     media.defaultPlaybackRate = settings.speed
     media.playbackRate = settings.speed
-    const checkpoint = library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
+    const checkpoint = nextSourceBookmark ??
+      library.history.find((item) => item.dramaId === target.id && item.episode === target.episode)
+    nextSourceBookmark = undefined
     mediaHistory = {
       generation: current, path, target, media, source: choice, checkpoint,
       pending: true, restoring: false, endHandled: false, autoAttempted: false, lastPosition: 0,
@@ -697,6 +750,14 @@ onBeforeUnmount(() => {
           :aria-current="item.index === episode ? 'page' : undefined"
           @click="selectEpisode(item.index)">第{{ item.index }}集</button>
       </nav>
+      <label v-if="canInteract && state === 'ready' && video && sources.length > 1" class="source-picker">
+        播放源
+        <select :value="selected" @change="selectPlaybackSource">
+          <option v-for="(choice, index) in sources" :key="choice.src" :value="index" :disabled="failedSources.has(index)">
+            {{ sourceLabel(choice, index) }}
+          </option>
+        </select>
+      </label>
       <BaseButton v-if="state === 'ready' && video" variant="ghost" type="button" data-testid="catalog-pip"
         :aria-pressed="pipActive" :disabled="pipBusy" @click="togglePip">
         <PictureInPicture2 :size="16" aria-hidden="true" />{{ pipActive ? '退出画中画' : '画中画' }}
@@ -737,6 +798,14 @@ video { display: block; width: 100%; max-width: 960px; max-height: calc(65vh / v
   border-radius: var(--r-pill); min-height: 38px; padding: 0 16px; background: var(--c-surface-hover);
   &[aria-current='page'] { background: var(--g-accent); color: #fff; }
   &:disabled { opacity: .45; cursor: not-allowed; }
+}
+.source-picker {
+  display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; color: var(--c-text-2);
+  select {
+    min-height: 38px; max-width: 100%; padding: 0 12px; border-radius: var(--r-pill);
+    border: 1px solid var(--c-border-strong); background: var(--c-surface-hover); color: var(--c-text);
+  }
+  option { background: var(--c-surface-solid); color: var(--c-text); }
 }
 .local-comment-panel { width: min(100%, 640px); height: min(560px, 75vh); min-height: 290px; margin-top: 12px; }
 .local-danmaku-panel { width: min(100%, 640px); height: min(660px, 75vh); min-height: 290px; margin-top: 12px; }
