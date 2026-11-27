@@ -50,7 +50,7 @@ func (a *App) restoreSelectedLibraryBackup(pick func() (string, error)) (*sqlite
 		}
 	}
 	var state *sqlite.LibraryState
-	err = withPrivateDatabaseSnapshot(func(root *os.Root, filename string) error {
+	err = withPrivateDatabaseSnapshot(privateSnapshotStage, func(root *os.Root, filename string) error {
 		var err error
 		state, err = sqlite.ReadLibraryBackup(path, root, filename)
 		return err

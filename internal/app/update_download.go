@@ -97,6 +97,7 @@ type outputStageKind uint8
 const (
 	mediaOutputStage outputStageKind = iota
 	privateSnapshotStage
+	privateBackupOutputStage
 	updateOutputStage
 )
 

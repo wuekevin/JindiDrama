@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"crypto/rand"
 	"errors"
 	"io"
@@ -16,10 +17,17 @@ import (
 const updateFileShares = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 
 func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
-	var descriptor *windows.SECURITY_DESCRIPTOR
+	var directoryDescriptor, fileDescriptor *windows.SECURITY_DESCRIPTOR
 	if kind != mediaOutputStage {
 		var err error
-		descriptor, err = fileprivacy.WindowsDirectoryDescriptor()
+		directoryDescriptor, err = fileprivacy.WindowsDirectoryDescriptor()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if kind == privateBackupOutputStage {
+		var err error
+		fileDescriptor, err = fileprivacy.WindowsFileDescriptor()
 		if err != nil {
 			return nil, err
 		}
@@ -32,9 +40,21 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		return nil, err
 	}
 
+	if kind == privateBackupOutputStage {
+		var volumeFlags uint32
+		// Some shares expose file ACLs without supporting this volume query.
+		// The staging directory and file ACLs are always checked below.
+		if err := windows.GetVolumeInformationByHandle(dest, nil, 0, nil, nil, &volumeFlags, nil, 0); err == nil &&
+			volumeFlags&windows.FILE_PERSISTENT_ACLS == 0 {
+			return nil, errors.Join(errPrivateBackupACL, windows.CloseHandle(dest))
+		}
+	}
 	dirName := prefix + rand.Text()
-	const stagingAccess = windows.FILE_WRITE_DATA | windows.FILE_TRAVERSE | windows.DELETE
-	dir, err := createUpdateObject(dest, dirName, stagingAccess, updateFileShares, windows.FILE_DIRECTORY_FILE, descriptor)
+	stagingAccess := uint32(windows.FILE_WRITE_DATA | windows.FILE_TRAVERSE | windows.DELETE)
+	if kind == privateBackupOutputStage {
+		stagingAccess |= windows.READ_CONTROL
+	}
+	dir, err := createUpdateObject(dest, dirName, stagingAccess, updateFileShares, windows.FILE_DIRECTORY_FILE, directoryDescriptor)
 	if err != nil {
 		_ = windows.CloseHandle(dest)
 		return nil, err
@@ -43,8 +63,13 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		return errors.Join(deleteUpdateObject(dir), windows.CloseHandle(dir), windows.CloseHandle(dest))
 	}
 
+	if kind == privateBackupOutputStage {
+		if err := verifyPrivateBackupACL(dir, directoryDescriptor); err != nil {
+			return nil, errors.Join(err, closeStageDirectory())
+		}
+	}
 	const name = "package"
-	handle, err := createUpdateObject(dir, name, windows.GENERIC_WRITE|windows.FILE_READ_ATTRIBUTES|windows.DELETE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, nil)
+	handle, err := createUpdateObject(dir, name, windows.GENERIC_WRITE|windows.FILE_READ_ATTRIBUTES|windows.DELETE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
 	if err != nil {
 		closeStageDirectory()
 		return nil, err
@@ -65,6 +90,11 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	}
 	cleanup := func() error {
 		return errors.Join(discard(), closeStageDirectory())
+	}
+	if kind == privateBackupOutputStage {
+		if err := verifyPrivateBackupACL(handle, fileDescriptor); err != nil {
+			return nil, errors.Join(err, cleanup())
+		}
 	}
 	if kind == updateOutputStage {
 		if err := markUpdateZone(dir, handle, name); err != nil {
@@ -109,6 +139,48 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 			})
 		},
 	}, nil
+}
+
+var errPrivateBackupACL = errors.New("无法为数据库备份设置私有权限")
+
+func verifyPrivateBackupACL(handle windows.Handle, expected *windows.SECURITY_DESCRIPTOR) error {
+	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return err
+	}
+	control, _, err := descriptor.Control()
+	if err != nil {
+		return err
+	}
+	if control&windows.SE_DACL_PROTECTED == 0 {
+		return errPrivateBackupACL
+	}
+	actual, _, err := descriptor.DACL()
+	if err != nil {
+		return err
+	}
+	requested, _, err := expected.DACL()
+	if err != nil {
+		return err
+	}
+	if actual == nil || requested == nil || actual.AceCount != requested.AceCount {
+		return errPrivateBackupACL
+	}
+	for i := range uint32(requested.AceCount) {
+		var found, wanted *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(actual, i, &found); err != nil {
+			return err
+		}
+		if err := windows.GetAce(requested, i, &wanted); err != nil {
+			return err
+		}
+		if found.Header.AceSize != wanted.Header.AceSize ||
+			!bytes.Equal(unsafe.Slice((*byte)(unsafe.Pointer(found)), found.Header.AceSize),
+				unsafe.Slice((*byte)(unsafe.Pointer(wanted)), wanted.Header.AceSize)) {
+			return errPrivateBackupACL
+		}
+	}
+	return nil
 }
 
 func openUpdateDirectory(path string, access uint32) (windows.Handle, error) {

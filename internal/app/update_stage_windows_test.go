@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	"jindi-drama/internal/fileprivacy"
 )
 
 func TestUpdatePublicationPreservesWindowsDownloadZone(t *testing.T) {
@@ -80,7 +82,7 @@ func TestStagedExportRejectsRetargetedWindowsDestination(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	err := writeStagedExport(filepath.Join(selected, "capture.png"), func(file io.Writer) error {
+	err := writePrivateStagedExport(filepath.Join(selected, "capture.png"), func(file io.Writer) error {
 		if _, err := io.WriteString(file, "capture"); err != nil {
 			return err
 		}
@@ -117,5 +119,84 @@ func TestSaveUpdateRejectsWindowsDestinationCreatedDuringDownload(t *testing.T) 
 	}
 	if entries, err := os.ReadDir(dir); err != nil || len(entries) != 1 {
 		t.Fatalf("staged files remain: %v, %v", entries, err)
+	}
+}
+
+func TestBackupPublicationKeepsProtectedWindowsACL(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "backups")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture, err := windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")(A;OICI;GR;;;WD)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dacl, _, err := fixture.DACL()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil); err != nil {
+		t.Fatal(err)
+	}
+	readACL := func(path string) *windows.SECURITY_DESCRIPTOR {
+		t.Helper()
+		info, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info
+	}
+	const everyone = ";;;WD)"
+	control := filepath.Join(dir, "ordinary-file")
+	if err := os.WriteFile(control, []byte("control"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if acl := readACL(control).String(); !strings.Contains(acl, everyone) {
+		t.Fatalf("control file did not inherit Everyone access: %s", acl)
+	}
+
+	expected, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;SY)(A;;FA;;;" + user.User.Sid.String() + ")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	controlPath, err := fileprivacy.WindowsPath(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle, err := windows.CreateFile(controlPath, windows.READ_CONTROL, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkErr := verifyPrivateBackupACL(handle, expected)
+	if err := windows.CloseHandle(handle); err != nil {
+		t.Fatal(err)
+	}
+	if !errors.Is(checkErr, errPrivateBackupACL) {
+		t.Fatalf("verification accepted nonprivate file: %v", checkErr)
+	}
+
+	app := New()
+	if err := app.openStore(filepath.Join(root, "jindi.db")); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(app.close)
+	backup, err := app.backupTo(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := readACL(backup)
+	flags, _, err := info.Control()
+	_, actualACEs, actualFound := strings.Cut(info.String(), "(")
+	_, expectedACEs, expectedFound := strings.Cut(expected.String(), "(")
+	if err != nil || flags&windows.SE_DACL_PROTECTED == 0 || !actualFound || !expectedFound || actualACEs != expectedACEs {
+		t.Fatalf("backup ACL is not private: %s, %v", info.String(), err)
+	}
+	if files, err := os.ReadDir(dir); err != nil || len(files) != 2 {
+		t.Fatalf("expected only the control and final backup: %v, %v", files, err)
 	}
 }

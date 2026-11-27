@@ -882,3 +882,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Windows 安装器 22.55 MiB、便携版 32.38 MiB、macOS Universal ZIP 40.91 MiB。Windows NSIS 内主程序与便携版字节一致，包含 WebView2 引导程序。macOS ZIP 含 arm64 和 x86_64，两切片最低 macOS 13.0，临时签名校验通过。按随包命令和归档后独立复验 Windows 7 项、macOS 6 项 SHA-256，全部通过。[结构检查](../build/bin/qa-release-source-53/package-static.log) · [归档校验](../build/bin/qa-release-source-53/archived-checks.log)
 - Apple Silicon 从已归档的测试 ZIP 通过原生启动、SQLite 完整性、正常退出及回滚。用归档内相同的可执行文件确认回滚 v2 不继承测试目录的 `everyone` ACL，源库 SHA-256 保持一致。[原生冒烟](../build/bin/qa-release-source-53/macos-native.log) · [回滚权限及包大小](../build/bin/qa-release-source-53/package-final.log)
 - .53 的 Windows 与 Intel Mac 原生验收、真实 Windows 托盘交互及正式签名、公证、在线更新待完成。CMS 和红果相关公网联调需要项目可用的授权接口或片源。本次为本地累计验收。目前 GitHub 原生结果覆盖 .52。[BMad 记录](../_bmad-output/plan-e13-local-candidate53-packages.md)
+
+## E11 Windows 数据库备份文件权限（2026-11-27）
+
+- 数据库备份的暂存阶段此前复用普通媒体导出。代码检查确认，Windows 上新文件可能从备份目录继承读取权限。现在备份暂存目录和文件均显式使用当前用户及 SYSTEM 的受保护 DACL。写入前从原句柄核对权限，仍由句柄完成独占发布。文件系统明确报告无法保留 ACL 时，在写入前拒绝。若网络卷不提供卷属性，继续核对实际对象的 DACL。[Windows 文件访问控制](https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights) · [卷属性适用范围](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getvolumeinformationbyhandlew)
+- macOS 的备份、恢复、媒体保存专项和 Go 全量、vet、App 与 SQLite 竞态通过。Windows 权限回归已交叉编译并通过 Windows 目标 vet。回归对照目录继承权限，并复核成品权限与暂存清理。Windows 原生 NTFS、FAT 和网络卷仍待验收。改动晚于 .53。[专项](../build/bin/qa-backup-file-privacy/targeted.log) · [竞态](../build/bin/qa-backup-file-privacy/go-race.log) · [Windows 编译](../build/bin/qa-backup-file-privacy/windows-compile.log) · [Windows vet](../build/bin/qa-backup-file-privacy/windows-vet.log)
+- 评审记录了独立的既有边界。SQLite 生成快照时仍要按路径访问暂存目录，目录句柄身份核验不能覆盖外部重定向路径的整段写入窗口。[BMad 记录](../_bmad-output/plan-e11-backup-file-privacy.md)

@@ -190,7 +190,7 @@ func writeMediaExport(target string, write func(io.Writer) error) error {
 }
 
 func stageMediaExport(target string, write func(io.Writer) error, publish func(*stagedOutput, string) error) error {
-	return stageExport(target, write, func(stage *stagedOutput, target string) error {
+	return stageExport(target, mediaOutputStage, write, func(stage *stagedOutput, target string) error {
 		err := publish(stage, target)
 		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
 			return stage.copyDirect(target, write)
@@ -199,18 +199,18 @@ func stageMediaExport(target string, write func(io.Writer) error, publish func(*
 	})
 }
 
-func writeStagedExport(target string, write func(io.Writer) error) error {
-	return stageExport(target, write, func(stage *stagedOutput, target string) error { return stage.publish(target) })
+func writePrivateStagedExport(target string, write func(io.Writer) error) error {
+	return stageExport(target, privateBackupOutputStage, write, func(stage *stagedOutput, target string) error { return stage.publish(target) })
 }
 
-func stageExport(target string, write func(io.Writer) error, publish func(*stagedOutput, string) error) (result error) {
+func stageExport(target string, kind outputStageKind, write func(io.Writer) error, publish func(*stagedOutput, string) error) (result error) {
 	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
 		if err == nil {
 			return fs.ErrExist
 		}
 		return err
 	}
-	stage, err := createOutputStage(filepath.Dir(target), ".jindidrama-export-", mediaOutputStage)
+	stage, err := createOutputStage(filepath.Dir(target), ".jindidrama-export-", kind)
 	if err != nil {
 		return err
 	}

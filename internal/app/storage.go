@@ -193,7 +193,7 @@ func publishDatabaseBackup(dest string, snapshot func(string) error) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return err
 	}
-	err := writeStagedExport(dest, func(output io.Writer) error {
+	err := writePrivateStagedExport(dest, func(output io.Writer) error {
 		return copyDatabaseSnapshot(output, snapshot)
 	})
 	// A published backup remains usable even if temporary directory cleanup fails.
@@ -204,7 +204,7 @@ func publishDatabaseBackup(dest string, snapshot func(string) error) error {
 }
 
 func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) error {
-	return withPrivateDatabaseSnapshot(func(root *os.Root, filename string) error {
+	return withPrivateDatabaseSnapshot(privateBackupOutputStage, func(root *os.Root, filename string) error {
 		if err := snapshot(filepath.Join(root.Name(), filename)); err != nil {
 			return err
 		}
@@ -232,8 +232,8 @@ func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) error {
 	})
 }
 
-func withPrivateDatabaseSnapshot(use func(*os.Root, string) error) (result error) {
-	stage, err := createOutputStage(os.TempDir(), ".jindi-backup-snapshot-", privateSnapshotStage)
+func withPrivateDatabaseSnapshot(kind outputStageKind, use func(*os.Root, string) error) (result error) {
+	stage, err := createOutputStage(os.TempDir(), ".jindi-backup-snapshot-", kind)
 	if err != nil {
 		return err
 	}

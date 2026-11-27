@@ -93,7 +93,7 @@ func TestRestoreBackupScratchReplacementReceivesNoCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	var moved, replacement string
-	err := withPrivateDatabaseSnapshot(func(root *os.Root, file string) error {
+	err := withPrivateDatabaseSnapshot(privateSnapshotStage, func(root *os.Root, file string) error {
 		replacement = root.Name()
 		moved = replacement + "-moved"
 		if err := os.Rename(replacement, moved); err != nil {

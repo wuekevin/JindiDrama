@@ -9,11 +9,20 @@ import (
 
 // WindowsDirectoryDescriptor permits inheritance by the same user and SYSTEM.
 func WindowsDirectoryDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+	return windowsPrivateDescriptor("OICI")
+}
+
+// WindowsFileDescriptor restricts a file to the same user and SYSTEM.
+func WindowsFileDescriptor() (*windows.SECURITY_DESCRIPTOR, error) {
+	return windowsPrivateDescriptor("")
+}
+
+func windowsPrivateDescriptor(aceFlags string) (*windows.SECURITY_DESCRIPTOR, error) {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()
 	if err != nil {
 		return nil, err
 	}
-	return windows.SecurityDescriptorFromString("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;" + user.User.Sid.String() + ")")
+	return windows.SecurityDescriptorFromString("D:P(A;" + aceFlags + ";FA;;;SY)(A;" + aceFlags + ";FA;;;" + user.User.Sid.String() + ")")
 }
 
 // ProtectDirectory applies the protected DACL to the same directory as root.
