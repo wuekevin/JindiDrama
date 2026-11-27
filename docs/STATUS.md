@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-28，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261128.62`，打包源提交为 `9ad65eb70abc3878d5c294848997cc848f990f35`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-28，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261128.63`，打包源提交为 `592493a9de15d74430c3c05c08559bde33a76cf8`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .63 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | 主工作区 `build/bin/smoke-20261128.63/` |
 | .62 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261128.62/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261128.62/macos/SHA256SUMS.txt) |
 | .61 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.61/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.61/macos/SHA256SUMS.txt) |
 | .60 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.60/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.60/macos/SHA256SUMS.txt) |
@@ -1205,3 +1206,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 正式 macOS 公证步骤记录已校验的 Apple 提交编号、已知状态及发生错误的阶段和退出码。工具原始输出不直达工作流日志。原版可在提交成功、失败和取消时复现合成标准错误文本进入日志。修复后覆盖公证成功、拒绝、取消、身份检查失败、归档失败和票据装订失败。票据装订、验签和临时文件清理逻辑继续通过回归。
 - 系统 Bash 语法校验、macOS 公证与桌面冒烟 19 项、Node 交付与 SHA-256 校验 18 项、发行源码检测夹具通过。系统 codesign 对临时签名应用按预期拒绝正式公证，退出码为 3，清理临时目录。使用合成凭据，实际 Developer ID 与 Apple 公证待验收。测试证据位于主工作区 `build/bin/qa-notary-stderr/`。[Apple 公证流程](https://developer.apple.com/documentation/security/customizing-the-notarization-workflow) · [BMad](../_bmad-output/plan-e13-notary-stderr.md)
+
+## E13 .63 累计发行候选本地打包与原生验收（2026-11-28）
+
+- 发行提交 `592493a9de15d74430c3c05c08559bde33a76cf8` 生成 `v0.1.0-smoke.20261128.63`，包含更新重试、HLS 音轨组和节目时间戳、公证日志修复。Windows x64 与 macOS Universal 的三个二进制切片均内嵌同一份锁文件构建的 69 个前端文件、5 个目录。Chromium 验收所用预览服务中 69 个文件逐一匹配。NSIS 归档共 7 件。x64 载荷主程序与便携版逐字节相同，安装与卸载引导程序为 x86，WebView2 引导程序和打包资源核对通过。macOS 两切片最低系统版本为 13.0。
+- 从最终归档目录分别校验 Windows 7 项、macOS 6 项 SHA-256。Windows 安装器 22.58 MiB，便携版 32.45 MiB，macOS 通用 ZIP 40.97 MiB。Apple Silicon 从最终 ZIP 启动实际窗口、正常退出，数据库完整性、活动 WAL 回滚及原库不变均通过。实际成品上的更新页通过断网恢复、旧失败提示撤下与重启恢复预发布渠道。Windows 成品未签名，macOS 成品使用独立 bundle ID 和本机临时签名。
+- Chromium 全量 406 项、WebKit 专项 5 项、Vitest 125 项、Go 全量与 vet、App 和更新模块竞态、公证和 macOS 冒烟脚本 19 项、Node 交付脚本 18 项及源码历史夹具通过。Go 生产源码、三种架构二进制和 npm 锁文件依赖扫描均未报告已知漏洞。测试证据位于主工作区 `build/bin/qa-release-source-63/`。
+- GitHub 只读查询显示最新托管候选仍为 .52，当前仓库可见签名环境、仓库级 Actions secrets 和 Release 均为 0。Windows 与 Intel Mac 原生、正式签名公证、签名版在线升级和真实授权公网片源待验收。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [BMad](../_bmad-output/plan-e13-local-candidate63-packages.md)
