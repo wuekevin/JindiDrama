@@ -936,3 +936,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 原版在重新检查失败后丢失已保存的本机路径。设置现于当前会话保留最近一次已验证的安装包版本与路径，可继续复制。后续成功保存替换旧记录，切换渠道清除旧路径。检查中和检查失败后的旧发布链接及下载候选仍会失效。[原版复现](../build/bin/qa-update-retained-path/baseline-e2e.log)
 - Chromium 设置页 45 项、WebKit 更新专项 3 轮、Vitest 125 项、生产构建、Go 全量与 vet 通过。首轮并行验证遇到磁盘空间不足，分开重跑通过。默认窗口和 1280×860、220% 截图复核版本提示、长路径换行和复制按钮。专项使用桌面桥夹具，这批源码待下一次累计打包。[Chromium](../build/bin/qa-update-retained-path/final-chromium.log) · [WebKit 专项](../build/bin/qa-update-retained-path/final-webkit.log) · [默认窗口](../build/bin/qa-update-retained-path/after-default.png) · [220% 原版](../build/bin/qa-update-retained-path/before-220.png) · [220% 修复版](../build/bin/qa-update-retained-path/after-220.png)
 - 原版与首轮修复的 WebKit 设置页全量各有 40 项通过，均复现相同的 5 项失败，涉及 Tab 焦点和快捷键录制，待专项核查。Windows、Intel Mac 和正式在线更新待原生验收。[WebKit 原版全量](../build/bin/qa-update-retained-path/webkit-baseline.log) · [WebKit 修复全量初跑](../build/bin/qa-update-retained-path/webkit.log) · [BMad 记录](../_bmad-output/plan-e13-retain-saved-update.md)
+
+## E10 设置页快捷键录制焦点（2026-11-27）
+
+- 原版在 macOS Playwright WebKit 中点击录制按钮后未聚焦，输入新键或按 Esc 仍停在录制状态。激活后显式聚焦该按钮，保持滚动位置。另三个原版用例使用 Option+Tab 后即通过，已统一这类 WebKit 按钮遍历测试的用键。[原版对照](../build/bin/qa-settings-shortcut-focus/baseline.log)
+- Chromium 与 WebKit 设置页各 45 项通过，涵盖快捷键录入、冲突、取消、重载及恢复默认。Vitest 125 项、生产前端构建、Go 全量和 vet 通过。[Chromium](../build/bin/qa-settings-shortcut-focus/chromium.log) · [WebKit](../build/bin/qa-settings-shortcut-focus/webkit.log) · [BMad](../_bmad-output/plan-e10-settings-shortcut-focus.md)
+- Apple Silicon 本地临时签名 Wails 应用启动和正常退出通过，系统辅助功能可观察到录制按钮获焦。原归档的辅助功能激活也可使按钮获焦。操作系统的合成键盘事件未能验证快捷键写入。改动待下一个累计安装包和原生手动键盘验收。[原生焦点](../build/bin/qa-settings-shortcut-focus/native-fixed-focus.log) · [输入验证待完成](../build/bin/qa-settings-shortcut-focus/native-hid-input.log)

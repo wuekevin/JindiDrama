@@ -235,7 +235,12 @@ async function changeCacheDirectory(reset = false) {
     cacheBusy.value = false
   }
 }
-const rec = ref(''); function startRec(action: string) { rec.value = action }
+const rec = ref('')
+function startRec(action: string, event: MouseEvent) {
+  const button = event.currentTarget as HTMLButtonElement
+  button.focus({ preventScroll: true })
+  rec.value = action
+}
 function onKey(e: KeyboardEvent) {
   if (!rec.value || e.isComposing) return
   if (e.key === 'Escape' || e.key === 'Tab') {
@@ -371,7 +376,7 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
           <label class="r">缓存上限<span class="sel"><select :value="currentLimit" :disabled="cacheBusy || !cache" data-testid="cache-limit" @change="setLimit"><option v-for="g in limitOptions" :key="g" :value="g">{{ g }} GB</option></select><ChevronDown :size="14" /></span></label>
           <div class="r">缓存管理<span class="cs" data-testid="cache-size">{{ cacheText }}</span><button class="clr" data-testid="clear-cache" :disabled="cacheBusy || !cache || cache.files === 0" @click="confirmClear = true"><Trash2 :size="15" />清理缓存</button></div></section>
         <section id="sec-keys" class="pn"><h2><Keyboard :size="22" />快捷键<button class="rs" data-testid="reset-keys" @click="st.shortcuts = { ...DEFAULT_SHORTCUTS }; toast.push('已恢复默认快捷键')"><RotateCcw :size="13" />恢复默认</button></h2>
-          <div v-for="(l, k) in SHORTCUT_LABELS" :key="k" class="r k"><span>{{ l }}</span><button class="kbd" :class="{ rec: rec === k }" :data-testid="`key-${k}`" :aria-label="`修改${l}快捷键`" @click="startRec(k)">{{ rec === k ? '按下新按键…' : st.shortcuts[k] || '未设置' }}</button></div></section>
+          <div v-for="(l, k) in SHORTCUT_LABELS" :key="k" class="r k"><span>{{ l }}</span><button class="kbd" :class="{ rec: rec === k }" :data-testid="`key-${k}`" :aria-label="`修改${l}快捷键`" @click="startRec(k, $event)">{{ rec === k ? '按下新按键…' : st.shortcuts[k] || '未设置' }}</button></div></section>
         <section id="sec-look" class="pn"><h2><Palette :size="22" />外观</h2>
           <div class="r tm">主题模式<div class="themes"><button v-for="t in [['dark','深色（推荐）'],['light','浅色'],['system','跟随系统']] as const" :key="t[0]" :class="[t[0], { on: st.theme === t[0] }]" :data-testid="`theme-${t[0]}`" :aria-pressed="st.theme === t[0]" @click="st.theme = t[0]"><span><Sun v-if="t[0] === 'system'" :size="20" /><Moon v-if="t[0] === 'system'" :size="20" /><Check v-if="st.theme === t[0]" :size="13" class="ck" /></span><em>{{ t[1] }}</em></button></div></div>
           <label class="r">界面缩放（DPI）<input v-model.number="st.dpi" class="rg" type="range" min="80" max="150" step="10" aria-label="界面缩放" data-testid="dpi" :style="{ '--p': pct(st.dpi, 80, 150) }" /><em>{{ st.dpi }}%</em></label>

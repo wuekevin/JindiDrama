@@ -1,6 +1,10 @@
 import { test, expect, deferPanelResize } from './fixtures'
 
-test('desktop Apple CMS settings test, preserve failed edits, and defer activation until restart', async ({ page }, testInfo) => {
+function controlsTabKey(browserName: string) {
+  return browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
+}
+
+test('desktop Apple CMS settings test, preserve failed edits, and defer activation until restart', async ({ page, browserName }, testInfo) => {
   const source = 'https://catalog.example.test/api.php/provide/vod/'
   await page.addInitScript(({ source }) => {
     const key = 'test.apple-cms'
@@ -45,12 +49,12 @@ test('desktop Apple CMS settings test, preserve failed edits, and defer activati
   await expect(demo).toBeVisible()
   await expect(clear).toBeDisabled()
   await address.fill(source)
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(testConnection).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(section.getByRole('status')).toHaveText('连接成功，已读取片源目录。')
   expect(await page.evaluate(() => sessionStorage.getItem('test.apple-cms'))).toBeNull()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(save).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(saved).toBeVisible()
@@ -281,7 +285,7 @@ test('desktop notifications share available releases, persist read state and cle
   await expect(unread).toHaveCount(0)
 })
 
-test('reads the release notes as scrollable plain text and clears stale candidates', async ({ page }, testInfo) => {
+test('reads the release notes as scrollable plain text and clears stale candidates', async ({ page, browserName }, testInfo) => {
   await page.addInitScript(() => {
     let channel = 'stable'
     Object.assign(window, { go: { app: { App: {
@@ -331,7 +335,7 @@ test('reads the release notes as scrollable plain text and clears stale candidat
   await page.locator('html').evaluate((html) => { html.style.setProperty('--user-zoom', '2.2') })
   await expect(fullNotes).toBeInViewport({ ratio: 0.95 })
   await page.screenshot({ path: testInfo.outputPath('release-notes-truncated-220.png') })
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(fullNotes).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page.locator('body')).toHaveAttribute('data-opened-release', 'https://github.com/wuekevin/JindiDrama/releases/tag/v0.2.0')
@@ -452,8 +456,7 @@ test('downloads a verified update through the desktop bridge and shows its path 
   await page.locator('html').evaluate((el) => el.style.setProperty('--user-zoom', '2.2'))
   await expect(page.getByTestId('page-settings')).toHaveClass(/\bcompact\b/)
   await page.getByTestId('privacy-notice').focus()
-  const tabKey = browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab'
-  await page.keyboard.press(tabKey)
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(copy).toBeFocused()
   await expect(copy).toBeInViewport()
   const savedBounds = (await saved.boundingBox())!
@@ -600,7 +603,11 @@ test.describe('10 应用设置', () => {
     await page.getByTestId('clear-cache').click(); await page.getByTestId('modal-confirm').click(); await expect(page.getByTestId('cache-size')).toContainText('0.0 GB'); await expect(page.getByTestId('clear-cache')).toBeDisabled()
   })
   test('shortcut rebind: accept, conflict rejected, reset', async ({ page }) => {
-    await page.getByTestId('key-danmaku').click(); await page.keyboard.press('B'); await expect(page.getByTestId('key-danmaku')).toHaveText('B')
+    const danmaku = page.getByTestId('key-danmaku')
+    await danmaku.click()
+    await expect(danmaku).toBeFocused()
+    await page.keyboard.press('B')
+    await expect(danmaku).toHaveText('B')
     await page.getByTestId('key-fullscreen').click(); await page.keyboard.press('B'); await expect(page.getByTestId('toast').last()).toContainText('冲突'); await expect(page.getByTestId('key-fullscreen')).toHaveText('F')
     await page.reload(); await expect(page.getByTestId('key-danmaku')).toHaveText('B'); await page.getByTestId('reset-keys').click(); await expect(page.getByTestId('key-danmaku')).toHaveText('D')
   })
@@ -631,7 +638,7 @@ test.describe('10 应用设置', () => {
   })
   test('left nav scrolls to section', async ({ page }) => { await page.getByTestId('snav-about').click(); await expect(page.getByTestId('snav-about')).toHaveClass(/on/) })
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=page-settings]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/10-${w}x${h}.png` }) })
-  test('settings controls remain reachable in a scaled minimum window', async ({ page }, testInfo) => {
+  test('settings controls remain reachable in a scaled minimum window', async ({ page, browserName }, testInfo) => {
     const settings = page.getByTestId('page-settings')
     const firstPanel = settings.locator('#sec-general')
     const secondPanel = settings.locator('#sec-playback')
@@ -676,9 +683,9 @@ test.describe('10 应用设置', () => {
       if (dpi === 220) {
         await looks.press('Enter')
         await expect(settings.getByRole('heading', { name: '外观' })).toBeFocused()
-        await page.keyboard.press('Tab')
+        await page.keyboard.press(controlsTabKey(browserName))
         await expect(page.getByTestId('theme-dark')).toBeFocused()
-        await page.keyboard.press('Tab')
+        await page.keyboard.press(controlsTabKey(browserName))
         await expect(theme).toBeFocused()
         await page.keyboard.press('Enter')
       } else {
