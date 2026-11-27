@@ -232,7 +232,7 @@ func (p *Provider) catalogPage(ctx context.Context, keyword, genre string, page 
 	seen := make(map[string]bool)
 	skippedUnpublished := false
 	for _, item := range data.List {
-		if !item.published() {
+		if item.publicationStatus() != "1" {
 			skippedUnpublished = true
 			continue
 		}
@@ -324,15 +324,23 @@ func (p *Provider) detail(ctx context.Context, id string) (provider.Drama, map[i
 		return provider.Drama{}, nil, record{}, err
 	}
 	items := data.List
-	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID || !items[0].published() {
+	if len(items) != 1 || scalar(items[0].ID).decimal(30) != vodID {
 		return provider.Drama{}, nil, record{}, provider.ErrNotFound
 	}
-	title := metadataText(items[0].Name)
+	item := items[0]
+	switch item.publicationStatus() {
+	case "0":
+		return provider.Drama{}, nil, record{}, provider.ErrNotFound
+	case "1":
+	default:
+		return provider.Drama{}, nil, record{}, errUpstream
+	}
+	title := metadataText(item.Name)
 	if title == "" {
 		return provider.Drama{}, nil, record{}, errUpstream
 	}
-	drama, sources := p.normalize(items[0], vodID, title)
-	return drama, sources, items[0], nil
+	drama, sources := p.normalize(item, vodID, title)
+	return drama, sources, item, nil
 }
 
 // scalar retains JSON number spelling instead of decoding IDs through float64.
@@ -533,9 +541,12 @@ func creditNames(raw json.RawMessage) []string {
 	return names
 }
 
-func (item record) published() bool {
+func (item record) publicationStatus() string {
 	// Some compatible endpoints omit this field for their published catalog.
-	return len(item.Status) == 0 || strings.TrimSpace(scalar(item.Status).text()) == "1"
+	if len(item.Status) == 0 {
+		return "1"
+	}
+	return strings.TrimSpace(scalar(item.Status).text())
 }
 
 func (item record) restricted() bool {

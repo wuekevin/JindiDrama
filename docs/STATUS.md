@@ -1070,3 +1070,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 首页、搜索和分类的列表现可跳过 JSON 无法解码的单条记录，继续展示正常剧目。非空列表全部无法解码时返回片源错误，原始记录数上限在过滤前生效。可解析条目仍须通过分类、上架等原有校验。含无法解码记录的详情仍报片源错误，播放不签发票据。[原版复现](../build/bin/qa-cms-malformed-list/baseline.log) · [专项回归](../build/bin/qa-cms-malformed-list/targeted.log)
 - Go 全量、vet、App 与 CMS 竞态、Windows amd64 交叉 vet 通过。Apple Silicon 的隔离 Wails 构建通过合成目录实测首页、搜索和分类，随后用 Go 签发的环回票据成功解码真实 MP4 样片。正常退出后 SQLite 完整性通过。[Go 全量](../build/bin/qa-cms-malformed-list/go-test.log) · [原生验收](../build/bin/qa-cms-malformed-list/native.log)
 - 本次修改晚于 .59 本地打包。证据存于本机 JindiDrama 主工作区的 `build/bin/`，真实授权端点和跨平台成品待后续验收。[BMad](../_bmad-output/plan-e12-cms-malformed-list-rows.md)
+
+## E12 苹果 CMS 上架状态异常可重试（2026-11-27）
+
+- 片源返回有效剧目 ID 且上架状态为 null、对象或其他未识别值时，详情报告片源错误，收藏和历史提供「重试核验」。明确下架仍报告未找到，省略状态的兼容片源可继续使用。异常和下架均不签发新票据，Go 夹具确认没有向媒体地址发起请求。[原版复现](../build/bin/qa-cms-publication/baseline.log) · [Go 专项](../build/bin/qa-cms-publication/targeted.log)
+- Go 全量、vet、CMS 与 App 竞态通过。前端生产构建后 Chromium 和 WebKit 各通过 4 项回归。Apple Silicon 两个隔离 Wails 会话分别验证收藏和历史原地恢复，保留 25% 进度及 6000 ms 断点，正常退出和 SQLite 完整性检查通过。原生测试使用合成网络响应。[Chromium](../build/bin/qa-cms-publication/chromium.log) · [WebKit](../build/bin/qa-cms-publication/webkit.log) · [原生](../build/bin/qa-cms-publication/native.log)
+- 本次修改晚于 .59 本地打包。验收日志位于本机 JindiDrama 主工作区的 `build/bin/`，授权公网片源和跨平台原生待验收。[BMad](../_bmad-output/plan-e12-cms-unknown-publication-status.md)

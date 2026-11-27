@@ -60,7 +60,7 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 	const cmsID = "90071992547409931234"
 	client := newCatalogMediaClient()
 	var detailCalls, mediaCalls atomic.Int32
-	var thirdEpisodeRemoved, trialRestricted, withdrawn atomic.Bool
+	var thirdEpisodeRemoved, trialRestricted, withdrawn, invalidStatus atomic.Bool
 	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Scheme != "https" {
 			t.Errorf("invalid scheme: %s", req.URL.Scheme)
@@ -86,16 +86,19 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			if trialRestricted.Load() {
 				trial = `"vod_trysee":2,`
 			}
-			status := 1
+			status := "1"
 			if withdrawn.Load() {
-				status = 0
+				status = "0"
+			}
+			if invalidStatus.Load() {
+				status = "{}"
 			}
 			malformed := ""
 			if !q.Has("ids") {
 				malformed = `{"vod_id":43,"vod_name":"行类型异常","vod_play_url":{}},`
 			}
 			body := fmt.Sprintf(`{
-				"code":1,"list":[%s{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%d,`, malformed, status) + trial + `
+				"code":1,"list":[%s{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%s,`, malformed, status) + trial + `
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
 				"vod_play_from":"主线路",
 				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]
@@ -192,6 +195,16 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 		t.Errorf("withdrawn title returned details: %+v, %v", detail, err)
 	}
 	withdrawn.Store(false)
+
+	invalidStatus.Store(true)
+	if detail, err := a.CatalogDetail(id); err == nil || err.Error() != "苹果 CMS 目录暂不可用" || detail.Drama.ID != "" {
+		t.Errorf("invalid CMS publication status should be retryable: %+v, %v", detail, err)
+	}
+	if ticket, err := a.CatalogPlayback(id, 3); !errors.Is(err, errCatalogPlaybackUnavailable) ||
+		ticket.LeaseID != "" || len(ticket.Sources) != 0 || mediaCalls.Load() != 0 {
+		t.Errorf("invalid CMS publication status returned playback: %+v, %v", ticket, err)
+	}
+	invalidStatus.Store(false)
 
 	for _, attempt := range []struct {
 		id    string
