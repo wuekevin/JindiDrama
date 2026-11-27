@@ -39,8 +39,7 @@ export function useCMSLibraryDetails(ids: () => string[]) {
   async function retryFailed() {
     await loadingRun
     if (!active) return
-    for (const id of ids()) if (details.get(id) === null) details.delete(id)
-    return loadMore()
+    await Promise.all(failedIds.value.map(retryDetail))
   }
 
   async function refreshDetail(id: string) {
@@ -59,6 +58,7 @@ export function useCMSLibraryDetails(ids: () => string[]) {
   }
 
   const canRetry = (id: string) => details.get(id) === null && failed.has(id)
+  const failedIds = computed(() => ids().filter(canRetry))
 
   async function retryDetail(id: string) {
     if (!canRetry(id) || retrying.has(id)) return
@@ -95,6 +95,6 @@ export function useCMSLibraryDetails(ids: () => string[]) {
     void loadMore()
   }, { immediate: true })
 
-  return { details, loadMore, retryFailed, canRetry, retryDetail, retrying, loading,
+  return { details, loadMore, retryFailed, failedIds, canRetry, retryDetail, retrying, loading,
     hasMore: computed(() => remaining.value.length > 0) }
 }

@@ -29,6 +29,7 @@ type CatalogState = {
   shortcuts?: Record<string, string>
   holdPlaybackEpisode?: number
   holdResume?: boolean
+  offlineId?: string
   home?: 'empty' | 'error'; localBookmarks?: boolean; format: 'webm' | 'hls'; expired?: boolean; offline?: boolean; cover?: string; detailDelayMs?: number; holdDetail?: boolean
 }
 const mediaURL = 'http://127.0.0.1:45671'
@@ -151,7 +152,7 @@ async function fixture(page: Page, mode: 'ready' | 'blocked' | 'stale' | 'retry'
           const catalog = await desktop.readDesktopCatalog()
           if (catalog.holdDetail) await desktop.waitForCMSDetails()
           if (catalog.detailDelayMs) await new Promise((resolve) => setTimeout(resolve, catalog.detailDelayMs))
-          if (catalog.offline) {
+          if (catalog.offline || catalog.offlineId === requestedId) {
             testState.failedLookups++
             throw new Error('unavailable')
           }
@@ -2429,4 +2430,70 @@ test('retrying a failed CMS home rechecks bookmarks once the connection recovers
   await expect(page.getByTestId('resume-card')).toContainText(cmsTitle)
   await expect.poll(lookups).toEqual([cmsId, cmsId])
   expect(await calls(page)).toEqual([])
+})
+
+test('CMS home retries only failed resume checks while the directory remains available', async ({ page }, testInfo) => {
+  const missing = cmsId.replace(/:[0-9]+$/, ':99')
+  const row = (dramaId: string, watchedAt: number): HistoryRow => ({
+    dramaId, episode: 1, percent: 25, watchedAt, positionMs: 6000, durationMs: 24000, episodeCountAtWatch: 3,
+  })
+  const now = Date.now()
+  const desktop = await cmsLibraryFixture(page, [row(cmsId, now), row(missing, now - 1), row('local-1', now - 2)])
+  desktop.catalog.localBookmarks = true
+  desktop.catalog.offlineId = cmsId
+  desktop.catalog.available = [1]
+  await page.goto('/#/home')
+  const section = page.getByRole('region', { name: '继续观看' })
+  const retry = section.getByRole('button', { name: '重试核验' })
+  const local = section.getByTestId('resume-card').filter({ hasText: '本地样片1' })
+  const lookups = () => page.evaluate(() => (window as unknown as {
+    catalogTest: { lookups: string[] }
+  }).catalogTest.lookups)
+
+  await expect(page.getByRole('heading', { name: '片源目录' })).toBeVisible()
+  await expect(local).toBeVisible()
+  await expect(section.getByRole('list', { name: '片源核验失败' })).toContainText(cmsTitle)
+  await expect(retry).toBeEnabled()
+  await expect.poll(lookups).toEqual([cmsId, missing])
+  await section.screenshot({ path: testInfo.outputPath('cms-home-retry.png') })
+
+  delete desktop.catalog.offlineId
+  desktop.catalog.detailDelayMs = 500
+  await retry.focus()
+  await retry.press('Enter')
+  await expect(section.getByRole('button', { name: '正在核验…' })).toBeDisabled()
+  await expect(local).toBeVisible()
+  const recovered = section.getByTestId('resume-card').filter({ hasText: cmsTitle })
+  await expect(recovered).toContainText('25%')
+  await expect(retry).toHaveCount(0)
+  await expect(section.getByRole('button', { name: '查看更多' })).toBeFocused()
+  await expect.poll(lookups).toEqual([cmsId, missing, cmsId])
+  expect(await calls(page)).toEqual([])
+  await recovered.click()
+  await expect(page).toHaveURL(/\/play\/1$/)
+  await expect.poll(() => position(historyVideo(page, 1))).toBeCloseTo(6, 2)
+})
+
+test('CMS home keeps the history link focused when retry confirms a title is unavailable', async ({ page }) => {
+  const desktop = await cmsLibraryFixture(page, [{
+    dramaId: cmsId, episode: 1, percent: 25, watchedAt: Date.now(),
+    positionMs: 6000, durationMs: 24000, episodeCountAtWatch: 3,
+  }])
+  desktop.catalog.home = 'empty'
+  desktop.catalog.offlineId = cmsId
+  await page.goto('/#/home')
+  const section = page.getByRole('region', { name: '继续观看' })
+  const retry = section.getByRole('button', { name: '重试核验' })
+  await expect(section.getByRole('list', { name: '片源核验失败' })).toContainText(cmsId.split(':').at(-1)!)
+  await expect(retry).toBeEnabled()
+
+  delete desktop.catalog.offlineId
+  desktop.catalog.id = cmsId.replace(/:[0-9]+$/, ':99')
+  await retry.focus()
+  await retry.press('Enter')
+  await expect(section.getByText('暂无可继续观看的短剧')).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  await expect(section.getByRole('button', { name: '查看更多' })).toBeFocused()
+  expect(desktop.rows()[0]).toMatchObject({ dramaId: cmsId, positionMs: 6000 })
+  expect(desktop.writes).toHaveLength(0)
 })

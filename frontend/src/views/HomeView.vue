@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ChevronRight, Flame, Crown, Heart, Swords, Ghost, Zap, Sprout, Infinity as InfinityIcon, Building2, Medal, Clock, Play } from 'lucide-vue-next'
 import { catalogResumeIDs } from '@/bindings'
@@ -50,10 +50,32 @@ watch(cmsHistoryIds, async (ids, _, onCleanup) => {
   const candidates = await catalogResumeIDs(ids)?.catch(() => [])
   if (active) currentCMSIds.value = candidates ?? []
 }, { immediate: true })
-const { details: cmsDetails, loading: loadingCMS, retryFailed } = useCMSLibraryDetails(() => currentCMSIds.value)
+const {
+  details: cmsDetails, loading: loadingCMS, failedIds: failedCMSIds, retryFailed, retrying: retryingCMS,
+} = useCMSLibraryDetails(() => currentCMSIds.value)
+const resumeHistory = ref<HTMLButtonElement>()
+const checkingResume = computed(() => loadingCMS.value || retryingCMS.size > 0)
+const failedResumeRows = computed(() => failedCMSIds.value.map((id) => ({
+  id,
+  title: home.value?.todayNew.find((drama) => drama.id === id)?.title ?? '苹果 CMS 短剧 · ' + id.slice(id.lastIndexOf(':') + 1),
+})))
+const resumeEmptyTitle = computed(() => {
+  if (checkingResume.value) return '正在核对片源…'
+  return lib.history.length ? '暂无可继续观看的短剧' : '还没有观看记录'
+})
 function retryHome() {
   void load()
   void retryFailed()
+}
+async function retryResume(event: MouseEvent) {
+  const button = event.currentTarget as HTMLButtonElement
+  const wasFocused = document.activeElement === button
+  await retryFailed()
+  await nextTick()
+  if (wasFocused && document.activeElement === document.body) {
+    if (button.isConnected) button.focus()
+    else resumeHistory.value?.focus()
+  }
 }
 const resume = computed(() => lib.history.flatMap((history) => {
   const cms = isAppleCMSDramaId(history.dramaId)
@@ -66,7 +88,7 @@ const resume = computed(() => lib.history.flatMap((history) => {
   return [{ d: drama, episode, next, percent: next ? 0 : history.percent, watchedAt: history.watchedAt }]
 }).sort((a, b) => Number(a.next) - Number(b.next) || b.watchedAt - a.watchedAt).slice(0, 3))
 const showResume = computed(() => catalog.status === 'ready' ||
-  ((catalog.status === 'empty' || catalog.status === 'error') && resume.value.some((item) => item.d.providerOnly)))
+  ((catalog.status === 'empty' || catalog.status === 'error') && currentCMSIds.value.length > 0))
 const openDrama = (id: string, fromProvider?: boolean) => router.push(detailRoute(id, fromProvider))
 function watchNow(id: string) {
   const history = lib.history.find((entry) => entry.dramaId === id)
@@ -123,14 +145,24 @@ const autoplay = computed(() => route.query.static === undefined)
 
     </template>
     <section v-if="showResume" class="block" aria-label="继续观看">
-      <div class="sec-h"><Clock :size="26" /><h2>继续观看</h2><button class="link" @click="router.push('/history')">查看更多<ChevronRight :size="15" /></button></div>
-      <EmptyState v-if="!resume.length" :title="loadingCMS ? '正在核对片源…' : lib.history.length ? '暂无可继续观看的短剧' : '还没有观看记录'" :hint="lib.history.length ? undefined : '去推荐页挑一部开始追剧吧'" />
-      <div v-else class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="router.push(r.d.providerOnly ? catalogPlaybackRoute(r.d.id, r.episode) : playbackRoute(r.d.id, r.episode))">
+      <div class="sec-h"><Clock :size="26" /><h2>继续观看</h2><div class="resume-tools">
+        <button v-if="failedResumeRows.length" class="link" :disabled="checkingResume" @click="retryResume">
+          {{ retryingCMS.size ? '正在核验…' : '重试核验' }}
+        </button>
+        <button ref="resumeHistory" class="link" @click="router.push('/history')">查看更多<ChevronRight :size="15" /></button>
+      </div></div>
+      <EmptyState v-if="!resume.length && !failedResumeRows.length" :title="resumeEmptyTitle" :hint="lib.history.length ? undefined : '去推荐页挑一部开始追剧吧'" />
+      <div v-if="resume.length" class="resume"><button v-for="r in resume" :key="r.d.id" class="rc" data-testid="resume-card" @click="router.push(r.d.providerOnly ? catalogPlaybackRoute(r.d.id, r.episode) : playbackRoute(r.d.id, r.episode))">
         <img :key="r.d.cover" v-cancel-catalog-cover :crossorigin="r.d.providerOnly ? 'anonymous' : undefined" :src="r.d.cover" :alt="r.d.title" @error="fallbackCatalogCover" />
         <span class="rm"><strong>{{ r.d.title }}</strong><em><template v-if="r.next">下一集 · </template>第{{ r.episode }}集 / 共{{ r.d.episodeCount }}集</em>
           <span class="pg"><ProgressBar :value="r.percent" /><i>{{ r.percent }}%</i></span></span>
         <span class="pl" aria-hidden="true"><Play :size="16" fill="currentColor" /></span>
       </button></div>
+      <ul v-if="failedResumeRows.length" class="resume-errors" aria-label="片源核验失败">
+        <li v-for="row in failedResumeRows" :key="row.id">
+          <span>{{ row.title }}</span><span>{{ retryingCMS.has(row.id) ? '正在核验…' : '片源核验失败' }}</span>
+        </li>
+      </ul>
     </section>
   </div>
 </template>
@@ -147,6 +179,10 @@ const autoplay = computed(() => route.query.static === undefined)
 .muted { color: var(--c-text-2); font-size: 14px; margin-left: 6px; }
 .new { padding: 1px 8px; border-radius: 10px; background: var(--g-accent); font-size: 12px; font-weight: 700; }
 .link { margin-left: auto; display: inline-flex; align-items: center; font-size: 14px; color: var(--c-text); &:hover { color: var(--c-accent-2); } }
+.resume-tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 12px; .link { margin-left: 0; } }
+.resume-tools .link:disabled { color: var(--c-text-2); cursor: wait; }
+.resume-errors { margin-top: 12px; color: var(--c-text-2); font-size: 14px; display: grid; gap: 6px; }
+.resume-errors li { display: flex; flex-wrap: wrap; gap: 6px 12px; overflow-wrap: anywhere; }
 .grid6 { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 11px; margin-top: 11px; }
 .rank { margin-top: 24px; }
 .seg { display: inline-flex; margin-left: 10px; padding: 3px; border-radius: 20px; background: var(--c-surface); border: 1px solid var(--c-border); button { height: 30px; padding: 0 18px; border-radius: 16px; font-size: 14px; color: var(--c-text-2); &.on { background: var(--g-accent); color: #fff; } } }

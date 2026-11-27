@@ -1102,3 +1102,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 正式 macOS 打包从 notarytool 的结构化响应提取有效提交编号，成功、拒绝或命令非零退出时都可保留已返回的编号。状态日志只接受已知值，编号按 UUID 校验。仅工具成功且状态准确为 Accepted 时装订。失败保留原退出码，取消和临时文件清理继续通过。README 增加按编号查询 Apple 日志的命令。[查询说明](../README.md#签名环境) · [Apple 公证文档](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution/)
 - 原版夹具复现编号丢失，修复后 11 项签名夹具、18 项 macOS 工具测试和 17 项 Node 发行脚本测试通过。真实 Apple 账户提交、公证及分发策略仍待正式凭据。本次为发布流程源码更新，晚于 .60 打包。[原版复现](../build/bin/qa-notary-diagnostics/baseline.log) · [签名夹具](../build/bin/qa-notary-diagnostics/signing-tests.log) · [BMad](../_bmad-output/plan-e13-notary-submission-diagnostics.md)
+
+## E01 首页续看可重试片源核验（2026-11-27）
+
+- 首页继续观看会逐项显示暂时核验失败的 CMS 剧目，优先使用当前目录标题，无法取名时显示本地 CMS 编号。重试只请求失败项，现有本地续看保持可用，确认下架的记录不会出现播放入口。键盘触发后如果重试按钮消失，焦点移到「查看更多」，空目录下确认下架时也保留该入口。[原版复现](../build/bin/qa-home-resume-retry/baseline.log) · [界面](../build/bin/qa-home-resume-retry/cms-home-retry.png)
+- 生产构建、Vitest 125 项、Chromium 首页与 Provider 播放 94 项、WebKit 首页 7 项通过。Apple Silicon Wails 隔离构建使用合成片源实际展示失败状态和原页重试，并从 Go 环回票据打开原 6000 ms 断点。正常退出后原收藏、历史和 SQLite 完整性均通过。[Chromium](../build/bin/qa-home-resume-retry/chromium.log) · [WebKit](../build/bin/qa-home-resume-retry/webkit.log) · [原生](../build/bin/qa-home-resume-retry/native.log)
+- 修改晚于 .60 本地打包。证据位于 JindiDrama 主工作区的 `build/bin/`，正式签名、最新跨平台成品和授权公网片源待验收。[BMad](../_bmad-output/plan-e01-cms-home-resume-retry.md)
