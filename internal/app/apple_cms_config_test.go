@@ -90,8 +90,12 @@ func TestAppleCMSAppCatalogAndLoopbackPlayback(t *testing.T) {
 			if withdrawn.Load() {
 				status = 0
 			}
+			malformed := ""
+			if !q.Has("ids") {
+				malformed = `{"vod_id":43,"vod_name":"行类型异常","vod_play_url":{}},`
+			}
 			body := fmt.Sprintf(`{
-				"code":1,"list":[{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%d,`, status) + trial + `
+				"code":1,"list":[%s{"vod_id":90071992547409931234,"vod_name":"CMS 海岛来信","vod_total":"4","vod_status":%d,`, malformed, status) + trial + `
 				"vod_pic":"https://media.example.test/thumbnail.png?signature=secret",
 				"vod_play_from":"主线路",
 				"vod_play_url":"1$http://media.example.test/one.mp4#第2集$https://127.0.0.1/two.mp4#` + third + `4$https://media.example.test/four.m3u8"}]

@@ -272,6 +272,8 @@ func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 		{"trailing document", http.StatusOK, `{"code":1,"list":[]}{"secret":1}`, errUpstream},
 		{"error body", http.StatusOK, `{"code":0,"msg":"secret upstream error","list":[]}`, errUpstream},
 		{"missing list", http.StatusOK, `{"code":1,"list":null}`, errUpstream},
+		{"null detail record", http.StatusOK, `{"code":1,"list":[null]}`, errUpstream},
+		{"valid detail mixed with invalid", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧","vod_play_url":"1$https://media.example.test/one.mp4"},{"vod_id":42,"vod_name":[],"vod_status":0}]}`, errUpstream},
 		{"other title", http.StatusOK, `{"code":1,"list":[{"vod_id":43,"vod_name":"其他剧"}]}`, provider.ErrNotFound},
 		{"multiple titles", http.StatusOK, `{"code":1,"list":[{"vod_id":42,"vod_name":"同一剧"},{"vod_id":43,"vod_name":"其他剧"}]}`, provider.ErrNotFound},
 		{"oversize streamed body", http.StatusOK, strings.Repeat(" ", maxResponseBytes+1), errUpstream},
@@ -288,6 +290,11 @@ func TestUpstreamFailuresHaveFixedErrors(t *testing.T) {
 			p := fixtureProvider(t, server.URL+"?token=hidden", server.Client())
 			if drama, err := p.Drama(t.Context(), p.idPrefix+"42"); err != tt.err || drama.ID != "" {
 				t.Fatalf("unexpected failure result: %+v, %v", drama, err)
+			}
+			if tt.name == "valid detail mixed with invalid" {
+				if ticket, err := p.ResolvePlayback(t.Context(), p.idPrefix+"42", 1); err != errUpstream || len(ticket.Sources) != 0 {
+					t.Fatalf("unexpected playback result: %+v, %v", ticket, err)
+				}
 			}
 		})
 	}
@@ -315,6 +322,9 @@ func TestCatalogPageMetadata(t *testing.T) {
 		{"unusable page count", 1, `"page":1,"pagecount":"2 pages",`, valid, false, nil},
 		{"empty page", 2, `"page":2,"pagecount":5,`, "", false, nil},
 		{"invalid records", 2, `"page":2,"pagecount":5,`, `{"vod_id":"a","vod_name":"无效"}`, false, nil},
+		{"valid and malformed rows", 2, `"page":2,"pagecount":5,`, `null,{"vod_id":41,"vod_name":[]},` + valid + `,7`, true, nil},
+		{"all rows malformed", 2, `"page":2,"pagecount":5,`, `null,{"vod_id":41,"vod_name":[]},7`, false, errUpstream},
+		{"record cap counts malformed rows", 2, `"page":2,"pagecount":5,`, strings.Repeat("null,", maxRecords) + valid, false, errUpstream},
 		{"bounded final page", maxPage, `"page":100000,"pagecount":100001,`, valid, false, nil},
 		{"different page", 2, `"page":1,"pagecount":2,`, valid, false, errPageMismatch},
 		{"non-digit page", 2, `"page":"2.0","pagecount":2,`, valid, false, errPageMismatch},
@@ -357,11 +367,14 @@ func TestCatalogPageMetadata(t *testing.T) {
 				return
 			}
 			wantEntries := 0
-			if tt.list == valid {
+			if tt.list == valid || tt.name == "valid and malformed rows" {
 				wantEntries = 1
 			}
 			if got.Page != tt.page || got.HasMore != tt.hasMore || got.Entries == nil || len(got.Entries) != wantEntries {
 				t.Fatalf("incorrect page: %+v", got)
+			}
+			if wantEntries == 1 && got.Entries[0].Title != "海岛" {
+				t.Fatalf("incorrect remaining title: %+v", got.Entries[0])
 			}
 		})
 	}
@@ -445,9 +458,11 @@ func TestCatalogGenrePageMatchesEveryRecord(t *testing.T) {
 		err   error
 	}{
 		{"first page", wideID, 1, `{"code":1,"page":1,"pagecount":2,"list":[` + row + `]}`, 1, true, nil},
+		{"ignores malformed member", wideID, 1, `{"code":1,"page":1,"pagecount":2,"list":[{"vod_id":43,"vod_name":[],"type_id":` + wideID + `},` + row + `]}`, 1, true, nil},
 		{"next page", "00" + wideID, 2, `{"code":1,"page":"2","pagecount":2,"list":[{"vod_id":43,"vod_name":"下一部","type_id":"00` + wideID + `"}]}`, 1, false, nil},
 		{"empty page", wideID, 2, `{"code":1,"page":2,"pagecount":3,"list":[]}`, 0, false, nil},
 		{"mixed page", wideID, 1, `{"code":1,"list":[` + row + `,{"vod_id":43,"vod_name":"同类标签","type_name":"分类剧目","type_id":3}]}`, 0, false, errGenreMismatch},
+		{"unverifiable type with a valid row", wideID, 1, `{"code":1,"list":[` + row + `,{"vod_id":43,"vod_name":"无效分类","type_id":{}}]}`, 0, false, errGenreMismatch},
 		{"missing type", wideID, 1, `{"code":1,"list":[` + row + `,{"vod_id":43,"vod_name":"缺少类型"}]}`, 0, false, errGenreMismatch},
 		{"invalid type", wideID, 1, `{"code":1,"list":[{"vod_id":42,"vod_name":"类型错误","type_id":9e19}]}`, 0, false, errGenreMismatch},
 		{"ignores class", wideID, 2, `{"code":1,"page":2,"class":"unused","list":[` + row + `]}`, 1, false, nil},

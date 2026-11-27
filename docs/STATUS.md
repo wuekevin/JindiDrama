@@ -1064,3 +1064,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Windows 安装器 22.57 MiB、便携程序 32.43 MiB，macOS Universal ZIP 40.94 MiB。归档后 Windows 7 项、macOS 6 项 SHA-256 均通过，两个随包说明中的校验示例也通过。Apple Silicon 从最终归档解包启动，实际窗口和 Wails 文档就绪，正常退出。SQLite 完整性和活动 WAL 回滚通过，原始数据未变化。[包大小](../build/bin/qa-release-source-59/package-sizes.log) · [归档校验](../build/bin/qa-release-source-59/package-static.log) · [原生运行](../build/bin/qa-release-source-59/macos-native.log)
 - TypeScript 检查及生产构建、Chromium 402 项、WebKit 切源 6 项、Vitest 125 项、Go 全量和 vet、发行脚本 17 项通过。Go 开发与生产标签、三套主程序和 npm 生产依赖的扫描均未报告已知漏洞。[Chromium](../build/bin/qa-release-source-59/chromium.log) · [WebKit](../build/bin/qa-release-source-59/webkit.log) · [Go 测试](../build/bin/qa-release-source-59/go-test.log) · [成品扫描](../build/bin/qa-release-source-59/binary-vulnerabilities.log)
 - 归档与验收日志保存在本机 JindiDrama 主工作区的 `build/bin/`。本批 Windows 为未签名测试成品，macOS 使用临时签名。Windows、Intel Mac 原生、正式签名与公证、正式 GitHub 版在线升级及授权接口公网联调仍待验收。[BMad](../_bmad-output/plan-e13-local-candidate59-packages.md)
+
+## E12 苹果 CMS 列表跳过无法解码的记录（2026-11-27）
+
+- 首页、搜索和分类的列表现可跳过 JSON 无法解码的单条记录，继续展示正常剧目。非空列表全部无法解码时返回片源错误，原始记录数上限在过滤前生效。可解析条目仍须通过分类、上架等原有校验。含无法解码记录的详情仍报片源错误，播放不签发票据。[原版复现](../build/bin/qa-cms-malformed-list/baseline.log) · [专项回归](../build/bin/qa-cms-malformed-list/targeted.log)
+- Go 全量、vet、App 与 CMS 竞态、Windows amd64 交叉 vet 通过。Apple Silicon 的隔离 Wails 构建通过合成目录实测首页、搜索和分类，随后用 Go 签发的环回票据成功解码真实 MP4 样片。正常退出后 SQLite 完整性通过。[Go 全量](../build/bin/qa-cms-malformed-list/go-test.log) · [原生验收](../build/bin/qa-cms-malformed-list/native.log)
+- 本次修改晚于 .59 本地打包。证据存于本机 JindiDrama 主工作区的 `build/bin/`，真实授权端点和跨平台成品待后续验收。[BMad](../_bmad-output/plan-e12-cms-malformed-list-rows.md)

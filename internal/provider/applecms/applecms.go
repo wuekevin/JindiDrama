@@ -473,11 +473,26 @@ func (p *Provider) request(ctx context.Context, params url.Values) (response, er
 	if err := json.Unmarshal(body, &wire); err != nil || scalar(wire.Code).decimal(1) != "1" {
 		return response{}, errUpstream
 	}
-	if params.Get("ac") != "list" {
-		if json.Unmarshal(wire.List, &wire.response.List) != nil ||
-			wire.response.List == nil || len(wire.response.List) > maxRecords {
+	if params.Get("ac") == "list" {
+		return wire.response, nil
+	}
+
+	var rows []json.RawMessage
+	if json.Unmarshal(wire.List, &rows) != nil || rows == nil || len(rows) > maxRecords {
+		return response{}, errUpstream
+	}
+	wire.response.List = make([]record, 0, len(rows))
+	detail := params.Has("ids")
+	for _, row := range rows {
+		var item *record
+		if json.Unmarshal(row, &item) == nil && item != nil {
+			wire.response.List = append(wire.response.List, *item)
+		} else if detail {
 			return response{}, errUpstream
 		}
+	}
+	if len(rows) > 0 && len(wire.response.List) == 0 {
+		return response{}, errUpstream
 	}
 	return wire.response, nil
 }
