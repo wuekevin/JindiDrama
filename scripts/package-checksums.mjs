@@ -98,16 +98,20 @@ export async function readVerifiedText(directory, name, digest) {
   return contents.toString('utf8')
 }
 
-export async function verifyHostedPackage(directory, platform, env = process.env) {
+async function verifyHostedPackageFiles(directory, platform, env) {
   const header = hostedPackageHeader(env)
-  const checksums = await verify(directory, platform)
+  const verified = await verifyFiles(directory, platform)
   const name = 'RELEASE-NOTES.md'
-  const notes = await readVerifiedText(directory, name, checksums.get(name))
+  const notes = await readVerifiedText(directory, name, verified.checksums.get(name))
   const lines = notes.split(/\r?\n/, header.length)
   if (header.some((line, index) => lines[index] !== line)) {
     throw new Error(`${platform} release notes do not match the expected mode, version, commit, run, and attempt`)
   }
-  return checksums
+  return verified
+}
+
+export async function verifyHostedPackage(directory, platform, env = process.env) {
+  return (await verifyHostedPackageFiles(directory, platform, env)).checksums
 }
 
 async function verifyReleaseTag(tag, directory) {
@@ -228,10 +232,8 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
   console.log(`GitHub Actions build ${run} attempt ${attempt} matches all ${required.length} successful release jobs and ${verifiedSteps} required steps`)
 }
 
-async function verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, files) {
-  const { repository, revision, run, attempt } = handoff
+async function verifyActionsArchive(name, archiveFile, artifactFile, { repository, revision, run }, files, fileLabel) {
   const artifact = JSON.parse(await readFile(artifactFile, 'utf8'))
-  const name = `release-handoff-${tag}-attempt-${attempt}`
   if (artifact?.name !== name || artifact.expired !== false ||
       !Number.isSafeInteger(artifact.id) || artifact.id < 1 ||
       !Number.isSafeInteger(artifact.size_in_bytes) || artifact.size_in_bytes < 1 ||
@@ -247,9 +249,32 @@ async function verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, fil
   const result = spawnSync(python, ['-I', helper, archiveFile], {
     encoding: 'utf8', input: JSON.stringify(expected), timeout: 120_000, windowsHide: true,
   })
-  if (result.error) throw new Error('Cannot run the Python 3 release archive verifier', { cause: result.error })
-  if (result.status !== 0) throw new Error(result.stderr.trim() || 'GitHub handoff ZIP verification failed')
-  console.log(`GitHub Actions artifact ${artifact.id} matches the original ZIP and all ${Object.keys(files).length} handoff files`)
+  if (result.error) throw new Error('Cannot run the Python 3 Actions archive verifier', { cause: result.error })
+  if (result.status !== 0) throw new Error(result.stderr.trim() || 'GitHub Actions ZIP verification failed: ' + name)
+  console.log(`GitHub Actions artifact ${artifact.id} matches the original ZIP and all ${Object.keys(files).length} ${fileLabel}`)
+  return artifact.id
+}
+
+async function verifySmokeArchives(version, repository, revision, run, attempt, root) {
+  const env = {
+    PACKAGE_MODE: 'smoke', PACKAGE_VERSION: version, GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: repository,
+    GITHUB_SHA: revision, GITHUB_RUN_ID: run, GITHUB_RUN_ATTEMPT: attempt,
+  }
+  const artifactIDs = new Set()
+  for (const platform of platformPackages.keys()) {
+    const directory = join(root, platform)
+    const { checksums, manifestFile } = await verifyHostedPackageFiles(directory, platform, env)
+    const files = { [manifest]: manifestFile }
+    for (const [name, digest] of checksums) {
+      const { size } = await stat(join(directory, name))
+      files[name] = { size, digest }
+    }
+    const id = await verifyActionsArchive(`package-${platform}-latest-attempt-${attempt}`, join(root, 'raw', platform + '-actions.zip'),
+      join(root, 'raw', platform + '-metadata.json'), { repository, revision, run }, files, platform + ' package files')
+    if (artifactIDs.has(id)) throw new Error('Duplicate GitHub Actions artifact ID: ' + id)
+    artifactIDs.add(id)
+  }
+  console.log(`Windows and macOS smoke archives verified for ${version} at ${revision}, run ${run} attempt ${attempt}`)
 }
 
 function matchesReleasePath(value, repository, expected) {
@@ -375,7 +400,8 @@ async function verifyGitHubRelease(draft, tag, directory, metadataFile, jobsFile
     if (!files.has(name)) throw new Error(`Missing ${label} asset: ${name}`)
   }
   await verifyReleaseJobs(jobsFile, handoff)
-  await verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, Object.fromEntries(files))
+  await verifyActionsArchive(`release-handoff-${tag}-attempt-${handoff.attempt}`, archiveFile, artifactFile, handoff,
+    Object.fromEntries(files), 'handoff files')
   if (remoteReleaseRevision(repository, tag) !== revision) {
     throw new Error('GitHub release tag does not match the handoff build commit')
   }
@@ -408,6 +434,8 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
     await verify(directory, platform)
   } else if (first === '--verify-hosted' && platformPackages.has(platform) && directory && extra.length === 0) {
     await verifyHostedPackage(directory, platform)
+  } else if (first === '--verify-smoke-archives' && platform && directory && extra.length === 4) {
+    await verifySmokeArchives(platform, directory, ...extra)
   } else if (first === '--verify-release-tag' && platform && directory && extra.length === 0) {
     await verifyReleaseTag(platform, directory)
   } else if (verifyReleaseModes.includes(first) && platform && directory && extra.length === 4) {
@@ -415,6 +443,6 @@ if (import.meta.main ?? isMainModule(process.argv[1])) {
   } else if (first && !first.startsWith('--') && platform === undefined) {
     await generate(first)
   } else {
-    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-release-tag <tag> <release-directory> | <--verify-release-draft|--verify-release-published|--verify-release-public-downloads> <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
+    throw new Error('Usage: node scripts/package-checksums.mjs <package-directory> | --verify <windows|macos|release> <download-directory> | --verify-hosted <windows|macos> <download-directory> | --verify-smoke-archives <version> <repository> <commit> <run> <attempt> <download-directory> | --verify-release-tag <tag> <release-directory> | <--verify-release-draft|--verify-release-published|--verify-release-public-downloads> <tag> <release-directory> <github-release.json> <github-jobs.json> <original-handoff.zip> <github-artifact.json>')
   }
 }

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { verifyPublicReleaseAsset } from './package-checksums.mjs'
+import { hostedPackageHeader } from './package-provenance.mjs'
 
 const script = fileURLToPath(new URL('./package-checksums.mjs', import.meta.url))
 const installer = 'JindiDrama-amd64-installer.exe'
@@ -42,6 +43,71 @@ for (const platform of ['macos', 'windows']) {
     assert.equal(verification.stdout.trim().split('\n').length, platform === 'windows' ? 7 : 6)
   })
 }
+
+test('verifies both original smoke ZIPs and rejects mismatched attempts and archive bytes', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'jindi-smoke-archives-'))
+  t.after(() => rm(root, { recursive: true, force: true }))
+  const raw = join(root, 'raw')
+  await mkdir(raw)
+  const version = 'v0.1.0-smoke.1'
+  const repository = 'example/JindiDrama'
+  const revision = 'a'.repeat(40)
+  const runID = '123'
+  const header = (attempt) => hostedPackageHeader({
+    PACKAGE_MODE: 'smoke', PACKAGE_VERSION: version, GITHUB_ACTIONS: 'true', GITHUB_REPOSITORY: repository,
+    GITHUB_SHA: revision, GITHUB_RUN_ID: runID, GITHUB_RUN_ATTEMPT: attempt,
+  }).join('\n') + '\n'
+  for (const [platform, packages, id] of [
+    ['windows', [installer, 'JindiDrama.exe'], 1],
+    ['macos', ['JindiDrama-macos-universal.zip'], 2],
+  ]) {
+    const directory = await fixture(t, platform)
+    await symlink(directory, join(root, platform), process.platform === 'win32' ? 'junction' : 'dir')
+    await writeFile(join(directory, 'RELEASE-NOTES.md'), header('1'))
+    assert.equal(run(directory).status, 0)
+    const archive = join(raw, platform + '-actions.zip')
+    const python = process.platform === 'win32' ? 'python' : 'python3'
+    const result = spawnSync(python, ['-I', '-m', 'zipfile', '-c', archive, ...documents, ...packages, manifest],
+      { cwd: directory, encoding: 'utf8' })
+    assert.equal(result.status, 0, result.stderr)
+    const bytes = await readFile(archive)
+    await writeFile(join(raw, platform + '-metadata.json'), JSON.stringify({
+      id, name: `package-${platform}-latest-attempt-1`, expired: false, size_in_bytes: bytes.length,
+      url: `https://api.github.com/repos/${repository}/actions/artifacts/${id}`,
+      digest: 'sha256:' + createHash('sha256').update(bytes).digest('hex'),
+      workflow_run: { id: Number(runID), head_sha: revision },
+    }))
+  }
+  const verifyArchives = (attempt) => run('--verify-smoke-archives', version, repository, revision, runID, attempt, root)
+  const valid = verifyArchives('1')
+  assert.equal(valid.status, 0, valid.stderr)
+  assert.match(valid.stdout, /Windows and macOS smoke archives verified/)
+  const wrongAttempt = verifyArchives('2')
+  assert.equal(wrongAttempt.status, 1)
+  assert.match(wrongAttempt.stderr, /release notes do not match/)
+  const macosNotes = join(root, 'macos', 'RELEASE-NOTES.md')
+  await writeFile(macosNotes, header('2'))
+  assert.equal(run(join(root, 'macos')).status, 0)
+  const mixedAttempts = verifyArchives('1')
+  assert.equal(mixedAttempts.status, 1)
+  assert.match(mixedAttempts.stderr, /macos release notes do not match/)
+  await writeFile(macosNotes, header('1'))
+  assert.equal(run(join(root, 'macos')).status, 0)
+  const metadataPath = join(raw, 'macos-metadata.json')
+  const metadata = JSON.parse(await readFile(metadataPath, 'utf8'))
+  await writeFile(metadataPath, JSON.stringify({ ...metadata, id: 1, url: metadata.url.replace(/2$/, '1') }))
+  const duplicate = verifyArchives('1')
+  assert.equal(duplicate.status, 1)
+  assert.match(duplicate.stderr, /Duplicate GitHub Actions artifact ID/)
+  await writeFile(metadataPath, JSON.stringify(metadata))
+  const archive = join(raw, 'macos-actions.zip')
+  const modified = await readFile(archive)
+  modified[0] ^= 1
+  await writeFile(archive, modified)
+  const replaced = verifyArchives('1')
+  assert.equal(replaced.status, 1)
+  assert.match(replaced.stderr, /GitHub Actions ZIP SHA-256 mismatch/)
+})
 
 test('rejects a missing installer even when the manifest is regenerated', async (t) => {
   const directory = await fixture(t, 'windows')

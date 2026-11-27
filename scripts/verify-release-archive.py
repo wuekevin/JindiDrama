@@ -1,4 +1,4 @@
-"""Check an Actions ZIP against the expected size and digests supplied by the release verifier."""
+"""Check an Actions ZIP against the expected size and digests supplied by the package verifier."""
 
 import hashlib
 import json
@@ -18,23 +18,23 @@ def sha256(stream):
 def verify_archive(path, expected):
     with open(path, "rb") as source:
         if os.fstat(source.fileno()).st_size != expected["size"]:
-            raise ValueError("GitHub handoff ZIP size mismatch")
+            raise ValueError("GitHub Actions ZIP size mismatch")
         if sha256(source) != expected["digest"]:
-            raise ValueError("GitHub handoff ZIP SHA-256 mismatch")
+            raise ValueError("GitHub Actions ZIP SHA-256 mismatch")
 
         with zipfile.ZipFile(source) as archive:
             files = expected["files"]
             entries = archive.infolist()
             if len(entries) != len(files) or {entry.filename for entry in entries} != files.keys():
-                raise ValueError("GitHub handoff ZIP has missing, duplicate or unexpected entries")
+                raise ValueError("GitHub Actions ZIP has missing, duplicate or unexpected entries")
             for entry in entries:
                 file = files[entry.filename]
                 file_type = stat.S_IFMT(entry.external_attr >> 16)
                 if file_type not in (0, stat.S_IFREG) or entry.file_size != file["size"]:
-                    raise ValueError(f"GitHub handoff ZIP entry type or size mismatch: {entry.filename}")
+                    raise ValueError(f"GitHub Actions ZIP entry type or size mismatch: {entry.filename}")
                 with archive.open(entry) as contents:
                     if sha256(contents) != file["digest"]:
-                        raise ValueError(f"GitHub handoff ZIP entry SHA-256 mismatch: {entry.filename}")
+                        raise ValueError(f"GitHub Actions ZIP entry SHA-256 mismatch: {entry.filename}")
 
 
 if __name__ == "__main__":

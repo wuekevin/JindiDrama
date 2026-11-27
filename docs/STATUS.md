@@ -1000,3 +1000,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 用候选源码 `0e83db98ac84c022091cc3b505df57fd199c9f13` 的 .57 临时签名构建，在 macOS 26.6.2 验证 Wails、WKWebView、苹果 CMS Go Provider 和媒体代理。夹具提供相同合成样片的两条可播线路和一条返回 HTTP 404 的线路。逐项核对签名 Mach-O 内 69 个前端文件的字节与生产构建 SHA-256。[构建身份](../build/bin/qa-native-cms-manual-source/identity.log) · [嵌入资源 SHA-256](../build/bin/qa-native-cms-manual-source/embedded-match.log) · [Go 媒体请求](../build/bin/qa-native-cms-manual-source/process.log)
 - 从第一条线路暂停定位在 7.000 秒，手动切换到第二条后断点不变且观看历史为空。继续播放后选中第三条，404 触发回退。第一条线路在同一票据内恢复静音播放，原生辅助功能识别「播放源」并报告「线路 1」。[运行记录](../build/bin/qa-native-cms-manual-source/native.log) · [辅助功能树](../build/bin/qa-native-cms-manual-source/player.ax)
 - 播放中退出前，SQLite 保存着第 1 集 7.250 秒。触发系统退出后，SQLite 断点更新为 10.080 秒，完整性检查通过，辅助文件和运行会话标记已清理。此行记录对应 Apple Silicon 测试构建。Windows、Intel Mac 和授权公网片源的生产配置仍待验收。[验收条件](../build/bin/qa-native-cms-manual-source/acceptance.txt) · [BMad](../_bmad-output/plan-e04-cms-manual-source-native.md)
+
+## E13 GitHub 双平台测试归档本地复验（2026-11-27）
+
+- 新增一个本地命令核对同一次 Windows 和 macOS 测试打包。校验解包文件与 SHA-256 清单，绑定预期的版本、仓库、提交、运行与轮次。将各原始 ZIP 的大小与 SHA-256 与 GitHub Artifact 元数据比对，再核对其中每项文件的字节摘要，包括清单本身。任一平台验证失败会以非零退出。[使用说明](../README.md#本地复验-github-双平台测试包)
+- 用留存的 .52 GitHub 原始 ZIP 与元数据实测，Windows 7 项、macOS 6 项清单及两个清单文件自身的 SHA-256 均匹配。把同一批归档指定为第 2 轮时被拒绝。Node 22 打包与正式发行脚本共 17 项通过，覆盖混用轮次、重复产物 ID 和原始 ZIP 被替换。首次运行遇到磁盘空间不足，磁盘空间恢复后串行重跑通过。[实际归档](../build/bin/qa-smoke-archive-verifier/actual.log) · [错误轮次](../build/bin/qa-smoke-archive-verifier/wrong-attempt.log) · [脚本测试](../build/bin/qa-smoke-archive-verifier/tests.log) · [BMad](../_bmad-output/plan-e13-verify-smoke-archives.md)
+- 当前证据对应 .52 的 GitHub 产物。本轮没有触发新的 GitHub 构建。

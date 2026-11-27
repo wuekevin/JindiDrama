@@ -96,6 +96,30 @@ macOS 打包会解压最终 Universal ZIP，在 Apple Silicon 上启动归档中
 
 GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-windows-latest-attempt-2` 和 `package-macos-latest-attempt-2`。下载复验会核对本轮的版本、提交和 SHA-256。遇到构建或验收失败时，选择「重新运行所有任务」或发起新运行，使两平台都能生成当前轮次的产物。
 
+### 本地复验 GitHub 双平台测试包
+
+从工作流页面确认本次的版本、提交、运行编号和轮次。下面以既有测试运行为例，在新目录保存两平台的解包文件、原始 Actions ZIP 和 GitHub 返回的产物元数据。换成当前批次的值后使用。
+
+```sh
+repo=wuekevin/JindiDrama
+version=v0.1.0-smoke.20261127.52
+commit=57bcf11ab9056565f8b24fa5c3ac3a821d5e4ed4
+run=45955369788
+attempt=1
+download=$(mktemp -d)
+mkdir "$download/raw"
+for platform in windows macos; do
+  name="package-$platform-latest-attempt-$attempt"
+  id=$(gh api --method GET "repos/$repo/actions/runs/$run/artifacts" -f name="$name" --jq '.artifacts[].id')
+  gh api "repos/$repo/actions/artifacts/$id" > "$download/raw/$platform-metadata.json"
+  gh api "repos/$repo/actions/artifacts/$id/zip" > "$download/raw/$platform-actions.zip"
+  gh run download "$run" --repo "$repo" --name "$name" --dir "$download/$platform"
+done
+node scripts/package-checksums.mjs --verify-smoke-archives "$version" "$repo" "$commit" "$run" "$attempt" "$download"
+```
+
+复验需 Node.js 和 Python 3。命令要求两个原始 ZIP 的大小与 SHA-256 匹配各自的 GitHub 元数据，再核对 ZIP 内文件、清单和解包文件，以及两份发行说明中的同次构建信息。最后一行确认两个平台均已通过。
+
 ### 准备 GitHub Release
 
 #### 签名环境
