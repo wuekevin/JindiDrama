@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.59`，打包源提交为 `fefccb64d2c497752a79c0f08c22faf883ca3353`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.60`，打包源提交为 `011b4cbcf42f45d0d9d8b74c9b8bfc54ea963c76`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .60 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.60/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.60/macos/SHA256SUMS.txt) |
 | .59 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.59/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.59/macos/SHA256SUMS.txt) |
 | .58 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.58/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.58/macos/SHA256SUMS.txt) |
 | .56 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.56/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.56/macos/SHA256SUMS.txt) |
@@ -1089,3 +1090,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - .52 通过原生设置页发现预发布 .59，在 macOS 系统保存对话框下载并显示校验成功。合成发布接口传输的是 .59 实际归档。落盘文件与原归档逐字节一致，独立 SHA-256 为 `07fb0fe444215905f98b2f5c9a5fe7886408b8d65a7bd8759c816e3cffb06c1c`，ZIP 完整性和文件隔离标记均通过。[保存对话框](../build/bin/qa-macos-download-upgrade-59/save-panel.ax) · [成功界面](../build/bin/qa-macos-download-upgrade-59/verified-save.ax)
 - 从下载 ZIP 解出 .59，在同一隔离安装路径直接运行主程序，沿用预置数据的 SQLite v10 目录。新版主程序与 .59 原归档字节一致，临时签名核验通过。旧版和新版均正常退出，新版界面显示 .59、两项收藏及两条历史。SQLite 完整性、收藏顺序、12345 ms 与 7456 ms 断点、搜索、浅色主题和预发布设置均核对通过。[升级日志](../build/bin/qa-macos-download-upgrade-59/roundtrip.log) · [程序身份](../build/bin/qa-macos-download-upgrade-59/installed-identity.log) · [数据读回](../build/bin/qa-macos-download-upgrade-59/sqlite-full-readback.log)
 - 本机验收证据位于 JindiDrama 主工作区的 `build/bin/`。此项覆盖 .59 的本地下载与启动，正式签名、系统分发策略、公证与 GitHub 真实公开下载待验收。[BMad](../_bmad-output/plan-e13-macos-download-upgrade-59.md)
+
+## E13 .60 累计本地打包验收（2026-11-27）
+
+- Windows x64 与 macOS Universal 从发行源码 `011b4cbcf42f45d0d9d8b74c9b8bfc54ea963c76` 构建，含 .59 后 CMS 异常记录跳过、上架状态错误处理和重复字段校验。三套主程序内嵌的 69 个路径和 SHA-256 与重建前端一致。重建前端与 .59 的已测生产前端逐文件一致。Windows 安装器中的程序与便携版一致，WebView2 引导程序匹配锁定模块，macOS 两切片最低系统版本为 13.0。[源码](../build/bin/qa-release-source-60/provenance.log) · [内嵌文件](../build/bin/qa-release-source-60/embedded-frontend.log) · [成品结构](../build/bin/qa-release-source-60/package-static.log)
+- Windows 安装器 22.57 MiB、便携版 32.43 MiB，macOS Universal ZIP 40.95 MiB。最终归档位置复算 Windows 7 项与 macOS 6 项 SHA-256 全部一致。Apple Silicon 从最终 ZIP 解包启动实际窗口，正常退出，SQLite 完整性和活动 WAL 回滚通过。Windows 两份程序未签名，macOS 使用本批专用应用标识及临时签名。同一 macOS 测试包在正式验收模式因缺少公证票据被拒绝。[包大小](../build/bin/qa-release-source-60/package-sizes.log) · [归档读回](../build/bin/qa-release-source-60/archive-readback.log) · [原生启动](../build/bin/qa-release-source-60/macos-native.log) · [正式模式拒绝](../build/bin/qa-release-source-60/macos-release-negative.log)
+- Go 全量、vet、App/CMS 竞态、前端单测 125 项、Node 发行脚本 17 项、macOS 工具测试 16 项及 Windows 签名夹具通过。Go 全量初次因磁盘空间不足导致链接失败，清理隔离生成物后重跑通过。三架构主程序与 npm 生产依赖扫描未报告已知漏洞。[Go 全量](../build/bin/qa-release-source-60/go-test.log) · [发行脚本](../build/bin/qa-release-source-60/release-scripts.log) · [成品扫描](../build/bin/qa-release-source-60/binary-vulnerabilities.log)
+- GitHub 只读查询显示打包工作流仍启用，最近完成批次为 .52。可见签名环境、仓库级 secrets 和 Releases 均为 0，本机代码签名身份为 0。验收证据位于 JindiDrama 主工作区的 `build/bin/`。本批 Windows 与 Intel Mac 原生、正式签名与公证、签名版线上升级和授权公网联调待验收。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [签名环境](../build/bin/qa-release-source-60/github-environments.json) · [BMad](../_bmad-output/plan-e13-local-candidate60-packages.md)
