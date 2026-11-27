@@ -8,6 +8,7 @@
 |---|---|---|
 | .52 本地打包 | Windows 与 macOS 共 13 项 SHA-256，Apple Silicon 原生启动和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.52/macos/SHA256SUMS.txt) |
 | .52 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项任务通过 | 两份 GitHub 原始归档摘要及内部清单共 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [本地复验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) |
+| .52 双平台 CI | Windows 和 macOS 各通过 394 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [GitHub CI](https://github.com/wuekevin/JindiDrama/actions/runs/45955369636) |
 | .51 本地源码回归 | 393 项 Chromium、122 项 Vitest、WebKit 专项及 Go 全量、vet 和竞态通过 | [浏览器日志](../build/bin/qa-release-source-51/e2e.log) · [WebKit 专项](../build/bin/qa-release-source-51/webkit.log) |
 | .51 GitHub 原生验收 | Windows、Apple Silicon 和 Intel Mac 四项打包与复验任务通过 | 两份原始归档 SHA-256 与 GitHub 摘要相符，两平台内部清单 13 项通过。[GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45946619517) · [本地复验日志](../build/bin/github-smoke-20261127.51/evidence/archived-checks.log) |
 | .51 双平台 CI | 修正设置页用例时序后，Windows 与 macOS 分别通过 393 项 Playwright、122 项 Vitest、Go 测试与桌面构建 | [修复后 CI](https://github.com/wuekevin/JindiDrama/actions/runs/45947965232) |
@@ -830,4 +831,5 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Apple Silicon 与 Intel Mac 从同一 ZIP 启动桌面窗口并通过正常退出、SQLite 完整性和回滚。下载的 Universal 主程序两切片最低系统版本均为 macOS 13.0。[Apple Silicon 日志](../build/bin/github-smoke-20261127.52/evidence/macos-arm64-native.log) · [Intel 日志](../build/bin/github-smoke-20261127.52/evidence/macos-intel-native.log) · [成品结构](../build/bin/github-smoke-20261127.52/evidence/package-layout.log)
 - 本机按 GitHub API 产物 ID 下载两份原始归档，核对原始归档摘要、随包版本与运行来源，再用项目脚本和 `shasum` 分别复验 Windows 7 项、macOS 6 项。安装器 22.54 MiB、Windows 便携版 32.33 MiB、macOS Universal ZIP 40.89 MiB。[校验日志](../build/bin/github-smoke-20261127.52/evidence/archived-checks.log) · [Windows 清单](../build/bin/github-smoke-20261127.52/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/github-smoke-20261127.52/macos/SHA256SUMS.txt)
 - 随包 Windows PowerShell 校验命令复验 7 项通过。对实际下载的 Windows 主程序与 macOS 两个架构分别运行 Go 二进制漏洞扫描，未报告已知漏洞。[PowerShell 记录](../build/bin/github-smoke-20261127.52/evidence/windows-readme-checks.log) · [Go 二进制扫描](../build/bin/github-smoke-20261127.52/evidence/binary-vulnerabilities.log)
+- 推送同一提交触发的 Windows 与 macOS CI 均通过。每个平台完成 394 项 Playwright、122 项 Vitest、Go vet、Go 测试和桌面构建。[GitHub CI](https://github.com/wuekevin/JindiDrama/actions/runs/45955369636) · [Windows 日志](../build/bin/github-smoke-20261127.52/evidence/windows-ci.log) · [macOS 日志](../build/bin/github-smoke-20261127.52/evidence/macos-ci.log)
 - 本次覆盖到 .52 同一源提交。后续 SQLite 备份目录修复保留本地验收。真实 ExFAT、正式签名及公证、正式在线更新、授权公网片源与红果官方接口联调仍待完成。
