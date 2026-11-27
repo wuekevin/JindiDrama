@@ -12,7 +12,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
   const channelAvailable = ref(false)
   const checking = ref(false)
   const downloading = ref(false)
-  const savedUpdatePath = ref('')
+  const lastSavedUpdate = ref<{ path: string; version: string } | null>(null)
   const lastCheck = ref<number | null>(null)
   const upd = ref<UpdateResult | null>(null)
   const checkMessage = ref('')
@@ -40,13 +40,18 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     } catch { /* 检查更新仍可用 */ }
   }
 
+  function setCurrentChannel(next: UpdateChannel) {
+    if (channel.value !== next) lastSavedUpdate.value = null
+    channel.value = next
+  }
+
   async function loadChannel() {
     if (loaded || channelBusy.value) return
     channelBusy.value = true
     try {
       const saved = await getUpdateChannel()
       if (saved !== null) {
-        channel.value = saved
+        setCurrentChannel(saved)
         channelAvailable.value = true
       }
       loaded = true
@@ -62,8 +67,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     channelBusy.value = true
     try {
       await setUpdateChannel(next)
-      channel.value = next
-      savedUpdatePath.value = ''
+      setCurrentChannel(next)
       upd.value = null
       checkMessage.value = ''
       restoreLastCheck()
@@ -79,7 +83,6 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
   async function check(showToast = true) {
     if (checking.value || channelBusy.value || downloading.value) return
     checking.value = true
-    savedUpdatePath.value = ''
     upd.value = null
     checkMessage.value = ''
     function report(message: string, kind: 'info' | 'success' | 'error') {
@@ -92,7 +95,7 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
         report('浏览器预览模式不支持检查更新，请在桌面端使用', 'info')
         return
       }
-      if (result.channel === 'stable' || result.channel === 'preview') channel.value = result.channel
+      if (result.channel === 'stable' || result.channel === 'preview') setCurrentChannel(result.channel)
       lastCheck.value = Date.now()
       try { localStorage.setItem(checkKey(channel.value), String(lastCheck.value)) } catch { /* 保留内存状态 */ }
       upd.value = result.hasUpdate ? result : null
@@ -122,8 +125,8 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     downloading.value = true
     try {
       const saved = await downloadUpdate(candidate.url)
-      if (typeof saved === 'string' && saved) savedUpdatePath.value = saved
-      else if (saved === true) toast.push('安装包已校验并保存，可手动安装', 'success')
+      if (typeof saved === 'string' && saved) lastSavedUpdate.value = { path: saved, version: candidate.latest }
+      else if (saved === true) toast.push(`${candidate.latest} 安装包已校验并保存，可手动安装`, 'success')
     } catch (error) {
       const message = error instanceof Error ? error.message : typeof error === 'string' ? error : '无法下载更新'
       toast.push(message, 'error')
@@ -136,5 +139,5 @@ export const useDesktopUpdates = defineStore('desktopUpdates', () => {
     try { await cancelUpdateDownload() } catch { toast.push('无法取消下载，请稍后重试', 'error') }
   }
 
-  return { channel, channelBusy, channelAvailable, checking, downloading, savedUpdatePath, canDownload, lastCheck, upd, checkMessage, noticeKey, unread, acknowledge, loadChannel, chooseChannel, check, openRelease, download, cancelDownload }
+  return { channel, channelBusy, channelAvailable, checking, downloading, lastSavedUpdate, canDownload, lastCheck, upd, checkMessage, noticeKey, unread, acknowledge, loadChannel, chooseChannel, check, openRelease, download, cancelDownload }
 })

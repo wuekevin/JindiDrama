@@ -252,15 +252,15 @@ function onKey(e: KeyboardEvent) {
   rec.value = ''
 }
 const updates = useDesktopUpdates()
-const { channel, channelBusy, channelAvailable, checking, downloading, savedUpdatePath, canDownload, lastCheck, upd } = storeToRefs(updates)
+const { channel, channelBusy, channelAvailable, checking, downloading, lastSavedUpdate, canDownload, lastCheck, upd } = storeToRefs(updates)
 if (desktop) void updates.loadChannel()
-const savedUpdate = ref<HTMLElement>()
-watch(savedUpdatePath, (path) => {
-  if (path) savedUpdate.value?.scrollIntoView({ block: 'nearest' })
+const savedUpdateCard = ref<HTMLElement>()
+watch(lastSavedUpdate, (saved) => {
+  if (saved) savedUpdateCard.value?.scrollIntoView({ block: 'nearest' })
 }, { flush: 'post' })
 
 async function copyUpdatePath() {
-  const path = savedUpdatePath.value
+  const path = lastSavedUpdate.value?.path
   if (!path) return
   const runtime = (window as Window & { runtime?: { ClipboardSetText?(text: string): Promise<boolean> } }).runtime
   try {
@@ -394,9 +394,9 @@ const sizeIdx = ['小', '中', '大']; const sizeLabel = { 小: '小', 标准: '
               <button ref="privacyButton" data-testid="privacy-notice" @click="showPrivacy = true"><CircleHelp :size="16" />隐私与反馈<ChevronRight :size="14" /></button>
             </div>
           </div>
-          <div v-if="savedUpdatePath" ref="savedUpdate" class="saved-update" data-testid="saved-update">
-            <p role="status">安装包已校验并保存，可手动安装</p>
-            <code>{{ savedUpdatePath }}</code>
+          <div v-if="lastSavedUpdate" ref="savedUpdateCard" class="saved-update" data-testid="saved-update">
+            <p role="status">{{ lastSavedUpdate.version }} 安装包已校验并保存，可手动安装</p>
+            <code>{{ lastSavedUpdate.path }}</code>
             <BaseButton variant="outline" size="sm" @click="copyUpdatePath">复制保存路径</BaseButton>
           </div>
         </section>

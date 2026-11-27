@@ -373,6 +373,9 @@ test('reads the release notes as scrollable plain text and clears stale candidat
 
 test('downloads a verified update through the desktop bridge and shows its path after cancellation and a write failure', async ({ page, browserName }, testInfo) => {
   const url = 'https://github.com/wuekevin/JindiDrama/releases/tag/v1.2.3'
+  const nextURL = 'https://github.com/wuekevin/JindiDrama/releases/tag/v1.2.4'
+  const nextPath = '/native/downloads/JindiDrama-v1.2.4.zip'
+  let checks = 0
   let attempts = 0
   let cancelled = 0
   const writeFailure = '无法写入更新文件，请检查保存位置和可用空间'
@@ -380,7 +383,14 @@ test('downloads a verified update through the desktop bridge and shows its path 
   let firstComplete!: (saved: string) => void
   let copied = ''
   await page.exposeFunction('copyUpdatePathFixture', (value: string) => { copied = value; return true })
+  await page.exposeFunction('checkUpdateFixture', () => {
+    checks++
+    if (checks === 2) throw new Error('offline')
+    const next = checks >= 4
+    return { current: 'v0.1.0', latest: next ? 'v1.2.4' : 'v1.2.3', channel: checks === 5 ? 'preview' : 'stable', hasUpdate: true, url: next ? nextURL : url, downloadName: 'JindiDrama-macos-universal.zip' }
+  })
   await page.exposeFunction('downloadUpdateFixture', (release: string) => {
+    if (release === nextURL) return nextPath
     if (release !== url) throw new Error('wrong candidate')
     attempts++
     if (attempts === 1) return new Promise<string>((resolve) => { firstComplete = resolve })
@@ -388,8 +398,9 @@ test('downloads a verified update through the desktop bridge and shows its path 
     return savedPath
   })
   await page.exposeFunction('cancelUpdateFixture', () => { cancelled++; firstComplete('') })
-  await page.addInitScript(({ url }) => {
+  await page.addInitScript(() => {
     const desktop = window as unknown as {
+      checkUpdateFixture(): Promise<unknown>
       downloadUpdateFixture(url: string): Promise<string>
       cancelUpdateFixture(): Promise<void>
       copyUpdatePathFixture(value: string): Promise<boolean>
@@ -403,12 +414,12 @@ test('downloads a verified update through the desktop bridge and shows its path 
         AutostartEnabled: async () => false,
         UpdateChannel: async () => 'stable',
         SetUpdateChannel: async () => {},
-        CheckUpdate: async () => ({ current: 'v0.1.0', latest: 'v1.2.3', channel: 'stable', hasUpdate: true, url, downloadName: 'JindiDrama-macos-universal.zip' }),
+        CheckUpdate: desktop.checkUpdateFixture,
         DownloadUpdateFile: desktop.downloadUpdateFixture,
         CancelUpdateDownload: desktop.cancelUpdateFixture,
       } } },
     })
-  }, { url })
+  })
   await page.goto('/#/settings')
   const check = page.getByTestId('check-update')
   const download = page.getByRole('button', { name: '校验并下载安装包' })
@@ -453,11 +464,33 @@ test('downloads a verified update through the desktop bridge and shows its path 
   expect(copied).toBe(savedPath)
 
   await check.click()
+  await expect(page.getByTestId('toast').last()).toContainText('检查更新失败')
+  await expect(download).toHaveCount(0)
+  await expect(page.getByTestId('open-release')).toHaveCount(0)
+  await expect(saved.locator('code')).toHaveText(savedPath)
+  await expect(saved.getByRole('status')).toContainText('v1.2.3')
+  copied = ''
+  await copy.click()
+  await expect.poll(() => copied).toBe(savedPath)
+
+  await check.click()
+  await expect(download).toBeEnabled()
+  await expect(saved.locator('code')).toHaveText(savedPath)
+  await check.click()
+  await expect(page.getByTestId('open-release')).toContainText('v1.2.4')
+  await expect(saved.getByRole('status')).toContainText('v1.2.3')
+  await expect(saved.locator('code')).toHaveText(savedPath)
+  await download.click()
+  await expect(saved.getByRole('status')).toContainText('v1.2.4')
+  await expect(saved.locator('code')).toHaveText(nextPath)
+  await expect(copy).toBeInViewport()
+  const updateChannel = page.getByTestId('update-channel')
+  await check.click()
+  await expect(updateChannel).toHaveValue('preview')
   await expect(saved).toHaveCount(0)
   await download.click()
-  await expect(saved.locator('code')).toHaveText(savedPath)
-  await expect(copy).toBeInViewport()
-  await page.getByTestId('update-channel').selectOption('preview')
+  await expect(saved.locator('code')).toHaveText(nextPath)
+  await updateChannel.selectOption('stable')
   await expect(saved).toHaveCount(0)
 })
 

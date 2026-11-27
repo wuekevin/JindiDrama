@@ -930,3 +930,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 桌面会话可交互后复核 .54 macOS ZIP 的 6 项 SHA-256、归档内主程序字节和 ad-hoc 签名。使用该归档的原始应用，在 Apple Silicon 上实际观察到 Wails 文档就绪和可见原生窗口。测试资料配置为推荐首页，避免默认续播主动更新测试历史。[归档身份](../build/bin/qa-archive54-native-ui/archive-identity.log) · [窗口可见](../build/bin/qa-archive54-native-ui/app-visibility.log)
 - 用真实设置页完成备份失败提示、排除障碍后重试、系统文件选择及取消。备份包含只在 WAL 提交的断点，成品权限为 `0600`，无继承 ACL。恢复补回 1 项收藏及 1 条历史，保留较新的当前断点及其他记录。重复导入保持结果，重启后界面显示各 3 条。源备份 SHA-256 一致，退出后 SQLite 完整性通过。[完整往返](../build/bin/qa-archive54-native-ui/roundtrip.log) · [系统选择器](../build/bin/qa-archive54-native-ui/picker-open.ax) · [取消前系统窗口](../build/bin/qa-archive54-native-ui/picker-before-cancel.ax)
 - 同一 .54 成品实际检查公开稳定频道，界面显示暂无正式发布版本，界面未提供安装包下载。正式发布后的真实下载、校验与安装升级仍待验收。Windows 和 Intel Mac 原生验收另待运行。[更新界面](../build/bin/qa-archive54-native-ui/check-public-update.ax) · [BMad 记录](../_bmad-output/plan-e13-candidate54-native-ui.md)
+
+## E13 更新重查保留已验证安装包路径（2026-11-27）
+
+- 原版在重新检查失败后丢失已保存的本机路径。设置现于当前会话保留最近一次已验证的安装包版本与路径，可继续复制。后续成功保存替换旧记录，切换渠道清除旧路径。检查中和检查失败后的旧发布链接及下载候选仍会失效。[原版复现](../build/bin/qa-update-retained-path/baseline-e2e.log)
+- Chromium 设置页 45 项、WebKit 更新专项 3 轮、Vitest 125 项、生产构建、Go 全量与 vet 通过。首轮并行验证遇到磁盘空间不足，分开重跑通过。默认窗口和 1280×860、220% 截图复核版本提示、长路径换行和复制按钮。专项使用桌面桥夹具，这批源码待下一次累计打包。[Chromium](../build/bin/qa-update-retained-path/final-chromium.log) · [WebKit 专项](../build/bin/qa-update-retained-path/final-webkit.log) · [默认窗口](../build/bin/qa-update-retained-path/after-default.png) · [220% 原版](../build/bin/qa-update-retained-path/before-220.png) · [220% 修复版](../build/bin/qa-update-retained-path/after-220.png)
+- 原版与首轮修复的 WebKit 设置页全量各有 40 项通过，均复现相同的 5 项失败，涉及 Tab 焦点和快捷键录制，待专项核查。Windows、Intel Mac 和正式在线更新待原生验收。[WebKit 原版全量](../build/bin/qa-update-retained-path/webkit-baseline.log) · [WebKit 修复全量初跑](../build/bin/qa-update-retained-path/webkit.log) · [BMad 记录](../_bmad-output/plan-e13-retain-saved-update.md)
