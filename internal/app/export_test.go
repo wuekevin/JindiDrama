@@ -381,23 +381,6 @@ func TestLicensedEpisodeExport(t *testing.T) {
 	}
 }
 
-func TestPublishExportRejectsExistingDestination(t *testing.T) {
-	dir := t.TempDir()
-	staged, target := filepath.Join(dir, "staged"), filepath.Join(dir, "target")
-	if err := os.WriteFile(staged, []byte("new bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(target, []byte("existing bytes"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := publishExport(staged, target); !errors.Is(err, fs.ErrExist) {
-		t.Fatalf("existing target: %v", err)
-	}
-	if data, err := os.ReadFile(target); err != nil || string(data) != "existing bytes" {
-		t.Fatalf("target content: %q, %v", data, err)
-	}
-}
-
 func TestWindowCloseWaitsForMediaExport(t *testing.T) {
 	a := New()
 	if !a.beginMediaExport() || a.beginMediaExport() {

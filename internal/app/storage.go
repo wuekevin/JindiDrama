@@ -3,6 +3,7 @@ package app
 import (
 	"crypto/rand"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -177,36 +178,80 @@ func (a *App) backupTo(dir string) (string, error) {
 	name := "jindi-" + time.Now().Format("20060102-150405") + "-" + rand.Text() + ".db"
 	dest := filepath.Join(dir, "backups", name)
 	if err := publishDatabaseBackup(dest, a.store.Backup); err != nil {
+		if errors.Is(err, errUpdateDestinationMoved) {
+			return "", errors.New("备份目录已移动或替换，请确认应用数据目录后重试")
+		}
+		if errors.Is(err, errUpdateDestinationMovedAfterPublish) {
+			return "", errors.New("备份已保存到原目录，请在原目录中查找")
+		}
 		return "", err
 	}
 	return dest, nil
 }
 
-func publishDatabaseBackup(dest string, snapshot func(string) error) (result error) {
-	dir := filepath.Dir(dest)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+func publishDatabaseBackup(dest string, snapshot func(string) error) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return err
 	}
-	staging, err := os.MkdirTemp(dir, ".jindi-backup-")
+	err := writeStagedExport(dest, func(output io.Writer) error {
+		return copyDatabaseSnapshot(output, snapshot)
+	})
+	// A published backup remains usable even if temporary directory cleanup fails.
+	if errors.Is(err, errExportCleanup) {
+		return nil
+	}
+	return err
+}
+
+func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) (result error) {
+	stage, err := createOutputStage(os.TempDir(), ".jindi-backup-snapshot-", privateSnapshotStage)
 	if err != nil {
 		return err
 	}
 	defer func() {
-		// A cleanup error must not relabel an already published backup as failed.
-		if err := os.RemoveAll(staging); result != nil && err != nil {
-			result = errors.Join(result, err)
-		}
+		result = errors.Join(result, stage.cleanup())
 	}()
-	staged := filepath.Join(staging, "snapshot")
-	if err := snapshot(staged); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(staged, os.O_RDWR, 0)
+	scratch := filepath.Dir(stage.file.Name())
+	root, err := os.OpenRoot(scratch)
 	if err != nil {
 		return err
 	}
-	if err := errors.Join(file.Chmod(0o600), file.Sync(), file.Close()); err != nil {
+	defer root.Close()
+	anchor, err := stage.file.Stat()
+	if err != nil {
 		return err
 	}
-	return publishExport(staged, dest)
+	if current, err := root.Lstat(filepath.Base(stage.file.Name())); err != nil || !os.SameFile(anchor, current) {
+		return errors.New("备份暂存目录已更换")
+	}
+	const filename = "snapshot"
+	defer func() {
+		for _, name := range [...]string{filename, filename + "-journal", filename + "-wal", filename + "-shm"} {
+			result = errors.Join(result, root.RemoveAll(name))
+		}
+	}()
+	if err := snapshot(filepath.Join(scratch, filename)); err != nil {
+		return err
+	}
+	info, err := root.Lstat(filename)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("备份快照必须是普通文件")
+	}
+	source, err := root.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	opened, err := source.Stat()
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, opened) {
+		return errors.New("备份快照已更换")
+	}
+	_, err = io.Copy(output, source)
+	return err
 }

@@ -796,6 +796,8 @@ test('desktop update status only records success, and database backup shows the 
       OpenReleasePage: async (url: string) => { document.body.dataset.openedRelease = url },
       BackupNow: async () => {
         if (++backup === 1) throw new Error('fixture: backup failed')
+        if (backup === 2) return Promise.reject('备份目录已移动或替换，请确认应用数据目录后重试')
+        if (backup === 3) throw new Error('备份已保存到原目录，请在原目录中查找')
         return '/native/backups/jindi-fixture.db'
       },
     } } } })
@@ -828,6 +830,10 @@ test('desktop update status only records success, and database backup shows the 
   const backup = page.getByTestId('create-backup')
   await backup.click()
   await expect(page.getByTestId('toast').last()).toContainText('数据库备份失败')
+  await backup.click()
+  await expect(page.getByTestId('toast').last()).toHaveText('备份目录已移动或替换，请确认应用数据目录后重试')
+  await backup.click()
+  await expect(page.getByTestId('toast').last()).toHaveText('备份已保存到原目录，请在原目录中查找')
   await backup.click()
   const dialog = page.getByRole('dialog', { name: '数据备份已创建' })
   await expect(dialog).toContainText('/native/backups/jindi-fixture.db')

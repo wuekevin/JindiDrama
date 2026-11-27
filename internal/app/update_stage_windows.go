@@ -13,9 +13,9 @@ import (
 
 const updateFileShares = windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE | windows.FILE_SHARE_DELETE
 
-func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, error) {
+func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
 	var descriptor *windows.SECURITY_DESCRIPTOR
-	if markOrigin {
+	if kind != mediaOutputStage {
 		user, err := windows.GetCurrentProcessToken().GetTokenUser()
 		if err != nil {
 			return nil, err
@@ -67,7 +67,7 @@ func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, e
 	cleanup := func() error {
 		return errors.Join(discard(), closeStageDirectory())
 	}
-	if markOrigin {
+	if kind == updateOutputStage {
 		if err := markUpdateZone(dir, handle, name); err != nil {
 			cleanup()
 			return nil, errUpdateOrigin

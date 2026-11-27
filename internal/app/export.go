@@ -185,7 +185,7 @@ func stageExport(target string, write func(io.Writer) error, publish func(*stage
 		}
 		return err
 	}
-	stage, err := createOutputStage(filepath.Dir(target), ".jindidrama-export-", false)
+	stage, err := createOutputStage(filepath.Dir(target), ".jindidrama-export-", mediaOutputStage)
 	if err != nil {
 		return err
 	}

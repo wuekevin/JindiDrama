@@ -202,7 +202,11 @@ async function createBackup() {
   try {
     backupPath.value = await backupNow()
   } catch (error) {
-    const message = error instanceof LibraryBackupPendingError ? error.message : '数据库备份失败'
+    const detail = typeof error === 'string' ? error : error instanceof Error ? error.message : ''
+    const knownBackupError = error instanceof LibraryBackupPendingError ||
+      detail === '备份目录已移动或替换，请确认应用数据目录后重试' ||
+      detail === '备份已保存到原目录，请在原目录中查找'
+    const message = knownBackupError ? detail : '数据库备份失败'
     backupErrorToast = toast.push(message, 'error')
   } finally {
     backupBusy.value = false

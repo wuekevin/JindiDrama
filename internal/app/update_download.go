@@ -92,8 +92,16 @@ type stagedOutput struct {
 	copyDirect func(string, func(io.Writer) error) error
 }
 
+type outputStageKind uint8
+
+const (
+	mediaOutputStage outputStageKind = iota
+	privateSnapshotStage
+	updateOutputStage
+)
+
 func createUpdateStage(parent string) (*stagedOutput, error) {
-	return createOutputStage(parent, ".jindidrama-update-", true)
+	return createOutputStage(parent, ".jindidrama-update-", updateOutputStage)
 }
 
 var (

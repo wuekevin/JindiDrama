@@ -5,6 +5,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -113,6 +115,60 @@ func TestBackupSnapshotCannotReplaceConcurrentDestination(t *testing.T) {
 	entries, err := os.ReadDir(dir)
 	if err != nil || len(entries) != 1 || entries[0].Name() != "backup.db" {
 		t.Fatalf("failed publication left staging files: %v, %v", entries, err)
+	}
+}
+
+func TestBackupSnapshotRejectsRetargetedDestination(t *testing.T) {
+	root := t.TempDir()
+	selected, original, replacement := filepath.Join(root, "selected"), filepath.Join(root, "original"), filepath.Join(root, "replacement")
+	for _, directory := range []string{original, replacement} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink(original, selected); err != nil {
+		const privilegeNotHeld = syscall.Errno(1314)
+		if runtime.GOOS == "windows" && errors.Is(err, privilegeNotHeld) {
+			t.Skipf("directory fixture requires Windows symbolic link support: %v", err)
+		}
+		t.Fatal(err)
+	}
+	marker := filepath.Join(replacement, "other-file")
+	if err := os.WriteFile(marker, []byte("unrelated file"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := publishDatabaseBackup(filepath.Join(selected, "backup.db"), func(snapshot string) error {
+		if err := os.WriteFile(snapshot, []byte("legitimate snapshot"), 0o600); err != nil {
+			return err
+		}
+		if err := os.Remove(selected); err != nil {
+			return err
+		}
+		if err := os.Symlink(replacement, selected); err != nil {
+			return err
+		}
+		// Older versions placed the SQLite snapshot under the selected directory.
+		if relative, err := filepath.Rel(selected, snapshot); err == nil && filepath.IsLocal(relative) {
+			if err := os.MkdirAll(filepath.Dir(snapshot), 0o700); err != nil {
+				return err
+			}
+			return os.WriteFile(snapshot, []byte("replacement snapshot"), 0o600)
+		}
+		return nil
+	})
+	if !errors.Is(err, errUpdateDestinationMoved) {
+		t.Fatalf("retargeted backup: expected destination error, got %v", err)
+	}
+	entries, err := os.ReadDir(original)
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("temporary data remained in original directory: %v, %v", entries, err)
+	}
+	entries, err = os.ReadDir(replacement)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "other-file" {
+		t.Fatalf("unexpected files in replacement directory: %v, %v", entries, err)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "unrelated file" {
+		t.Fatalf("replacement file changed: %q, %v", data, err)
 	}
 }
 

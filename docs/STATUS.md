@@ -816,3 +816,8 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 用已归档的 .52 macOS Universal ZIP 核对真实系统校验。测试模式的临时签名校验成功。正式模式在 `stapler validate` 因缺少公证票据被拒绝，独立执行 `syspolicy_check distribution` 也确认临时签名及缺票据。Windows 便携程序和安装器的 PE 内嵌 Authenticode 证书表为空。本次检查仅证明这些测试包在正式分发验收中的状态。[归档签名检查](../build/bin/qa-release-negative-52/archive-gate.log) · [macOS 分发策略](../build/bin/qa-release-negative-52/macos-policy.log) · [Windows 证书表](../build/bin/qa-release-negative-52/windows-certificate-table.log) · [Apple 公证](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
 - 当轮只读检查发现本机有效代码签名身份为 0，GitHub 签名环境、仓库级 Actions secrets 和 Release 均为 0。正式签名成品的正向验收仍需实际发行凭据。本轮 .52 的托管验收仍待确认。
+
+## E11 SQLite 备份固定原目录（2026-11-27）
+
+- 回归复现旧版在 SQLite 快照写入期间改向备份目录后错误返回成功。现在先打开原备份目录，在独立受保护的临时目录生成 SQLite 快照，再复制并独占发布到已打开的目标目录。替换目录及已有文件保持原样，设置页提示检查数据目录或前往原目录查找已保存结果。快照复制阶段会占用一份额外临时空间。[原版回归](../build/bin/qa-backup-destination/before.log) · [BMad 记录](../_bmad-output/plan-e11-backup-destination.md)
+- macOS 实际 ACL 夹具验证暂存目录清除继承 ACL，临时目录被替换时通过原句柄清除快照并保留替代内容。Windows 源码复用受保护 DACL，测试程序完成 amd64 交叉编译。SQLite 备份恢复、Go 全量、vet、App/SQLite 竞态、前端生产构建和 Chromium 设置页 45 项通过。Windows 原生运行待验收，本次源码晚于 .52。[ACL 与目录专项](../build/bin/qa-backup-destination/backup-acl.log) · [设置页回归](../build/bin/qa-backup-destination/settings.log) · [备份对话框](../build/bin/qa-backup-destination/backup-dialog.png)

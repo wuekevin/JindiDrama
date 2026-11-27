@@ -14,7 +14,7 @@ import (
 
 // The desktop update selector supports Windows and macOS. Keep the storage
 // path available on hosts that run the platform-independent Go tests.
-func createOutputStage(parent, prefix string, _ bool) (*stagedOutput, error) {
+func createOutputStage(parent, prefix string, _ outputStageKind) (*stagedOutput, error) {
 	dest, err := os.OpenRoot(parent)
 	if err != nil {
 		return nil, err

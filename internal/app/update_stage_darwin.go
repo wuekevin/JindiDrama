@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, error) {
+func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
 	destFD, err := unix.Open(parent, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, err
@@ -67,7 +67,7 @@ func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, e
 		return nil, err
 	}
 	if info.Uid != uint32(os.Geteuid()) || info.Mode&0077 != 0 {
-		if !markOrigin {
+		if kind == mediaOutputStage {
 			// A volume without private directory permissions can still create a
 			// demo's final file exclusively inside the opened destination.
 			if err := closeStageDirectory(); err != nil {
@@ -109,7 +109,7 @@ func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, e
 	cleanup := func() error {
 		return errors.Join(discard(), closeDirectory())
 	}
-	if markOrigin {
+	if kind == updateOutputStage {
 		quarantine := fmt.Appendf(nil, "0081;%x;JindiDrama;", time.Now().Unix())
 		if err := unix.Fsetxattr(fd, "com.apple.quarantine", quarantine, 0); err != nil {
 			cleanup()
@@ -124,7 +124,7 @@ func createOutputStage(parent, prefix string, markOrigin bool) (*stagedOutput, e
 				err := unix.RenameatxNp(dirFD, name, destFD, destName, unix.RENAME_EXCL)
 				if errors.Is(err, unix.ENOTSUP) {
 					linkErr := unix.Linkat(dirFD, name, destFD, destName, 0)
-					if linkErr != nil && !markOrigin {
+					if linkErr != nil && kind == mediaOutputStage {
 						return errors.Join(err, linkErr)
 					}
 					return linkErr
