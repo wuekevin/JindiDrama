@@ -969,3 +969,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 新增公开下载复验模式。核对发布信息、原始 Actions 交付 ZIP、签名任务和远程标签后，用与桌面更新相同的公开 GitHub 附件 API 读实际字节，逐项核对大小和 SHA-256，包含清单。限制重定向和传输时长，流式处理。原有草稿及发布信息复验模式继续可用。[发布后复验](../README.md#发布后复验)
 - 16 项发行脚本测试通过。端到端夹具核对 11 项附件，清单实际字节变化会失败。覆盖下载中断、长度异常、错误响应及不允许的 CDN 重定向。用 GitHub 上公开的 jq 1.8.1 附件验过真实匿名下载。[脚本测试](../build/bin/qa-public-release-downloads/tests.log) · [公开附件实测](../build/bin/qa-public-release-downloads/public-asset.log)
 - JindiDrama 公开稳定频道返回 HTTP 404，公开发布列表为空。该项目正式发布附件复验及旧版真实在线升级待已签名版本发布后执行。本轮不涉及桌面二进制更新。[稳定频道](../build/bin/qa-public-release-downloads/release-status.log) · [公开列表](../build/bin/qa-public-release-downloads/release-count.log) · [BMad](../_bmad-output/plan-e13-verify-public-downloads.md)
+
+## E13 交付复验核对关键执行步骤（2026-11-27）
+
+- 已有草稿、公开元数据和公开下载复验均核对同一 GitHub 构建、提交和轮次的五个发行任务及 17 项关键步骤。正式 Windows 构建、签名与 WebView2 验收、macOS 双架构最低系统校验、签名、公证、ZIP 完整性和原生启动、Intel 归档验证、下载校验等均须实际完成并成功。拒绝步骤缺失、重复、跳过或顺序异常的记录。[发布说明](../README.md#生成并核对交付包)
+- 已复现旧版校验器接受整体成功但公证步骤跳过的夹具。修复后发行脚本 16 项通过，17 个必需步骤的名字和顺序均与当前工作流定义匹配。[原版复现](../build/bin/qa-release-executed-steps/baseline.log) · [回归](../build/bin/qa-release-executed-steps/tests.log) · [工作流比对](../build/bin/qa-release-executed-steps/workflow-compatibility.log)
+- 只读查询 .52 实际 GitHub 任务记录，Windows 和 macOS 测试任务成功，正式签名与公证步骤标为跳过。当前项目的正式签名任务仍待配置凭据并运行，本次未触发打包。[.52 GitHub 运行](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [任务记录](../build/bin/qa-release-executed-steps/archived-smoke-jobs.json) · [BMad](../_bmad-output/plan-e13-verify-release-executed-steps.md)

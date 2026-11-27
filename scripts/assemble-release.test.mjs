@@ -140,12 +140,32 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
     workflow_run: { id: Number(runID), head_sha: sha }, ...zipMetadata(archive),
   }
   const jobs = [
-    'package-release (windows-latest)', 'package-release (macos-latest)',
-    'verify-windows-download', 'verify-macos-intel', 'assemble-release',
-  ].map((name) => ({
+    ['package-release (windows-latest)', [
+      'verify distribution source history',
+      'build (windows, NSIS installer)',
+      'confirm dependency files stayed unchanged',
+      'sign application and installer (windows release)',
+      'verify installer and WebView2 startup (windows)',
+      'generate SHA-256 checksums',
+    ]],
+    ['package-release (macos-latest)', [
+      'verify distribution source history',
+      'build and verify deployment target (macos)',
+      'confirm dependency files stayed unchanged',
+      'sign application (macos release)',
+      'notarize application (macos release)',
+      'zip (macos)',
+      'verify archived desktop startup (macos)',
+      'generate SHA-256 checksums',
+    ]],
+    ['verify-windows-download', ['verify downloaded Windows packages']],
+    ['verify-macos-intel', ['verify the downloaded Universal archive on Intel']],
+    ['assemble-release', ['assemble and verify the release handoff']],
+  ].map(([name, names]) => ({
     name, workflow_name: 'package', run_id: Number(runID), run_attempt: Number(attempt), head_sha: sha,
     run_url: 'https://api.github.com/repos/' + repository + '/actions/runs/' + runID,
     status: 'completed', conclusion: 'success',
+    steps: names.map((name, index) => ({ name, status: 'completed', conclusion: 'success', number: index * 2 + 5 })),
   }))
   async function checkRelease(data, { releaseJobs = jobs, total = releaseJobs.length, releaseArtifact = artifact, published = false, downloadEnv } = {}) {
     await writeFile(draftFile, JSON.stringify(data))
@@ -160,8 +180,44 @@ test('verifies the handoff against GitHub release jobs, tags, draft and publishe
   const validDraft = await checkDraft(draft)
   assert.equal(validDraft.status, 0, validDraft.stderr)
   assert.match(validDraft.stdout, /matches all 11 handoff files/)
-  assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs/)
+  assert.match(validDraft.stdout, /build 12345 attempt 2 matches all 5 successful release jobs and 17 required steps/)
   assert.match(validDraft.stdout, /artifact 321 matches the original ZIP and all 11 handoff files/)
+  const withChangedJob = (name, update) => jobs.map((job) => job.name === name ? update(job) : job)
+  const macSigning = 'package-release (macos-latest)'
+  const notarization = 'notarize application (macos release)'
+  const changeNotarization = (update) => withChangedJob(macSigning, (job) => ({
+    ...job, steps: job.steps.map((step) => step.name === notarization ? { ...step, ...update } : step),
+  }))
+  for (const [releaseJobs, message] of [
+    [changeNotarization({ conclusion: 'skipped' }), /must have succeeded in order: notarize application/],
+    [withChangedJob(macSigning, (job) => ({
+      ...job, steps: job.steps.filter(({ name }) => name !== 'build and verify deployment target (macos)'),
+    })), /Expected one release step named build and verify deployment target/],
+    [withChangedJob(macSigning, (job) => ({
+      ...job, steps: job.steps.map((step) => step.name === 'zip (macos)' ? { ...step, conclusion: 'skipped' } : step),
+    })), /must have succeeded in order: zip/],
+
+    [changeNotarization({ number: 2 }), /must have succeeded in order: notarize application/],
+    [changeNotarization({ number: null }), /must have succeeded in order: notarize application/],
+    [withChangedJob(macSigning, (job) => ({
+      ...job, steps: job.steps.filter(({ name }) => name !== notarization),
+    })), /Expected one release step named notarize application/],
+    [withChangedJob(macSigning, (job) => ({
+      ...job, steps: [...job.steps, job.steps.find(({ name }) => name === notarization)],
+    })), /Expected one release step named notarize application/],
+    [withChangedJob('verify-macos-intel', (job) => ({
+      ...job, steps: null,
+    })), /Missing steps for release job verify-macos-intel/],
+    [withChangedJob('package-release (windows-latest)', (job) => ({
+      ...job, steps: job.steps.map((step) => step.name === 'sign application and installer (windows release)' ?
+        { ...step, conclusion: 'skipped' } : step),
+    })), /must have succeeded in order: sign application and installer/],
+  ]) {
+    const result = await checkDraft(draft, { releaseJobs })
+    assert.equal(result.status, 1, result.stderr)
+    assert.match(result.stderr, message)
+  }
+
   for (const wrong of [
     { name: artifact.name.replace('attempt-2', 'attempt-1') }, { expired: true },
     { url: 'https://api.github.com/repos/example/Other/actions/artifacts/321' },

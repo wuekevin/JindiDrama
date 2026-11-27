@@ -179,13 +179,30 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
   }
   const runURL = `https://api.github.com/repos/${repository}/actions/runs/${run}`.toLowerCase()
   const required = [
-    'package-release (windows-latest)',
-    'package-release (macos-latest)',
-    'verify-windows-download',
-    'verify-macos-intel',
-    'assemble-release',
+    ['package-release (windows-latest)', [
+      'verify distribution source history',
+      'build (windows, NSIS installer)',
+      'confirm dependency files stayed unchanged',
+      'sign application and installer (windows release)',
+      'verify installer and WebView2 startup (windows)',
+      'generate SHA-256 checksums',
+    ]],
+    ['package-release (macos-latest)', [
+      'verify distribution source history',
+      'build and verify deployment target (macos)',
+      'confirm dependency files stayed unchanged',
+      'sign application (macos release)',
+      'notarize application (macos release)',
+      'zip (macos)',
+      'verify archived desktop startup (macos)',
+      'generate SHA-256 checksums',
+    ]],
+    ['verify-windows-download', ['verify downloaded Windows packages']],
+    ['verify-macos-intel', ['verify the downloaded Universal archive on Intel']],
+    ['assemble-release', ['assemble and verify the release handoff']],
   ]
-  for (const name of required) {
+  let verifiedSteps = 0
+  for (const [name, steps] of required) {
     const matching = response.jobs.filter((job) => job?.name === name)
     if (matching.length !== 1) throw new Error(`Expected one release job named ${name}`)
     const [job] = matching
@@ -194,8 +211,21 @@ async function verifyReleaseJobs(jobsFile, { repository, revision, run, attempt 
         job.status !== 'completed' || job.conclusion !== 'success') {
       throw new Error(`Release job ${name} must have succeeded for build ${run} attempt ${attempt} at ${revision}`)
     }
+    if (!Array.isArray(job.steps)) throw new Error(`Missing steps for release job ${name}`)
+    let lastNumber = 0
+    for (const stepName of steps) {
+      const matchingSteps = job.steps.filter((step) => step?.name === stepName)
+      if (matchingSteps.length !== 1) throw new Error(`Expected one release step named ${stepName} in ${name}`)
+      const [step] = matchingSteps
+      if (step.status !== 'completed' || step.conclusion !== 'success' ||
+          !Number.isSafeInteger(step.number) || step.number <= lastNumber) {
+        throw new Error(`Release job ${name} steps must have succeeded in order: ${stepName}`)
+      }
+      lastNumber = step.number
+      verifiedSteps++
+    }
   }
-  console.log(`GitHub Actions build ${run} attempt ${attempt} matches all ${required.length} successful release jobs`)
+  console.log(`GitHub Actions build ${run} attempt ${attempt} matches all ${required.length} successful release jobs and ${verifiedSteps} required steps`)
 }
 
 async function verifyReleaseArchive(tag, archiveFile, artifactFile, handoff, files) {

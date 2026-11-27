@@ -116,7 +116,7 @@ GitHub 的测试包在产物名称中标注平台和轮次，例如 `package-win
 1. 在拟发布提交上以 `release` 模式运行 `package` 工作流。签名、公证、双平台验收和下载复验全部通过后，会产生 `release-handoff-<版本>-attempt-<轮次>`。如果一轮失败，重跑全部任务或重新发起打包，使两个平台产物来自同一轮。保存原始交付 ZIP，再解压到干净目录。原始 ZIP 用于后续核对。
 2. 在本地仓库准备指向构建提交的拟发布标签。运行 `node scripts/package-checksums.mjs --verify-release-tag v0.1.0 "<解压目录>"`，将 `v0.1.0` 替换为拟发布标签。命令校验交付包内全部文件的 SHA-256，以及发行说明中的版本和构建提交。核对说明中的 GitHub 打包运行和轮次后再发布。
 3. 在 GitHub 上准备指向构建提交的版本标签。用 `RELEASE-NOTES.md` 和交付包内全部文件建立 GitHub Release 草稿。预发布标签须标记为预发布。[GitHub Release 管理](https://docs.github.com/en/repositories/releasing-projects-on-github/managing-releases-in-a-repository)
-4. 用已登录的 GitHub CLI 查询草稿 ID。按照发行说明里的运行编号和尝试次数查询 Actions 任务，并查询同轮交付包的 Artifact ID。用 Node 和 Python 3 核对草稿正文、远程标签、签名打包任务、GitHub 原始 ZIP 和其中的每个文件。示例中的 ID、运行编号、尝试次数、版本和目录需替换为本次发行值。JSON 和原始 ZIP 保存到解压目录之外。核验成功后由维护者发布。
+4. 用已登录的 GitHub CLI 查询草稿 ID。按照发行说明里的运行编号和尝试次数查询 Actions 任务，并查询同轮交付包的 Artifact ID。用 Node 和 Python 3 核对草稿正文、远程标签、打包任务的签名、公证及原生验收步骤、GitHub 原始 ZIP 和其中的每个文件。示例中的 ID、运行编号、尝试次数、版本和目录需替换为本次发行值。JSON 和原始 ZIP 保存到解压目录之外。核验成功后由维护者发布。
 
 ```sh
 gh api --paginate repos/wuekevin/JindiDrama/releases --jq '.[] | select(.draft) | [.id, .tag_name] | @tsv'
