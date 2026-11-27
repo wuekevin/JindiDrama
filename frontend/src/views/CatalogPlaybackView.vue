@@ -12,7 +12,7 @@ import DanmakuLayer from '@/components/player/DanmakuLayer.vue'
 import DanmakuSettings from '@/components/player/DanmakuSettings.vue'
 import Skeleton from '@/components/ui/Skeleton.vue'
 import { useLocalEpisodeDanmaku } from '@/composables/useLocalEpisodeDanmaku'
-import { getDetail, type DramaDetail } from '@/mocks/provider'
+import { CMS_RATE_LIMIT_MESSAGE, getDetail, isCMSRateLimited, type DramaDetail } from '@/mocks/provider'
 import { DEMO_QUALITIES, demoQualityId } from '@/player/demoMedia'
 import { usePictureInPicture } from '@/player/pictureInPicture'
 import { resumePosition, seekablePosition, type PlaybackBookmark } from '@/player/playbackBookmark'
@@ -26,7 +26,6 @@ import { useLibraryStore } from '@/stores/library'
 import type { MediaSource, PlaybackTicket } from '../../../contracts/provider-contracts'
 
 const hlsType = 'application/vnd.apple.mpegurl'
-const cmsRateLimitError = '苹果 CMS 请求过于频繁，请稍后重试'
 const playbackStallTimeout = 20_000
 
 const route = useRoute()
@@ -554,9 +553,8 @@ async function load() {
     watchExpiry(current)
   } catch (cause) {
     if (!isPlaybackRoute(path, current)) return
-    const message = cause instanceof Error ? cause.message : cause
-    fail(isAppleCMSDramaId(targetId) && message === cmsRateLimitError
-      ? cmsRateLimitError + '。' : '无法取得可用的播放源，请重试。')
+    fail(isAppleCMSDramaId(targetId) && isCMSRateLimited(cause)
+      ? CMS_RATE_LIMIT_MESSAGE + '。' : '无法取得可用的播放源，请重试。')
   }
 }
 

@@ -63,6 +63,15 @@ function providerNotFound(error: unknown) {
 }
 
 export const MAX_CMS_PAGE = 100_000
+export const CMS_RATE_LIMIT_MESSAGE = '苹果 CMS 请求过于频繁，请稍后重试'
+
+export function isCMSRateLimited(cause: unknown) {
+  return (cause instanceof Error ? cause.message : cause) === CMS_RATE_LIMIT_MESSAGE
+}
+
+export function cmsClassificationError(cause: unknown) {
+  return new Error(isCMSRateLimited(cause) ? CMS_RATE_LIMIT_MESSAGE : '苹果 CMS 分类暂不可用')
+}
 
 export async function loadCMSCatalogPage(query: string, page: number, mode: 'normal' | 'error') {
   if (mode === 'error') throw new Error('苹果 CMS 目录暂不可用')
@@ -78,8 +87,8 @@ export async function loadCMSCatalogGenres(mode: 'normal' | 'error') {
     if (!Array.isArray(genres) || genres.some((genre) => !genre || typeof genre.id !== 'string' ||
       !/^[1-9][0-9]{0,29}$/.test(genre.id) || typeof genre.name !== 'string' || !genre.name)) throw new Error()
     return genres
-  } catch {
-    throw new Error('苹果 CMS 分类暂不可用')
+  } catch (cause) {
+    throw cmsClassificationError(cause)
   }
 }
 
@@ -87,8 +96,8 @@ export async function loadCMSCatalogGenrePage(genre: string, page: number, mode:
   try {
     if (mode === 'error') throw new Error()
     return cmsPageResult(await loadCatalogGenrePage(genre, page), page)
-  } catch {
-    throw new Error('苹果 CMS 分类暂不可用')
+  } catch (cause) {
+    throw cmsClassificationError(cause)
   }
 }
 

@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
 import type { CatalogGenre } from '@/bindings'
-import { catalogProviderName, fallbackCatalogCover, vCancelCatalogCover, loadCatalogHome, loadCMSCatalogGenrePage, loadCMSCatalogGenres, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
+import { catalogProviderName, cmsClassificationError, fallbackCatalogCover, vCancelCatalogCover, loadCatalogHome, loadCMSCatalogGenrePage, loadCMSCatalogGenres, loadCMSCatalogPage, searchDramas, HOT_WORDS, MAX_CMS_PAGE, type SearchFilters } from '@/mocks/provider'
 import { useSearchStore } from '@/stores/search'
 import { useLicensedCatalog } from '@/stores/licensedCatalog'
 import { detailRoute, playbackRoute } from '@/router/libraryRoutes'
@@ -39,6 +39,8 @@ const browseTopics = computed(() => discovery.value === 'topics')
 const feed = computed(() => discovery.value === 'topics' ? undefined : discovery.value)
 const topic = computed(() => typeof route.query.topic === 'string' ? route.query.topic.trim() : '')
 const genre = computed(() => route.query.genre)
+const requestedCMSGenre = computed(() => typeof genre.value === 'string' && /^[1-9][0-9]{0,29}$/.test(genre.value)
+  ? genre.value : undefined)
 const catalogLabel = ref<string>()
 const discoveryTitle = computed(() => {
   if (feed.value === 'today' && catalogLabel.value) return catalogLabel.value
@@ -80,6 +82,8 @@ const cmsFallback = ref<{ page: number; reason: string }>()
 let lastCMSResult: { scope: string; page: number; items: Drama[]; hasMore: boolean } | undefined
 let cmsReturnPath: string | undefined
 const state = ref<'loading'|'ready'|'empty'|'error'>('loading')
+const pendingCMSGenre = computed(() => !selectedGenre.value && (state.value === 'loading' || state.value === 'error')
+  ? requestedCMSGenre.value : undefined)
 const isDemo = ref(false)
 const localResultsOnly = ref(false)
 const err = ref(''); const items = ref<Drama[]>([])
@@ -153,8 +157,7 @@ async function run(isRetry = false) {
     let label: string | undefined
     if (cmsPagination.value) {
       const requestedGenre = genre.value
-      const genreScope = typeof requestedGenre === 'string' && /^[1-9][0-9]{0,29}$/.test(requestedGenre)
-        ? requestedGenre : undefined
+      const genreScope = requestedCMSGenre.value
       const keyword = section || topicBrowse ? '' : q.value
       const requestedPage = cmsPage.value
       const scope = topicBrowse ? `genre:${genreScope ?? (requestedGenre === undefined ? '' : 'invalid')}`
@@ -214,7 +217,7 @@ async function run(isRetry = false) {
         lastCMSResult = results.length ? { scope, page: requestedPage, items: results, hasMore: remote.hasMore } : undefined
       } catch (error) {
         if (my !== token) return
-        if (topicBrowse && !lastCMSResult) throw new Error('苹果 CMS 分类暂不可用')
+        if (topicBrowse) throw cmsClassificationError(error)
         if (lastCMSResult || !local.length) throw error
         localOnly = true
         results = local
@@ -336,8 +339,9 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
       </header>
       <label v-if="cmsTopics" class="topic-filter">
         分类
-        <select :value="selectedGenre?.id ?? ''" :disabled="!genreOptions.length" data-testid="genre-select" @change="selectGenre(($event.target as HTMLSelectElement).value)">
+        <select :value="selectedGenre?.id ?? pendingCMSGenre ?? ''" :disabled="!genreOptions.length" data-testid="genre-select" @change="selectGenre(($event.target as HTMLSelectElement).value)">
           <option value="">全部分类</option>
+          <option v-if="pendingCMSGenre" :value="pendingCMSGenre" disabled>所选分类暂未加载</option>
           <option v-for="{ id, name } in genreOptions" :key="id" :value="id">{{ name }}</option>
         </select>
       </label>

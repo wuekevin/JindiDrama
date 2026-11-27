@@ -354,15 +354,16 @@ test('empty CMS pages can go back and unsafe hash page values resolve to page on
 })
 
 const wideGenre = '90071992547409931234'
+const cmsRateLimit = '苹果 CMS 请求过于频繁，请稍后重试'
 type CMSGenreWindow = typeof window & {
   cmsGenreCalls: string[]
   releaseCMSGenrePage: () => void
   deleteCMSGenre: (genre: string) => void
-  setNextCMSGenrePage: (outcome: 'empty' | 'empty-more' | 'error') => void
+  setNextCMSGenrePage: (outcome: 'empty' | 'empty-more' | 'error' | 'rate-limit') => void
 }
 
-async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'retry-class' | 'late-page' = 'normal') {
-  await page.addInitScript(({ wideGenre, scenario }) => {
+async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'retry-class' | 'late-page' | 'rate-limit' | 'all-page-error' = 'normal') {
+  await page.addInitScript(({ wideGenre, scenario, cmsRateLimit }) => {
     const row = (id: string, title: string, tags = ['剧情']) => ({
       id: 'apple-cms:0123456789abcdef0123456789abcdef:' + id,
       title, summary: '授权片源目录提供的短剧。', tags, episodeCount: 1, updatedTo: 1,
@@ -391,11 +392,16 @@ async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'ret
       CatalogSearch: async () => { calls.push('search'); return [allFirst] },
       CatalogPage: async (_query: string, pg: number) => {
         calls.push('all:' + pg)
+        if (scenario === 'all-page-error' && pg === 2 && ++otherAttempts === 1) {
+          throw new Error('苹果 CMS 返回的页码与请求不一致')
+        }
         return { entries: [pg === 1 ? allFirst : allSecond], page: pg, hasMore: pg === 1 }
       },
       CatalogGenres: async () => {
         calls.push('class')
-        if (scenario === 'retry-class' && ++classAttempts === 1) throw new Error('fixture upstream URL')
+        classAttempts++
+        if (scenario === 'retry-class' && classAttempts === 1) throw new Error('fixture upstream URL')
+        if (scenario === 'rate-limit' && classAttempts === 1) throw cmsRateLimit
         return scenario === 'no-class' ? [] : [
           { id: wideGenre, name: '海岛' }, { id: '7', name: '海岛' }, { id: '8', name: `海岛（ID ${wideGenre}）` },
         ].filter(({ id }) => !deleted.has(id))
@@ -405,6 +411,7 @@ async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'ret
         const outcome = nextOutcome
         nextOutcome = undefined
         if (outcome === 'error') throw new Error('苹果 CMS 返回的短剧与请求分类不一致')
+        if (outcome === 'rate-limit' || scenario === 'rate-limit' && ++otherAttempts === 1) throw new Error(cmsRateLimit)
         if (outcome === 'empty' || deleted.has(genre)) return { entries: [], page: pg, hasMore: false }
         if (outcome === 'empty-more') return { entries: [], page: pg, hasMore: true }
         if (genre === '7' && scenario === 'late-page' && ++otherAttempts === 1) {
@@ -421,7 +428,7 @@ async function setupCMSGenres(page: Page, scenario: 'normal' | 'no-class' | 'ret
       },
       CatalogEpisodes: async (id: string) => [{ index: 1, available: true, dramaId: id }],
     } } } })
-  }, { wideGenre, scenario })
+  }, { wideGenre, scenario, cmsRateLimit })
 }
 
 const cmsGenreCalls = (page: Page) => page.evaluate(() => (window as CMSGenreWindow).cmsGenreCalls)
@@ -505,6 +512,62 @@ test('CMS invalid and expired classifications stay off the wire, and a failed cl
   await page.getByRole('button', { name: '查看全部分类' }).click()
   await expect(page.getByTestId('result-card')).toContainText('未分类目录第一页')
   expect(await cmsGenreCalls(page)).toEqual(['class', 'class', 'all:1'])
+})
+
+test('CMS classifications preserve rate limits and retry the requested page', async ({ page }, testInfo) => {
+  await setupCMSGenres(page, 'rate-limit')
+  await page.goto('/#/search?browse=topics&genre=' + wideGenre)
+  const error = page.getByTestId('error')
+  const cards = page.getByTestId('result-card')
+  const retry = page.getByRole('button', { name: '重试' })
+  const selected = page.getByRole('combobox', { name: '分类' })
+  await expect(error).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('class-rate-limit.png') })
+  await expect(error).toContainText(cmsRateLimit)
+  await expect(selected).toHaveValue(wideGenre)
+  await expect(selected.locator('option:checked')).toHaveText('所选分类暂未加载')
+  expect(await cmsGenreCalls(page)).toEqual(['class'])
+
+  await retry.click()
+  await expect(error).toContainText(cmsRateLimit)
+  await expect(selected).toHaveValue(wideGenre)
+  await expect.poll(() => cmsGenreCalls(page)).toEqual(['class', 'class', 'genre:' + wideGenre + ':1'])
+  await retry.click()
+  await expect(cards).toContainText('北海来信')
+  await expect(selected).toHaveValue(wideGenre)
+
+  await page.evaluate(() => (window as CMSGenreWindow).setNextCMSGenrePage('rate-limit'))
+  await page.getByRole('button', { name: '下一页' }).click()
+  const fallback = page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })
+  await expect(fallback).toContainText(cmsRateLimit)
+  await expect(cards).toContainText('北海来信')
+  await expect(page).toHaveURL(/&page=2$/)
+  await page.screenshot({ path: testInfo.outputPath('class-rate-limit-retained-page.png') })
+  await page.setViewportSize({ width: 1280, height: 860 })
+  await page.locator('html').evaluate(element => element.style.setProperty('--user-zoom', '2.2'))
+  await expect(fallback).toBeInViewport()
+  await expect(retry).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('class-rate-limit-retained-page-220.png') })
+  await retry.click()
+  await expect(cards).toContainText('北海归航')
+  await expect(selected).toHaveValue(wideGenre)
+  await expect(page.getByRole('navigation', { name: '分页' })).toContainText('第 2 页')
+  await expect(fallback).toHaveCount(0)
+})
+
+test('all CMS classifications keep the previous page and use a generic error', async ({ page }) => {
+  await setupCMSGenres(page, 'all-page-error')
+  await page.goto('/#/search?browse=topics')
+  const cards = page.getByTestId('result-card')
+  await expect(cards).toContainText('未分类目录第一页')
+  await page.getByRole('button', { name: '下一页' }).click()
+  const fallback = page.getByRole('status').filter({ hasText: '当前显示已加载的第 1 页' })
+  await expect(fallback).toContainText('苹果 CMS 分类暂不可用')
+  await expect(fallback).not.toContainText('返回的页码与请求不一致')
+  await expect(cards).toContainText('未分类目录第一页')
+  await page.getByRole('button', { name: '重试' }).click()
+  await expect(cards).toContainText('未分类目录第二页')
+  await expect(page.getByRole('combobox', { name: '分类' })).toHaveValue('')
 })
 
 test('CMS classification retains its page on failure and discards it when the filter changes', async ({ page }) => {
