@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.58`，打包源提交为 `5a9181690e9356ba3003d49b5c147ec606a775b2`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-27，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261127.59`，打包源提交为 `fefccb64d2c497752a79c0f08c22faf883ca3353`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .59 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.59/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.59/macos/SHA256SUMS.txt) |
 | .58 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.58/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.58/macos/SHA256SUMS.txt) |
 | .56 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.56/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.56/macos/SHA256SUMS.txt) |
 | .54 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 可见窗口、系统恢复选择器和回滚通过 | [Windows 清单](../build/bin/smoke-20261127.54/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.54/macos/SHA256SUMS.txt) |
@@ -1056,3 +1057,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 同一部剧手动选择了唯一命名的线路后，新分集票据存在唯一同名来源时优先使用该线路。无匹配或重名时使用原排序，自动故障回退不覆盖此前的手动选择。离开播放页即清除本次选择。
 - WebKit 复现原版手动切集从备用线跳回第一条。修复后 Chromium 播放 71 项、WebKit 专项 6 项、Vitest 125 项及生产构建通过。覆盖手动切集暂停、自动下一集播放、线路换位、重名或缺名回退、故障回退后偏好保留及离页重置。补充场景在 Chromium 单项和 WebKit 专项复验通过。Chromium 单项的首轮截图因临时磁盘空间不足失败，清理隔离的 Go 构建缓存后复验通过。对照原有布局，第三集的播放器和已选备用线可同时辨认。[原版复现](../build/bin/qa-cms-route-preference/baseline.log) · [Chromium](../build/bin/qa-cms-route-preference/chromium.log) · [Chromium 补充场景](../build/bin/qa-cms-route-preference/chromium-focused-final.log) · [WebKit](../build/bin/qa-cms-route-preference/webkit.log) · [自动切集截图](../build/bin/qa-cms-route-preference/cms-route-preference.png)
 - Apple Silicon 的隔离 Wails 构建用合成目录和真实媒体样片跑通三个分集。手动切到第二集保持备用线和暂停，自动切到第三集保持备用线和静音，两个分集都取得新票据。正常退出和 SQLite 完整性通过。授权公网片源与跨平台原生仍待验收。[原生证据](../build/bin/qa-cms-route-preference/native.log) · [BMad](../_bmad-output/plan-e12-cms-route-preference.md)
+
+## E13 .59 累计本地打包验收（2026-11-27）
+
+- Windows x64 与 macOS Universal 从发行源码 `fefccb64d2c497752a79c0f08c22faf883ca3353` 构建。这批包含 .58 后的 Wails 依赖更新、启动退出保护、CMS 线路名称和切集沿用。三套主程序内嵌的 69 个路径及各自 SHA-256 与已测前端一致。Windows 安装器中的程序与便携版一致，WebView2 引导程序与锁定 Wails 模块一致。macOS 两套切片的最低系统版本为 13.0。[源码](../build/bin/qa-release-source-59/provenance.log) · [内嵌文件](../build/bin/qa-release-source-59/embedded-frontend.log) · [成品结构](../build/bin/qa-release-source-59/package-static.log)
+- Windows 安装器 22.57 MiB、便携程序 32.43 MiB，macOS Universal ZIP 40.94 MiB。归档后 Windows 7 项、macOS 6 项 SHA-256 均通过，两个随包说明中的校验示例也通过。Apple Silicon 从最终归档解包启动，实际窗口和 Wails 文档就绪，正常退出。SQLite 完整性和活动 WAL 回滚通过，原始数据未变化。[包大小](../build/bin/qa-release-source-59/package-sizes.log) · [归档校验](../build/bin/qa-release-source-59/package-static.log) · [原生运行](../build/bin/qa-release-source-59/macos-native.log)
+- TypeScript 检查及生产构建、Chromium 402 项、WebKit 切源 6 项、Vitest 125 项、Go 全量和 vet、发行脚本 17 项通过。Go 开发与生产标签、三套主程序和 npm 生产依赖的扫描均未报告已知漏洞。[Chromium](../build/bin/qa-release-source-59/chromium.log) · [WebKit](../build/bin/qa-release-source-59/webkit.log) · [Go 测试](../build/bin/qa-release-source-59/go-test.log) · [成品扫描](../build/bin/qa-release-source-59/binary-vulnerabilities.log)
+- 归档与验收日志保存在本机 JindiDrama 主工作区的 `build/bin/`。本批 Windows 为未签名测试成品，macOS 使用临时签名。Windows、Intel Mac 原生、正式签名与公证、正式 GitHub 版在线升级及授权接口公网联调仍待验收。[BMad](../_bmad-output/plan-e13-local-candidate59-packages.md)
