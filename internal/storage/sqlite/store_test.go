@@ -1,6 +1,8 @@
 package sqlite
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -153,5 +155,128 @@ func TestBackupRestoreAndPersistence(t *testing.T) {
 	defer s2.Close()
 	if f, _ := s2.Favorites(); len(f) != 1 {
 		t.Fatal("重启后数据丢失")
+	}
+}
+
+func TestWriteBackupCompactsAndIncludesLiveWAL(t *testing.T) {
+	source := open(t)
+	const deleted = "deprecated-private-value"
+	if _, err := source.db.Exec(`PRAGMA temp_store=FILE;
+PRAGMA wal_autocheckpoint=0;
+PRAGMA secure_delete=OFF;
+CREATE TABLE sample(value TEXT);
+INSERT INTO sample VALUES (? || hex(zeroblob(700000)));
+DELETE FROM sample;
+PRAGMA wal_checkpoint(TRUNCATE);`, deleted); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := source.db.Exec("INSERT INTO sample VALUES ('uncheckpointed')"); err != nil {
+		t.Fatal(err)
+	}
+	wal, err := os.Stat(source.Path + "-wal")
+	if err != nil || wal.Size() <= 32 {
+		t.Fatalf("fixture has no live WAL frames: %v, %v", wal, err)
+	}
+	path := filepath.Join(t.TempDir(), "backup.db")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readOnly, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeErr := source.WriteBackup(readOnly)
+	if err := readOnly.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr == nil {
+		t.Fatal("SQLite accepted a read-only backup handle")
+	}
+	output, err := os.OpenFile(path, os.O_RDWR, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeErr = source.WriteBackup(output)
+	if err := output.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) > 300000 || bytes.Contains(data, []byte(deleted)) {
+		t.Fatalf("backup was not compacted: %d bytes", len(data))
+	}
+	legacyPath := filepath.Join(t.TempDir(), "legacy.db")
+	if err := source.Backup(legacyPath); err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := os.ReadFile(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(data, legacy) {
+		t.Fatalf("snapshot differs from VACUUM INTO disk output: %d vs %d bytes", len(data), len(legacy))
+	}
+	var tempMode int
+	if err := source.db.QueryRow("PRAGMA temp_store").Scan(&tempMode); err != nil || tempMode != 1 {
+		t.Fatalf("source temp_store changed: %d, %v", tempMode, err)
+	}
+	restored, err := openDatabase(path, "ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var check, value string
+	if err := restored.QueryRow("PRAGMA quick_check").Scan(&check); err != nil || check != "ok" {
+		t.Fatalf("backup integrity check: %q, %v", check, err)
+	}
+	if err := restored.QueryRow("SELECT value FROM sample").Scan(&value); err != nil || value != "uncheckpointed" {
+		t.Fatalf("live WAL value missing: %q, %v", value, err)
+	}
+}
+
+func TestConcurrentBackupsKeepTheirOwnContents(t *testing.T) {
+	type job struct {
+		source *Store
+		path   string
+		value  string
+	}
+	dir := t.TempDir()
+	jobs := []job{
+		{open(t), filepath.Join(dir, "first.db"), "first"},
+		{open(t), filepath.Join(dir, "second.db"), "second"},
+	}
+	for _, job := range jobs {
+		if err := job.source.SetFavorites([]string{job.value}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, job := range jobs {
+		t.Run(job.value, func(t *testing.T) {
+			t.Parallel()
+			file, err := os.OpenFile(job.path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			backupErr := job.source.WriteBackup(file)
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if backupErr != nil {
+				t.Fatal(backupErr)
+			}
+			restored, err := Open(job.path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restored.Close()
+			if values, err := restored.Favorites(); err != nil || !slices.Equal(values, []string{job.value}) {
+				t.Fatalf("backup favorites: %v, %v", values, err)
+			}
+		})
 	}
 }

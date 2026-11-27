@@ -82,7 +82,7 @@ func TestStagedExportRejectsRetargetedWindowsDestination(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
-	err := writePrivateStagedExport(filepath.Join(selected, "capture.png"), func(file io.Writer) error {
+	err := writePrivateStagedExport(filepath.Join(selected, "capture.png"), func(file *os.File) error {
 		if _, err := io.WriteString(file, "capture"); err != nil {
 			return err
 		}

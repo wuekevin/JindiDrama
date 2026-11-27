@@ -69,7 +69,11 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		}
 	}
 	const name = "package"
-	handle, err := createUpdateObject(dir, name, windows.GENERIC_WRITE|windows.FILE_READ_ATTRIBUTES|windows.DELETE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
+	access := uint32(windows.GENERIC_WRITE | windows.FILE_READ_ATTRIBUTES | windows.DELETE)
+	if kind == privateBackupOutputStage {
+		access |= windows.GENERIC_READ
+	}
+	handle, err := createUpdateObject(dir, name, access, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
 	if err != nil {
 		closeStageDirectory()
 		return nil, err

@@ -4,9 +4,6 @@ package app
 
 import (
 	"bytes"
-	"errors"
-	"io"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,7 +12,7 @@ import (
 	"jindi-drama/internal/storage/sqlite"
 )
 
-func TestBackupScratchDoesNotInheritAccessACL(t *testing.T) {
+func TestRestoreScratchDoesNotInheritAccessACL(t *testing.T) {
 	parent := t.TempDir()
 	permission := "everyone allow search,file_inherit,directory_inherit"
 	if output, err := exec.Command("/bin/chmod", "+a", permission, parent).CombinedOutput(); err != nil {
@@ -29,8 +26,8 @@ func TestBackupScratchDoesNotInheritAccessACL(t *testing.T) {
 		t.Fatalf("the fixture did not inherit an ACL: %v (%s)", err, output)
 	}
 	t.Setenv("TMPDIR", parent)
-	if err := copyDatabaseSnapshot(io.Discard, func(path string) error {
-		scratch := filepath.Dir(path)
+	if err := withPrivateDatabaseSnapshot(privateSnapshotStage, func(root *os.Root, _ string) error {
+		scratch := root.Name()
 		info, err := os.Stat(scratch)
 		if err != nil || info.Mode().Perm()&0o077 != 0 {
 			t.Fatalf("snapshot directory is not private: %v, %v", info, err)
@@ -38,46 +35,13 @@ func TestBackupScratchDoesNotInheritAccessACL(t *testing.T) {
 		if output, err := exec.Command("/bin/ls", "-lde", scratch).CombinedOutput(); err != nil || bytes.Contains(output, []byte("everyone")) {
 			t.Fatalf("snapshot directory retained an inherited ACL: %v (%s)", err, output)
 		}
-		return os.WriteFile(path, []byte("snapshot"), 0o600)
+		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
 	entries, err := os.ReadDir(parent)
 	if err != nil || len(entries) != 1 || entries[0].Name() != "inherited" {
 		t.Fatalf("snapshot cleanup left data: %v, %v", entries, err)
-	}
-}
-
-func TestBackupScratchCleanupLeavesReplacementFilesAlone(t *testing.T) {
-	t.Setenv("TMPDIR", t.TempDir())
-	target := filepath.Join(t.TempDir(), "backup.db")
-	var moved, marker string
-	err := publishDatabaseBackup(target, func(path string) error {
-		if err := os.WriteFile(path, []byte("snapshot"), 0o600); err != nil {
-			return err
-		}
-		scratch := filepath.Dir(path)
-		moved = scratch + "-moved"
-		if err := os.Rename(scratch, moved); err != nil {
-			return err
-		}
-		if err := os.Mkdir(scratch, 0o700); err != nil {
-			return err
-		}
-		marker = filepath.Join(scratch, "unrelated")
-		return os.WriteFile(marker, []byte("unrelated content"), 0o600)
-	})
-	if err == nil {
-		t.Fatal("backup accepted a replaced scratch directory")
-	}
-	if _, err := os.Stat(target); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("scratch failure created a backup: %v", err)
-	}
-	if contents, err := os.ReadFile(marker); err != nil || string(contents) != "unrelated content" {
-		t.Fatalf("replacement contents changed: %q, %v", contents, err)
-	}
-	if files, err := os.ReadDir(moved); err != nil || len(files) > 0 {
-		t.Fatalf("original scratch still contains data: %v, %v", files, err)
 	}
 }
 

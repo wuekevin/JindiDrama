@@ -2,6 +2,7 @@ package app
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -74,12 +75,43 @@ func TestBackupsHaveSeparatePathsAndPreserveData(t *testing.T) {
 	}
 }
 
+func TestApplicationBackupWithUnavailableTempDirectory(t *testing.T) {
+	dir := t.TempDir()
+	a := New()
+	if err := a.openStore(filepath.Join(dir, "jindi.db")); err != nil {
+		t.Fatal(err)
+	}
+	defer a.close()
+	if err := a.SaveFavorites([]string{"d1"}); err != nil {
+		t.Fatal(err)
+	}
+	unavailable := filepath.Join(dir, "not-a-directory")
+	if err := os.WriteFile(unavailable, []byte("sentinel"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+		t.Setenv(key, unavailable)
+	}
+	path, err := a.backupTo(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	backup, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer backup.Close()
+	if rows, err := backup.Favorites(); err != nil || len(rows) != 1 || rows[0] != "d1" {
+		t.Fatalf("backup favorites: %v, %v", rows, err)
+	}
+}
+
 func TestBackupSnapshotFailureDoesNotPublishPartialFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "backups")
 	dest := filepath.Join(dir, "backup.db")
 	failure := errors.New("snapshot interrupted")
-	err := publishDatabaseBackup(dest, func(staged string) error {
-		if err := os.WriteFile(staged, []byte("partial"), 0o600); err != nil {
+	err := publishDatabaseBackup(dest, func(staged *os.File) error {
+		if _, err := io.WriteString(staged, "partial"); err != nil {
 			return err
 		}
 		if _, err := os.Lstat(dest); !errors.Is(err, fs.ErrNotExist) {
@@ -99,8 +131,8 @@ func TestBackupSnapshotFailureDoesNotPublishPartialFile(t *testing.T) {
 func TestBackupSnapshotCannotReplaceConcurrentDestination(t *testing.T) {
 	dir := t.TempDir()
 	dest := filepath.Join(dir, "backup.db")
-	err := publishDatabaseBackup(dest, func(staged string) error {
-		if err := os.WriteFile(staged, []byte("completed snapshot"), 0o600); err != nil {
+	err := publishDatabaseBackup(dest, func(staged *os.File) error {
+		if _, err := io.WriteString(staged, "completed snapshot"); err != nil {
 			return err
 		}
 		return os.WriteFile(dest, []byte("existing file"), 0o600)
@@ -137,24 +169,14 @@ func TestBackupSnapshotRejectsRetargetedDestination(t *testing.T) {
 	if err := os.WriteFile(marker, []byte("unrelated file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := publishDatabaseBackup(filepath.Join(selected, "backup.db"), func(snapshot string) error {
-		if err := os.WriteFile(snapshot, []byte("legitimate snapshot"), 0o600); err != nil {
+	err := publishDatabaseBackup(filepath.Join(selected, "backup.db"), func(snapshot *os.File) error {
+		if _, err := io.WriteString(snapshot, "legitimate snapshot"); err != nil {
 			return err
 		}
 		if err := os.Remove(selected); err != nil {
 			return err
 		}
-		if err := os.Symlink(replacement, selected); err != nil {
-			return err
-		}
-		// Older versions placed the SQLite snapshot under the selected directory.
-		if relative, err := filepath.Rel(selected, snapshot); err == nil && filepath.IsLocal(relative) {
-			if err := os.MkdirAll(filepath.Dir(snapshot), 0o700); err != nil {
-				return err
-			}
-			return os.WriteFile(snapshot, []byte("replacement snapshot"), 0o600)
-		}
-		return nil
+		return os.Symlink(replacement, selected)
 	})
 	if !errors.Is(err, errUpdateDestinationMoved) {
 		t.Fatalf("retargeted backup: expected destination error, got %v", err)

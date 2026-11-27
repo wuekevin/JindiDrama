@@ -14,7 +14,7 @@ import (
 
 // The desktop update selector supports Windows and macOS. Keep the storage
 // path available on hosts that run the platform-independent Go tests.
-func createOutputStage(parent, prefix string, _ outputStageKind) (*stagedOutput, error) {
+func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutput, error) {
 	dest, err := os.OpenRoot(parent)
 	if err != nil {
 		return nil, err
@@ -42,7 +42,11 @@ func createOutputStage(parent, prefix string, _ outputStageKind) (*stagedOutput,
 		return errors.Join(statErr, currentErr, removeErr, stage.Close(), dest.Close())
 	}
 	const name = "package"
-	file, err := stage.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	access := os.O_WRONLY
+	if kind == privateBackupOutputStage {
+		access = os.O_RDWR
+	}
+	file, err := stage.OpenFile(name, access|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		closeDirectories()
 		return nil, err

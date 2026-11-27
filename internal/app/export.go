@@ -190,7 +190,7 @@ func writeMediaExport(target string, write func(io.Writer) error) error {
 }
 
 func stageMediaExport(target string, write func(io.Writer) error, publish func(*stagedOutput, string) error) error {
-	return stageExport(target, mediaOutputStage, write, func(stage *stagedOutput, target string) error {
+	return stageExport(target, mediaOutputStage, func(file *os.File) error { return write(file) }, func(stage *stagedOutput, target string) error {
 		err := publish(stage, target)
 		if errors.Is(err, errors.ErrUnsupported) && !errors.Is(err, fs.ErrExist) {
 			return stage.copyDirect(target, write)
@@ -199,11 +199,11 @@ func stageMediaExport(target string, write func(io.Writer) error, publish func(*
 	})
 }
 
-func writePrivateStagedExport(target string, write func(io.Writer) error) error {
+func writePrivateStagedExport(target string, write func(*os.File) error) error {
 	return stageExport(target, privateBackupOutputStage, write, func(stage *stagedOutput, target string) error { return stage.publish(target) })
 }
 
-func stageExport(target string, kind outputStageKind, write func(io.Writer) error, publish func(*stagedOutput, string) error) (result error) {
+func stageExport(target string, kind outputStageKind, write func(*os.File) error, publish func(*stagedOutput, string) error) (result error) {
 	if _, err := os.Lstat(target); !errors.Is(err, fs.ErrNotExist) {
 		if err == nil {
 			return fs.ErrExist

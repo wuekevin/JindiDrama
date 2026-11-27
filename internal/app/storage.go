@@ -3,7 +3,6 @@ package app
 import (
 	"crypto/rand"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -177,7 +176,7 @@ func (a *App) BackupNow() (string, error) {
 func (a *App) backupTo(dir string) (string, error) {
 	name := "jindi-" + time.Now().Format("20060102-150405") + "-" + rand.Text() + ".db"
 	dest := filepath.Join(dir, "backups", name)
-	if err := publishDatabaseBackup(dest, a.store.Backup); err != nil {
+	if err := publishDatabaseBackup(dest, a.store.WriteBackup); err != nil {
 		if errors.Is(err, errUpdateDestinationMoved) {
 			return "", errors.New("备份目录已移动或替换，请确认应用数据目录后重试")
 		}
@@ -189,47 +188,16 @@ func (a *App) backupTo(dir string) (string, error) {
 	return dest, nil
 }
 
-func publishDatabaseBackup(dest string, snapshot func(string) error) error {
+func publishDatabaseBackup(dest string, snapshot func(*os.File) error) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o700); err != nil {
 		return err
 	}
-	err := writePrivateStagedExport(dest, func(output io.Writer) error {
-		return copyDatabaseSnapshot(output, snapshot)
-	})
+	err := writePrivateStagedExport(dest, snapshot)
 	// A published backup remains usable even if temporary directory cleanup fails.
 	if errors.Is(err, errExportCleanup) {
 		return nil
 	}
 	return err
-}
-
-func copyDatabaseSnapshot(output io.Writer, snapshot func(string) error) error {
-	return withPrivateDatabaseSnapshot(privateBackupOutputStage, func(root *os.Root, filename string) error {
-		if err := snapshot(filepath.Join(root.Name(), filename)); err != nil {
-			return err
-		}
-		info, err := root.Lstat(filename)
-		if err != nil {
-			return err
-		}
-		if !info.Mode().IsRegular() {
-			return errors.New("备份快照必须是普通文件")
-		}
-		source, err := root.Open(filename)
-		if err != nil {
-			return err
-		}
-		defer source.Close()
-		opened, err := source.Stat()
-		if err != nil {
-			return err
-		}
-		if !os.SameFile(info, opened) {
-			return errors.New("备份快照已更换")
-		}
-		_, err = io.Copy(output, source)
-		return err
-	})
 }
 
 func withPrivateDatabaseSnapshot(kind outputStageKind, use func(*os.Root, string) error) (result error) {

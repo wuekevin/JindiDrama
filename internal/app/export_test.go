@@ -29,11 +29,11 @@ func TestStagedExportLeavesReplacementDirectoryAlone(t *testing.T) {
 	}
 	target := filepath.Join(directory, "capture.png")
 	var replacement string
-	err := writePrivateStagedExport(target, func(out io.Writer) error {
+	err := writePrivateStagedExport(target, func(out *os.File) error {
 		if _, err := io.WriteString(out, "captured data"); err != nil {
 			return err
 		}
-		stagingPath, err := filepath.Rel(directory, out.(*os.File).Name())
+		stagingPath, err := filepath.Rel(directory, out.Name())
 		if err != nil {
 			return err
 		}
@@ -66,8 +66,8 @@ func TestStagedExportLeavesReplacementDirectoryAlone(t *testing.T) {
 func TestStagedExportReportsCleanupFailureAfterPublishing(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "capture.png")
 	var otherFile string
-	err := writePrivateStagedExport(target, func(out io.Writer) error {
-		otherFile = filepath.Join(filepath.Dir(out.(*os.File).Name()), "unrelated")
+	err := writePrivateStagedExport(target, func(out *os.File) error {
+		otherFile = filepath.Join(filepath.Dir(out.Name()), "unrelated")
 		if err := os.WriteFile(otherFile, []byte("unrelated content"), 0o600); err != nil {
 			return err
 		}

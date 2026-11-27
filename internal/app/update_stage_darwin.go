@@ -90,7 +90,11 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 		return nil, err
 	}
 	const name = "package"
-	fd, err := unix.Openat(dirFD, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
+	flags := unix.O_WRONLY
+	if kind == privateBackupOutputStage {
+		flags = unix.O_RDWR
+	}
+	fd, err := unix.Openat(dirFD, name, flags|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0600)
 	if err != nil {
 		closeDirectory()
 		return nil, err
