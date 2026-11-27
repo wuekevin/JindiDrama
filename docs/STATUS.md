@@ -1108,3 +1108,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 首页继续观看会逐项显示暂时核验失败的 CMS 剧目，优先使用当前目录标题，无法取名时显示本地 CMS 编号。重试只请求失败项，现有本地续看保持可用，确认下架的记录不会出现播放入口。键盘触发后如果重试按钮消失，焦点移到「查看更多」，空目录下确认下架时也保留该入口。[原版复现](../build/bin/qa-home-resume-retry/baseline.log) · [界面](../build/bin/qa-home-resume-retry/cms-home-retry.png)
 - 生产构建、Vitest 125 项、Chromium 首页与 Provider 播放 94 项、WebKit 首页 7 项通过。Apple Silicon Wails 隔离构建使用合成片源实际展示失败状态和原页重试，并从 Go 环回票据打开原 6000 ms 断点。正常退出后原收藏、历史和 SQLite 完整性均通过。[Chromium](../build/bin/qa-home-resume-retry/chromium.log) · [WebKit](../build/bin/qa-home-resume-retry/webkit.log) · [原生](../build/bin/qa-home-resume-retry/native.log)
 - 修改晚于 .60 本地打包。证据位于 JindiDrama 主工作区的 `build/bin/`，正式签名、最新跨平台成品和授权公网片源待验收。[BMad](../_bmad-output/plan-e01-cms-home-resume-retry.md)
+
+## E13 .60 成品原生恢复 v6 备份（2026-11-27）
+
+- .60 macOS 归档的 6 项 SHA-256 全部匹配，解包后的原始主程序通过字节核对和临时签名验证。在 Apple Silicon 使用隔离的 v10 资料目录启动，核对运行版本及架构。从原生设置打开系统文件选择器，取消及选择损坏备份均未改动现有收藏、历史、主题、启动页和搜索词。[归档清单](../build/bin/qa-restore-v6-60/archive.log) · [原程序](../build/bin/qa-restore-v6-60/identity.log) · [错误提示](../build/bin/qa-restore-v6-60/invalid-result.ax)
+- 选择留存的 v6 数据库后只恢复一项收藏和一条历史。恢复 7456 ms 旧记录并保留 14321 ms 和 9123 ms 的现有断点，收藏顺序、主题、启动页及搜索保持。重复恢复没有新增数据。重启显示三项收藏和三条历史，两个会话正常退出，SQLite 完整性及源备份 SHA-256 通过，源目录没有新增辅助文件。[恢复界面](../build/bin/qa-restore-v6-60/v6-result.ax) · [完整往返](../build/bin/qa-restore-v6-60/roundtrip.log) · [数据读回](../build/bin/qa-restore-v6-60/sqlite-readback.log)
+- App 与 SQLite 的恢复专项 Go 测试通过，恢复相关源码与 .60 打包提交匹配。本轮证据在本机 JindiDrama 主工作区的 `build/bin/`，仅覆盖 Apple Silicon 本地成品。[Go 回归](../build/bin/qa-restore-v6-60/go-restore.log) · [BMad](../_bmad-output/plan-e13-macos-v6-restore-60.md)
