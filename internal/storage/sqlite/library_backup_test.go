@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -267,4 +268,92 @@ func readTestLibraryBackup(t *testing.T, source string) (*LibraryState, error) {
 	}
 	defer root.Close()
 	return ReadLibraryBackup(source, root, "staged.db")
+}
+
+func TestHistoryBridgeRejectsUnrepresentableValues(t *testing.T) {
+	unsafeInteger := int64(9007199254740993)
+	const lossyPosition = int64(9007199254740962)
+	tests := []struct {
+		column string
+		value  int64
+		change func(*HistoryEntry)
+	}{
+		{"episode", unsafeInteger, func(h *HistoryEntry) { h.Episode = int(unsafeInteger) }},
+		{"position_ms", lossyPosition, func(h *HistoryEntry) { h.PositionMs = lossyPosition }},
+		{"duration_ms", unsafeInteger, func(h *HistoryEntry) { h.DurationMs = unsafeInteger }},
+		{"watched_at", 8640000000000001, func(h *HistoryEntry) { h.WatchedAt = 8640000000000001 }},
+	}
+	valid := HistoryEntry{DramaID: "current", Episode: 2, PositionMs: 1123, DurationMs: 3234, Percent: 35, WatchedAt: 2000}
+	for _, test := range tests {
+		t.Run(test.column, func(t *testing.T) {
+			if test.column == "episode" && strconv.IntSize < 64 {
+				t.Skip("episode overflows native int")
+			}
+			store, err := Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer store.Close()
+			// Seed through the normal API, then reproduce a backup made before
+			// this validation existed by editing its stored value directly.
+			if err := store.RecordHistory(valid); err != nil {
+				t.Fatal(err)
+			}
+			bad := valid
+			test.change(&bad)
+			if err := store.RecordHistory(bad); err == nil {
+				t.Error("accepted an unrepresentable value through the direct writer")
+			}
+			if err := store.SaveLibraryChanges(LibraryChanges{
+				Favorites: []string{"should-roll-back"}, History: []HistoryEntry{bad},
+				Receipt: &LibraryReceipt{Writer: "abcdef0123456789abcdef0123456789", Revision: 1},
+			}); err == nil {
+				t.Error("accepted an unrepresentable value through the batch writer")
+			}
+			if favorites, err := store.Favorites(); err != nil || len(favorites) != 0 {
+				t.Errorf("failed batch changed favorites: %v %v", favorites, err)
+			}
+			var receipts int
+			if err := store.db.QueryRow("SELECT COUNT(*) FROM library_receipts").Scan(&receipts); err != nil || receipts != 0 {
+				t.Errorf("failed batch left a receipt: %d %v", receipts, err)
+			}
+			if history, err := store.History(); err != nil || !slices.Equal(history, []HistoryEntry{valid}) {
+				t.Errorf("failed write changed history: %v %v", history, err)
+			}
+			if _, err := store.db.Exec("UPDATE history SET "+test.column+"=?", test.value); err != nil {
+				t.Fatal(err)
+			}
+			backup := filepath.Join(t.TempDir(), "legacy.db")
+			if err := store.Backup(backup); err != nil {
+				t.Fatal(err)
+			}
+			if result, err := readTestLibraryBackup(t, backup); result != nil || err == nil {
+				t.Errorf("accepted an unrepresentable value from backup: %+v %v", result, err)
+			}
+		})
+	}
+}
+
+func TestHistoryBridgePreservesRepresentableValues(t *testing.T) {
+	store, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	entry := HistoryEntry{
+		DramaID: "boundary", Episode: 7, EpisodeCountAtWatch: 7,
+		PositionMs: 9007199254740963, DurationMs: 9007199254740990,
+		Percent: 99, WatchedAt: 8640000000000000,
+	}
+	if err := store.RecordHistory(entry); err != nil {
+		t.Fatal(err)
+	}
+	backup := filepath.Join(t.TempDir(), "history.db")
+	if err := store.Backup(backup); err != nil {
+		t.Fatal(err)
+	}
+	result, err := readTestLibraryBackup(t, backup)
+	if err != nil || result == nil || !slices.Equal(result.History, []HistoryEntry{entry}) {
+		t.Fatalf("representable entry changed: %+v %v", result, err)
+	}
 }

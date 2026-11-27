@@ -492,8 +492,9 @@ function fromHistoryRow(row: HistoryRow): HistoryEntry {
 
 function sameHistoryRow(previous: HistoryRow | undefined, next: HistoryRow): boolean {
   return previous !== undefined && previous.episode === next.episode && previous.percent === next.percent
-    && previous.watchedAt === next.watchedAt && previous.positionMs === next.positionMs
-    && previous.durationMs === next.durationMs && previous.episodeCountAtWatch === next.episodeCountAtWatch
+    && previous.watchedAt === next.watchedAt && previous.episodeCountAtWatch === next.episodeCountAtWatch
+    && Math.round(previous.positionMs / 1000 * 1000) === next.positionMs
+    && Math.round(previous.durationMs / 1000 * 1000) === next.durationMs
 }
 
 function toHistoryRow(entry: HistoryEntry): HistoryRow {
@@ -503,6 +504,16 @@ function toHistoryRow(entry: HistoryEntry): HistoryRow {
     durationMs: Math.round((entry.durationSec ?? 0) * 1000),
     ...(entry.episodeCountAtWatch === undefined ? {} : { episodeCountAtWatch: entry.episodeCountAtWatch }),
   }
+}
+
+function isWritableHistoryRow(row: HistoryRow): boolean {
+  const validTime = (ms: number) => Number.isSafeInteger(ms) && ms >= 0 && Math.round(ms / 1000 * 1000) === ms
+  return row.dramaId.length > 0 && Number.isSafeInteger(row.episode) && row.episode >= 1
+    && Number.isSafeInteger(row.percent) && Number.isSafeInteger(row.watchedAt)
+    && row.watchedAt >= 0 && row.watchedAt <= 8640000000000000
+    && validTime(row.positionMs) && validTime(row.durationMs)
+    && (row.episodeCountAtWatch === undefined || row.episodeCountAtWatch === 0
+      || (Number.isSafeInteger(row.episodeCountAtWatch) && row.episodeCountAtWatch >= row.episode))
 }
 
 async function readDesktopLibrary(a: GoApp): Promise<LibraryState> {
@@ -548,7 +559,7 @@ function batchChanges(batch: LibraryBatch, database: LibraryState): LibraryChang
   if (batch.intent) {
     const intent = batch.intent
     return {
-      history: intent.updatedHistory.map(toHistoryRow),
+      history: intent.updatedHistory.map(toHistoryRow).filter(isWritableHistoryRow),
       removed: intent.removedHistory,
       addedFavorites: intent.addedFavorites,
       removedFavorites: intent.removedFavorites,
@@ -559,7 +570,7 @@ function batchChanges(batch: LibraryBatch, database: LibraryState): LibraryChang
   }
   const ids = new Set(batch.snapshot.history.map((row) => row.dramaId))
   const changes: LibraryChanges = {
-    history: batch.snapshot.history.map(toHistoryRow)
+    history: batch.snapshot.history.map(toHistoryRow).filter(isWritableHistoryRow)
       .filter((row) => !sameHistoryRow(persistedLibrary?.history.get(row.dramaId), row)),
     removed: database.history.filter((row) => !ids.has(row.dramaId)).map((row) => row.dramaId),
     ...acknowledgement,
@@ -759,6 +770,11 @@ export async function saveLibrary(
   // A queued SQLite acknowledgement can add records before the view renders
   // them. Only a change to the view the user edited can express deletion.
   const before = events?.before ?? previous
+  const intent = captureLibraryIntent(before, next)
+  if (!intent.updatedHistory.map(toHistoryRow).every(isWritableHistoryRow)) {
+    events?.onReconciled?.()
+    return 'unsaved'
+  }
   const stage = (batch: LibraryBatch) => rebaseLibraryWrites && previous && events?.before
     ? replayLibraryBatch(previous, batch) : next
   const batches = pendingBatches(previous)
@@ -772,7 +788,7 @@ export async function saveLibrary(
   }
 
   const receipt = nextLibraryReceipt()
-  const batch = { receipt, intent: captureLibraryIntent(before, next) }
+  const batch = { receipt, intent }
   const journal = [...batches, batch]
   const state = stage(batch)
   if (!persistedLibrary) {
@@ -838,9 +854,20 @@ function queueLibraryWrite(
         await writeRebasedLibrary(a, previous, receipt, events?.onReconciled)
         return 'saved'
       }
-      const next = { favorites: pendingFavorites, history: new Map(pendingRows.map((row) => [row.dramaId, row])) }
+      const next = { favorites: pendingFavorites, history: new Map<string, HistoryRow>() }
+      const changedHistory: HistoryRow[] = []
+      for (const row of pendingRows) {
+        const saved = previous.history.get(row.dramaId)
+        if (saved && sameHistoryRow(saved, row)) {
+          // Keep the original milliseconds for unchanged legacy rows.
+          next.history.set(row.dramaId, saved)
+        } else {
+          next.history.set(row.dramaId, row)
+          changedHistory.push(row)
+        }
+      }
       const changes: LibraryChanges = {
-        history: pendingRows.filter((row) => !sameHistoryRow(previous.history.get(row.dramaId), row)),
+        history: changedHistory,
         removed: [...previous.history.keys()].filter((id) => !next.history.has(id)),
         receipt,
       }

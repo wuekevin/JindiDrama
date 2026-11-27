@@ -838,3 +838,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 原版回归确认，恢复已关闭的 WAL 数据库会在源目录留下 `-wal` 和 `-shm`。现在先复制数据库及持久辅助文件，再由 SQLite 读取受保护的临时副本。文件复制和清理使用目录句柄。恢复需要额外的临时磁盘空间。[原版失败证据](../build/bin/qa-library-restore-input/before.log)
 - 当前及旧版备份、活动 WAL 已提交记录、备份损坏时保留当前收藏和历史、拒绝选中正在使用的数据库均通过回归。macOS 目录替换夹具确认替代目录未收到副本，原暂存目录完成清理。Go 全量、vet、App 和 SQLite 竞态及 Windows amd64 交叉编译通过。Windows 原生验收待运行，改动晚于 .52 打包。[专项](../build/bin/qa-library-restore-input/targeted.log) · [竞态](../build/bin/qa-library-restore-input/go-race.log) · [Windows 交叉编译](../build/bin/qa-library-restore-input/windows-crosscompile.log) · [BMad 记录](../_bmad-output/plan-e11-library-restore-input.md)
+
+## E11 观看历史桥接精度（2026-11-27）
+
+- 复现集数越过 JavaScript 安全整数边界、毫秒经秒数往返发生舍入、时间戳超出可显示日期。SQLite 在恢复和日常写入时共享校验，异常备份整次拒绝，直接批量写入失败时收藏、历史和回执一起回滚。有效旧备份、可精确往返的边界值和正常进度保留原值。[原版复现](../build/bin/qa-history-bridge-bounds/before.log) · [JavaScript 边界](../build/bin/qa-history-bridge-bounds/bridge-boundary.log)
+- 只改收藏时保留旧历史的原始毫秒。新增的异常历史在入队前拒绝。旧队列重放排除异常历史更新，继续处理有效的收藏、删除和进度。数据库中已存在的旧行沿用原有读取方式。[桥接原版复现](../build/bin/qa-history-bridge-bounds/before-bridge.log)
+- 前端类型检查、生产构建、125 项 Vitest 和收藏、历史、设置 91 项 Chromium 通过。Go 全量、vet、App 与 SQLite 竞态和 Windows amd64 SQLite 交叉编译通过。Windows 原生与成品验收待下一批，源码晚于 .52。[Vitest](../build/bin/qa-history-bridge-bounds/vitest.log) · [浏览器回归](../build/bin/qa-history-bridge-bounds/e2e.log) · [Go 竞态](../build/bin/qa-history-bridge-bounds/go-race.log) · [BMad 记录](../_bmad-output/plan-e11-history-bridge-bounds.md)

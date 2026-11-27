@@ -167,8 +167,7 @@ WHERE "schema"='main' AND type='table' AND name IN ('schema_migrations','favorit
 		return nil, err
 	}
 	for _, entry := range state.History {
-		if strings.TrimSpace(entry.DramaID) == "" || entry.Episode < 1 || entry.PositionMs < 0 ||
-			entry.DurationMs < 0 || entry.Percent < 0 || entry.Percent > 100 || entry.WatchedAt < 0 || !validHistoryEpisodeCount(entry) {
+		if strings.TrimSpace(entry.DramaID) == "" || entry.Percent < 0 || entry.Percent > 100 || !validHistoryNumbers(entry) {
 			return nil, errors.New("备份包含无效的观看历史")
 		}
 	}

@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -369,7 +370,7 @@ func recordHistory(db historyWriter, h HistoryEntry) error {
 }
 
 func writeHistory(db historyWriter, h HistoryEntry, preserveNewer bool) error {
-	if h.DramaID == "" || h.Episode < 1 || !validHistoryEpisodeCount(h) {
+	if h.DramaID == "" || !validHistoryNumbers(h) {
 		return errors.New("无效的历史记录")
 	}
 	if h.Percent < 0 {
@@ -389,8 +390,21 @@ WHERE NOT ? OR excluded.watched_at >= history.watched_at`,
 	return err
 }
 
-func validHistoryEpisodeCount(h HistoryEntry) bool {
-	return h.EpisodeCountAtWatch == 0 || (h.EpisodeCountAtWatch >= h.Episode && int64(h.EpisodeCountAtWatch) <= 1<<53-1)
+const (
+	maxHistorySafeInteger int64 = 1<<53 - 1
+	maxHistoryDateMs      int64 = 8_640_000_000_000_000
+)
+
+func validHistoryNumbers(h HistoryEntry) bool {
+	return h.Episode >= 1 && int64(h.Episode) <= maxHistorySafeInteger &&
+		(h.EpisodeCountAtWatch == 0 || (h.EpisodeCountAtWatch >= h.Episode && int64(h.EpisodeCountAtWatch) <= maxHistorySafeInteger)) &&
+		h.WatchedAt >= 0 && h.WatchedAt <= maxHistoryDateMs &&
+		validHistoryPlaybackMs(h.PositionMs) && validHistoryPlaybackMs(h.DurationMs)
+}
+
+func validHistoryPlaybackMs(ms int64) bool {
+	// The desktop bridge converts integer milliseconds to seconds and back.
+	return ms >= 0 && ms <= maxHistorySafeInteger && int64(math.Round(float64(ms)/1000*1000)) == ms
 }
 
 func (s *Store) RemoveHistory(ids []string) error {

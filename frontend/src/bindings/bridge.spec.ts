@@ -319,6 +319,54 @@ describe('wails bridge', () => {
     expect(JSON.parse(localStorage.getItem(LS.library)!)).toEqual({ history: [], favorites: ['d9'] })
   })
 
+  it('does not rewrite legacy playback milliseconds when only favorites change', async () => {
+    const row = { dramaId: 'd9', episode: 7, positionMs: 9007199254740962, durationMs: 0, percent: 9, watchedAt: 5 }
+    const SaveLibraryChanges = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('go', { app: { App: { ...fake, History: async () => [row], SaveLibraryChanges } } })
+    await prime()
+    const { history } = readLibraryCache()!
+    expect(Math.round(history[0].positionSec! * 1000)).not.toBe(row.positionMs)
+    expect(await saveLibrary(history, ['d9', 'd2'])).toBe('saved')
+    expect(SaveLibraryChanges).toHaveBeenNthCalledWith(1, expect.objectContaining({ history: [], favorites: ['d9', 'd2'] }))
+    const advanced = { ...history[0], positionSec: 2.345, watchedAt: 10 }
+    expect(await saveLibrary([advanced], ['d9', 'd2'])).toBe('saved')
+    expect(SaveLibraryChanges).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      history: [{ ...row, positionMs: 2345, watchedAt: 10 }],
+    }))
+  })
+
+  it('rejects invalid new history before queuing it', async () => {
+    const SaveLibraryChanges = vi.fn().mockResolvedValue(undefined)
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges } } })
+    await prime()
+    const { history, favorites } = readLibraryCache()!
+    const invalid = { ...history[0], watchedAt: 8640000000000001 }
+    expect(await saveLibrary([invalid], favorites)).toBe('unsaved')
+    expect(readLibraryCache()).toEqual({ history, favorites })
+    expect(SaveLibraryChanges).not.toHaveBeenCalled()
+    expect(await saveLibrary(history, ['d9', 'd2'])).toBe('saved')
+  })
+
+  it('recovers valid deletions, favorites and history alongside an invalid legacy update', async () => {
+    const invalid = { dramaId: 'd7', episode: 1, percent: 15, watchedAt: 8640000000000001 }
+    const valid = { dramaId: 'd8', episode: 2, percent: 20, watchedAt: 2000 }
+    const row = { ...valid, positionMs: 0, durationMs: 0 }
+    const favorites = ['d2', 'd9']
+    const SaveLibraryChanges = vi.fn().mockResolvedValue({ favorites, history: [row] })
+    const pending = {
+      pending: true, favorites, history: [invalid, valid],
+      intent: { addedFavorites: ['d2'], removedFavorites: [], favoriteOrder: favorites, updatedHistory: [invalid, valid], removedHistory: ['d9'] },
+    }
+    localStorage.setItem(LS.library, JSON.stringify(pending))
+    vi.stubGlobal('go', { app: { App: { ...fake, SaveLibraryChanges } } })
+    await prime()
+    expect(SaveLibraryChanges).toHaveBeenCalledWith(expect.objectContaining({
+      history: [row], addedFavorites: ['d2'], removed: ['d9'], readBack: true,
+    }))
+    expect(readLibraryCache()).toMatchObject({ favorites, history: [valid] })
+    expect(readLibraryCache()).not.toHaveProperty('pending')
+  })
+
   it('replays the local catalog count after a failed count-only write', async () => {
     const row = { dramaId: 'local-d9', episode: 1, positionMs: 1000, durationMs: 1000, percent: 100, watchedAt: 5 }
     const updated = { ...row, episodeCountAtWatch: 2 }
