@@ -1,7 +1,7 @@
 import { test, expect, controlsTabKey } from './fixtures'
 
-test('browser shares an actual detail and paused episode link', async ({ context, page }, testInfo) => {
-  await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+test('browser shares an actual detail and paused episode link', async ({ context, page, browserName }, testInfo) => {
+  await context.grantPermissions(browserName === 'webkit' ? ['clipboard-read'] : ['clipboard-read', 'clipboard-write'])
   await page.goto('/#/drama/d1')
   await page.getByTestId('share').click()
   const readClipboard = () => page.evaluate(() => navigator.clipboard.readText())

@@ -1,5 +1,5 @@
 import type { Page } from '@playwright/test'
-import { test, expect, deferPanelResize } from './fixtures'
+import { test, expect, controlsTabKey, deferPanelResize } from './fixtures'
 test.describe('08 观看历史', () => {
   test.beforeEach(async ({ page }) => {
     // The demo groups use relative timestamps. Anchor them away from midnight.
@@ -67,7 +67,7 @@ test.describe('08 观看历史', () => {
   for (const [w, h] of [[1366, 768], [1920, 1080], [2560, 1440]]) test(`responsive ${w}`, async ({ page }) => { await page.setViewportSize({ width: w, height: h }); await page.reload(); await page.waitForSelector('[data-testid=history-item]'); expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth + 1)).toBe(false); await page.screenshot({ path: `../design/rendered/responsive/08-${w}x${h}.png` }) })
 })
 
-test('an older checkbox starts batch deletion with keyboard confirmation', async ({ page }, testInfo) => {
+test('an older checkbox starts batch deletion with keyboard confirmation', async ({ page, browserName }, testInfo) => {
   await page.goto('/#/history')
   const olderCheckbox = page.getByTestId('group-earlier').getByRole('checkbox').first()
   const label = await olderCheckbox.getAttribute('aria-label')
@@ -90,9 +90,9 @@ test('an older checkbox starts batch deletion with keyboard confirmation', async
 
   await page.keyboard.press('Enter')
   await expect(dialog).toBeFocused()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(dialog.getByRole('button', { name: '取消' })).toBeFocused()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(dialog.getByRole('button', { name: '确认删除' })).toBeFocused()
   await page.keyboard.press('Enter')
   await expect(page.getByRole('heading', { name: '观看历史', exact: true })).toBeFocused()
@@ -643,7 +643,7 @@ test('terminal and locked bookmarks keep replay or selection available without o
   await expect(page.getByTestId('ep').first()).toBeVisible()
 })
 
-test('history keeps grid, list, filters and selection reachable at the saved 220% zoom', async ({ page }, testInfo) => {
+test('history keeps grid, list, filters and selection reachable at the saved 220% zoom', async ({ page, browserName }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 860 })
   await deferPanelResize(page, 'page-history')
   await page.addInitScript(() => {
@@ -685,7 +685,7 @@ test('history keeps grid, list, filters and selection reachable at the saved 220
   const first = items.first()
   const more = first.getByTestId('h-more')
   await more.press('Enter')
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   const deleteItem = first.getByTestId('h-delete')
   await expect(deleteItem).toBeFocused()
   await expect(deleteItem).toHaveCSS('color', 'rgb(246, 236, 233)')

@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures'
+import { test, expect, controlsTabKey } from './fixtures'
 import fs from 'node:fs'
 test.describe('02 搜索结果', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/search?q=%E6%9B%BF%E5%AB%81'); await page.waitForSelector('[data-testid=result-card]') })
@@ -169,7 +169,7 @@ test('global topbar keeps search and window controls usable at 150% zoom', async
     .toEqual(['min', 'max', 'close'])
 })
 
-test('compact topbar keeps all controls reachable at the saved 220% zoom', async ({ page }, testInfo) => {
+test('compact topbar keeps all controls reachable at the saved 220% zoom', async ({ page, browserName }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 860 })
   await page.addInitScript(() => {
     localStorage.setItem('jindi.settings.v1', JSON.stringify({ theme: 'light', dpi: 220 }))
@@ -206,9 +206,9 @@ test('compact topbar keeps all controls reachable at the saved 220% zoom', async
   expect(await discovery.evaluate((button) => parseFloat(getComputedStyle(button).outlineOffset))).toBeLessThan(0)
   await page.screenshot({ path: testInfo.outputPath('topbar-220-focus.png') })
   await topbar.getByTestId('tab-category').focus()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(input).toBeFocused()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(bell).toBeFocused()
   await bell.press('Enter')
   const notification = page.getByRole('dialog', { name: '更新通知' })
@@ -230,9 +230,9 @@ test('compact topbar keeps all controls reachable at the saved 220% zoom', async
   await expect(match).toHaveAttribute('aria-selected', 'true')
   await input.press('Enter')
   await expect(page).toHaveURL(/q=%E6%9B%BF%E5%AB%81%E6%96%B0%E5%A8%98/)
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(topbar.getByRole('button', { name: '清除' })).toBeFocused()
-  await page.keyboard.press('Tab')
+  await page.keyboard.press(controlsTabKey(browserName))
   await expect(bell).toBeFocused()
   await avatar.click()
   await expect(page).toHaveURL(/#\/login$/)
@@ -240,13 +240,13 @@ test('compact topbar keeps all controls reachable at the saved 220% zoom', async
   expect(await page.evaluate(() => (window as Window & { __jdCompactTopbarActions?: string[] }).__jdCompactTopbarActions))
     .toEqual(['min', 'max', 'close'])
 
-  await page.setViewportSize({ width: 1750, height: 860 })
-  await expect(topbar).toHaveClass(/compact/)
+  await page.setViewportSize({ width: 1757, height: 860 })
+  await expect(topbar).toHaveCSS('display', 'grid')
   const clear = topbar.getByRole('button', { name: '清除', exact: true })
   await expect(clear).toBeVisible()
   expect((await input.boundingBox())!.width).toBeGreaterThan(100)
-  await page.setViewportSize({ width: 1760, height: 860 })
-  await expect(topbar).not.toHaveClass(/compact/)
+  await page.setViewportSize({ width: 1758, height: 860 })
+  await expect(topbar).toHaveCSS('display', 'flex')
   await expect(clear).toBeVisible()
   expect((await input.boundingBox())!.width).toBeGreaterThan(100)
 })

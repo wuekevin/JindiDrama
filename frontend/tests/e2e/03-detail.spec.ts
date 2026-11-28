@@ -8,11 +8,15 @@ test.describe('03 短剧详情', () => {
   test('unreleased episode blocked with toast', async ({ page }) => { await page.getByTestId('ep').last().click(); await expect(page.getByTestId('toast')).toContainText('尚未更新'); await expect(page).toHaveURL(/#\/drama\/d1/) })
   test('favorite toggle', async ({ page }) => { const b = page.getByTestId('fav'); const t = await b.innerText(); await b.click(); expect(await b.innerText()).not.toBe(t) })
   test('expand summary', async ({ page }) => { const before = await page.getByTestId('summary').innerText(); await page.getByTestId('expand').click(); expect((await page.getByTestId('summary').innerText()).length).toBeGreaterThan(before.length) })
-  test('opens a cast member’s works and links to the corresponding details', async ({ page }) => {
+  test('opens a cast member’s works and links to the corresponding details', async ({ page, browserName }) => {
     const cast = page.getByRole('link', { name: '搜索 苏晚宁 的作品' })
     await expect(page.getByRole('heading', { name: '演示主演' })).toBeVisible()
-    const newTab = page.context().waitForEvent('page')
-    await cast.click({ button: 'middle' })
+    const newTab = page.context().waitForEvent('page', { timeout: 5000 })
+    if (browserName === 'webkit') {
+      await cast.click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] })
+    } else {
+      await cast.click({ button: 'middle' })
+    }
     const searchTab = await newTab
     await expect(searchTab.getByTestId('history-item').first()).toContainText('苏晚宁')
     await searchTab.close()

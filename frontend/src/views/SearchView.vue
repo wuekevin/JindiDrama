@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Search, Video, Cat, Bot, BookOpen, CircleCheck, RefreshCw, ChevronDown, Flame, Play, X, Clock } from 'lucide-vue-next'
 import type { CatalogGenre } from '@/bindings'
@@ -17,21 +17,7 @@ const catalog = useLicensedCatalog()
 const PAGE = 5
 const root = ref<HTMLElement>()
 const heading = ref<HTMLElement>()
-const layout = ref<'wide' | 'stacked' | 'compact'>('wide')
-let layoutObserver: ResizeObserver | undefined
-onMounted(() => {
-  if (!root.value) return
-  // Measure unscaled layout space consistently in Chromium and WKWebView.
-  layoutObserver = new ResizeObserver(([entry]) => {
-    const width = entry.contentRect.width
-    layout.value = width <= 620 ? 'compact' : width <= 950 ? 'stacked' : 'wide'
-  })
-  layoutObserver.observe(root.value)
-})
-onBeforeUnmount(() => {
-  token++
-  layoutObserver?.disconnect()
-})
+onBeforeUnmount(() => { token++ })
 const q = computed(() => String(route.query.q ?? ''))
 const castOnly = computed(() => route.query.cast === '1')
 const discovery = computed(() => searchDiscovery(route.query))
@@ -328,7 +314,7 @@ const go = (t: string) => {
 const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 </script>
 <template>
-  <div ref="root" class="search" :class="[layout, { discovery: discoveryTitle }]" data-testid="page-search">
+  <div ref="root" class="search" :class="{ discovery: discoveryTitle }" data-testid="page-search">
     <div class="main">
       <header class="head">
         <h1 ref="heading" :tabindex="cmsPagination ? -1 : undefined"><Search :size="38" :stroke-width="2.2" /><span class="heading-text"><template v-if="discoveryTitle">{{ discoveryTitle }}</template><template v-else-if="q"><em>“{{ q }}”</em>的搜索结果</template><template v-else>全部短剧</template></span></h1>
@@ -406,7 +392,7 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 .main { flex: 1; min-width: 0; }
 .head { padding-top: 38px; padding-left: 10px; h1 { display: flex; align-items: center; gap: 12px; font-size: 34px; font-weight: 700; svg { flex: none; } em { font-style: normal; color: var(--c-accent-2); } } .count { margin-top: 18px; font-size: 15px; color: var(--c-text-2); } }
 .heading-text { min-width: 0; overflow-wrap: anywhere; }
-.search.wide .heading-text em { margin-inline-end: 12px; }
+.heading-text em { margin-inline-end: 12px; }
 .filters { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 30px; padding-left: 0; }
 .discovery .list { margin-top: 18px; }
 .topic-filter { display: flex; align-items: center; gap: 12px; margin: 22px 0 16px 10px; }
@@ -441,13 +427,15 @@ const watchIt = (id: string) => router.push(playbackRoute(id, 1, true))
 .hot li { height: 41px; button { width: 100%; display: flex; align-items: center; gap: 12px; font-size: 15px; } span { flex: 1; text-align: left; &.top { color: var(--c-accent-2); } } em { font-style: normal; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--c-text-2); }
   b { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; font-size: 14px; flex: none; background: rgba(255,255,255,.08); &.n1 { background: linear-gradient(#ffc24a, #e8892a); } &.n2 { background: linear-gradient(#cfd3de, #8d93a6); } &.n3 { background: linear-gradient(#f0b27a, #b9743c); } } }
 
-.search:is(.stacked, .compact) {
-  flex-direction: column;
+// The search box uses 25px of inline padding inside the scroll container.
+@container app-content (max-width: 975px) {
+  .search { flex-direction: column; }
+  .heading-text em { margin-inline-end: 0; }
 
   .side { width: 100%; padding-top: 0; padding-bottom: 16px; }
   .sorts { flex-wrap: wrap; row-gap: 10px; }
 }
-.search.compact {
+@container app-content (max-width: 645px) {
   .item {
     display: grid;
     grid-template-columns: minmax(0, 120px) minmax(0, 1fr);

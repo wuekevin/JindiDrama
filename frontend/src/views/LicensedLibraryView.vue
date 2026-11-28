@@ -113,6 +113,7 @@ function openEpisode(index: number) {
 
 function retryEpisodeList() {
   if (loadingEpisodes.value || !episodeListError.value || closing.value || leaving) return
+  episodeRetryButton.value?.focus({ preventScroll: true })
   episodeListAttempt.value++
 }
 

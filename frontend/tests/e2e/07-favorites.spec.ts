@@ -1,4 +1,4 @@
-import { test, expect, deferPanelResize } from './fixtures'
+import { test, expect, controlsTabKey, deferPanelResize } from './fixtures'
 test.describe('07 我的收藏', () => {
   test.beforeEach(async ({ page }) => { await page.goto('/#/favorites'); await page.evaluate(() => localStorage.removeItem('jindi.library.v1')); await page.reload(); await page.waitForSelector('[data-testid=fav-card]') })
   test('screenshot + count', async ({ page }) => { await expect(page.getByTestId('fav-count')).toContainText('11'); await page.screenshot({ path: '../design/rendered/07-我的收藏.png' }) })
@@ -46,7 +46,7 @@ test('favorites chooses the correct layout at fractional initial widths', async 
 })
 
 for (const dpi of [150, 220]) {
-  test(`favorites keeps toolbar, cards and batch operations reachable at ${dpi}% zoom`, async ({ page }, testInfo) => {
+  test(`favorites keeps toolbar, cards and batch operations reachable at ${dpi}% zoom`, async ({ page, browserName }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 860 })
     await deferPanelResize(page, 'page-favorites')
     await page.addInitScript((dpi) => {
@@ -79,7 +79,7 @@ for (const dpi of [150, 220]) {
     const goToDetail = first.getByRole('button', { name: '查看详情' })
     await withinFavorites(goToDetail)
     await expect(goToDetail).toHaveCSS('color', 'rgb(246, 236, 233)')
-    await page.keyboard.press('Tab')
+    await page.keyboard.press(controlsTabKey(browserName))
     await expect(goToDetail).toBeFocused()
     await page.keyboard.press('Escape')
     await expect(more).toBeFocused()

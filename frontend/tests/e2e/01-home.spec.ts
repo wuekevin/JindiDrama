@@ -60,7 +60,7 @@ test.describe('01 首页推荐', () => {
     await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 150, theme: 'light' })))
     await page.reload()
     await expect(page.locator('html')).toHaveCSS('--user-zoom', '1.5')
-    await expect(settings).toBeInViewport({ ratio: 1 })
+    await expect(settings).toBeInViewport({ ratio: 0.99 })
     await sidebar.screenshot({ path: testInfo.outputPath('sidebar-150.png') })
     const scaledNav = (await nav.boundingBox())!
     const scaledDeco = (await decoration.boundingBox())!
@@ -69,7 +69,7 @@ test.describe('01 首页推荐', () => {
     await expect(settings).toHaveAttribute('aria-current', 'page')
   })
 
-  test('sidebar can scroll by keyboard and mouse with an older 220% setting', async ({ page }, testInfo) => {
+  test('sidebar can scroll by keyboard and mouse with an older 220% setting', async ({ page, browserName }, testInfo) => {
     await page.setViewportSize({ width: 1280, height: 860 })
     await page.evaluate(() => localStorage.setItem('jindi.settings.v1', JSON.stringify({ dpi: 220 })))
     await page.reload()
@@ -86,7 +86,7 @@ test.describe('01 首页推荐', () => {
     await expect(nav.getByRole('button', { name: '推荐' })).toBeInViewport({ ratio: 1 })
     await expect(settings).not.toBeInViewport()
     for (const name of ['推荐', '热门', '漫剧', '真人剧', 'AI剧', '排行榜', '收藏', '历史', '设置']) {
-      await page.keyboard.press('Tab')
+      await page.keyboard.press(controlsTabKey(browserName))
       await expect(nav.getByRole('button', { name, exact: true })).toBeFocused()
     }
     await expect.poll(scrollTop).toBeGreaterThan(0)

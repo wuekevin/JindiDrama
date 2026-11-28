@@ -1243,3 +1243,11 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - Chromium 全量 409 项、Vitest 125 项、WebKit 分类及设置专项 8 项、Go 全量与 vet、App/CMS/更新竞态、Python 公证与冒烟 19 项、Node 交付 18 项通过。Go 生产源码及三种成品架构与 npm 依赖扫描均未报告已知漏洞。
 - WebKit 完整回归使用与 .64 成品一致的前端，最终 398 项通过、10 项失败、1 项重试后通过。其中 9 项在隔离目录按 WebKit 的缩放精度、按键、标签页及剪贴板操作调整脚本后通过。第 10 项改用键盘触发片库分集重试后也通过，鼠标路径的焦点恢复仍待核实。授权片库搜索进入播放的用例重试一次通过，但独立复跑再次捕获到 `ResizeObserver` 循环警告，警告根因待定位。完整 WebKit 验收仍待关闭。主工作区的测试日志位于 `build/bin/qa-release-source-64/`。
 - Windows 测试包未签名，macOS 使用独立应用标识和临时签名。GitHub 最近托管候选仍为 .52，仓库未配置自托管 runner，签名环境、仓库级 Actions secrets 和 Release 当前均为 0。Windows 与 Intel Mac 最新原生验收、正式签名公证、签名版在线升级及授权公网联调待完成。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [BMad](../_bmad-output/plan-e13-local-candidate64-packages.md)
+
+## E02/E03 WebKit 搜索布局及授权片库重试（2026-11-28）
+
+- 顶部栏与搜索页使用 CSS 容器查询切换原有布局档位，保留顶部栏在分数宽度下的旧取整规则。旧前端 16 次搜索复现出现 2 次 WebKit 布局循环警告，以测试注入停用相关观察器作诊断时通过 35 次。最终成品前端保持原页面错误断言，授权片库真实媒体搜索用例连续通过 34 次。150% 和 220% 搜索页 WebKit 截图与 .64 对应截图字节一致。
+- 鼠标点分集重试时聚焦当前按钮，成功后焦点移到分集区域，等待期间用户已移动焦点时保留新焦点。原鼠标竞态用例及新增的焦点保留用例均纳入两端全量回归。侧栏缩放、键盘、演员新标签页与系统剪贴板用例使用各浏览器真实支持的操作。
+- 同一生产构建的 69 个文件摘要在两套环境逐项一致。Chromium 410 项通过。WebKit 410 项通过，其中 1 项重试通过。前端类型检查、Vitest 125 项、Go 全量测试与 vet 通过。
+- Windows x64 生产目标交叉编译通过。Apple Silicon 独立测试归档通过启动、正常退出、SQLite 完整性及回滚。双平台打包记录仍为 .64，当前源码的 Windows、Intel Mac 和 GitHub 托管验收待完成。
+- WebKit 暂停后连续两次快进至片尾仍有时序问题。全量用例首次失败后重试通过，独立复跑 8 次中有 2 次停在 22 秒。此问题继续保留为上线验收项。 主工作区的验收日志位于 `build/bin/qa-webkit-regression/`。[BMad](../_bmad-output/plan-e03-webkit-search-and-licensed-regression.md)

@@ -953,6 +953,37 @@ test('re-enables licensed episode retry after the desktop cancels closing', asyn
   await expect(page.getByRole('alert')).toHaveCount(0)
 })
 
+test('keeps the user’s new focus when a mouse episode retry finishes', async ({ page }) => {
+  await page.addInitScript((entry) => {
+    let finish: (() => void) | undefined
+    let calls = 0
+    Object.assign(window, {
+      go: { app: { App: {
+        StorageReady: async () => false,
+        LicensedCatalog: async () => [entry],
+        Episodes: async () => {
+          if (++calls === 1) throw new Error('temporary episode list failure')
+          await new Promise<void>((resolve) => { finish = resolve })
+          return [{ id: entry.id + '-1', dramaId: entry.id, index: 1, available: true }]
+        },
+      } } },
+      finishEpisodeRetry: () => finish?.(),
+    })
+  }, drama)
+  await page.goto(`/#/licensed?id=${drama.id}`)
+  const retry = page.getByRole('button', { name: '重试读取分集' })
+  await retry.click()
+  await expect(retry).toBeFocused()
+  await expect(retry).toHaveAttribute('aria-disabled', 'true')
+  const search = page.getByRole('searchbox', { name: '搜索本地片库' })
+  await search.click()
+  await expect(search).toBeFocused()
+  await page.evaluate(() => (window as typeof window & { finishEpisodeRetry(): void }).finishEpisodeRetry())
+  await expect(page.getByRole('button', { name: '第 1 集' })).toBeVisible()
+  await expect(retry).toHaveCount(0)
+  await expect(search).toBeFocused()
+})
+
 test('ignores a failed episode retry after switching licensed dramas', async ({ page }) => {
   const other = { ...drama, id: 'local-other-licensed', title: '独立片库短剧' }
   await page.addInitScript(({ first, other }) => {
