@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"jindi-drama/internal/cache"
 	"jindi-drama/internal/observability"
@@ -29,10 +30,11 @@ type App struct {
 	catalogCovers      *catalogCoverService
 
 	appleCMSConfigMu        sync.Mutex
+	appleCMSProbeCooldown   map[string]time.Time
 	appleCMSManaged         bool
 	appleCMSStartupURL      string
 	appleCMSStartupErr      error
-	appleCMSSettingsChanged atomic.Bool
+	appleCMSSettingsChanged bool
 
 	p                 provider.VideoProvider
 	licensed          *licensed.DemoProvider

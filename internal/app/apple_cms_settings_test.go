@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"jindi-drama/internal/provider/applecms"
 )
 
 func appleCMSSettingsFixture(t *testing.T) *http.Client {
@@ -71,7 +72,7 @@ func TestAppleCMSSettingsPersistUntilStartup(t *testing.T) {
 	if config := a.AppleCMSConfiguration(); config != (AppleCMSConfiguration{CanConfigure: true}) || a.ProviderName() != "mock" {
 		t.Fatalf("initial config: %+v, provider=%s", config, a.ProviderName())
 	}
-	if _, err := checkAppleCMSConnection(context.Background(), "https://empty.example.test/fixture", client); err != nil {
+	if err := a.testAppleCMSConnection("https://empty.example.test/fixture", client); err != nil {
 		t.Fatalf("valid empty catalog: %v", err)
 	}
 	if config := a.AppleCMSConfiguration(); config.SavedURL != "" {
@@ -142,7 +143,7 @@ func TestAppleCMSSettingsRejectFailuresWithoutReplacingSavedURL(t *testing.T) {
 		{"https://unavailable.example.test", errAppleCMSConnection},
 	} {
 		t.Run(tc.url, func(t *testing.T) {
-			if _, err := checkAppleCMSConnection(context.Background(), tc.url, client); err != tc.want {
+			if err := a.testAppleCMSConnection(tc.url, client); err != tc.want {
 				t.Errorf("test error = %v, want %v", err, tc.want)
 			}
 			if _, err := a.saveAppleCMSURL(tc.url, client); err != tc.want {
@@ -170,6 +171,139 @@ func TestAppleCMSSettingsRejectFailuresWithoutReplacingSavedURL(t *testing.T) {
 	t.Cleanup(reopened.close)
 	if got := reopened.AppleCMSConfiguration(); got.SavedURL != before.SavedURL || !got.Active {
 		t.Fatalf("failed database write replaced persisted endpoint: %+v", got)
+	}
+}
+
+func TestAppleCMSSettingsRespectEndpointCooldown(t *testing.T) {
+	t.Setenv("JINDIDRAMA_DATA_DIR", t.TempDir())
+	client := appleCMSSettingsFixture(t)
+	normalTransport := client.Transport
+	limitedCalls := 0
+	rateLimited := true
+	client.Transport = catalogRoundTripper(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Hostname() != "limited.example.test" {
+			return normalTransport.RoundTrip(req)
+		}
+		limitedCalls++
+		if !rateLimited {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader("{\"code\":1,\"page\":1,\"list\":[]}")),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": {"60"}},
+			Body:       io.NopCloser(strings.NewReader("private response")),
+		}, nil
+	})
+	a := New()
+	if err := prepareAppleCMS(a, "", client); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+	before, err := a.saveAppleCMSURL("https://catalog.example.test", client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const limited = "https://limited.example.test/api.php/provide/vod/"
+	first := a.testAppleCMSConnection(limited, client)
+	_, second := a.saveAppleCMSURL("  https://LIMITED.Example.Test.:443/  ", client)
+	if err := a.testAppleCMSConnection("https://empty.example.test/fixture", client); err != nil {
+		t.Fatal("another source was throttled:", err)
+	}
+	third := a.testAppleCMSConnection(limited, client)
+	if limitedCalls != 1 || first != applecms.ErrRateLimited || second != applecms.ErrRateLimited || third != applecms.ErrRateLimited {
+		t.Fatalf("same source: requests=%d, test=%v, save=%v, retest=%v", limitedCalls, first, second, third)
+	}
+	if after := a.AppleCMSConfiguration(); after != before {
+		t.Errorf("rate limited save replaced existing source: %+v", after)
+	}
+	cleared, err := a.ClearAppleCMSURL()
+	if err != nil || cleared.SavedURL != "" || cleared.RestartRequired {
+		t.Fatalf("clear during cooldown: %+v, %v", cleared, err)
+	}
+	if err := a.testAppleCMSConnection(limited, client); err != applecms.ErrRateLimited || limitedCalls != 1 {
+		t.Fatalf("clear discarded the cooldown: %v, requests=%d", err, limitedCalls)
+	}
+	if deadline := a.appleCMSProbeCooldown[limited]; !deadline.After(time.Now()) {
+		t.Fatal("missing Retry-After deadline")
+	}
+	a.appleCMSProbeCooldown[limited] = time.Now().Add(-time.Second)
+	rateLimited = false
+	config, err := a.saveAppleCMSURL(limited, client)
+	if err != nil || config.SavedURL != limited || !config.RestartRequired || limitedCalls != 2 {
+		t.Fatalf("save after expiry: %+v, err=%v, requests=%d", config, err, limitedCalls)
+	}
+	a.close()
+
+	reopened := New()
+	if err := prepareAppleCMS(reopened, "", client); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(reopened.close)
+	rateLimited = true
+	if err := reopened.testAppleCMSConnection(limited, client); err != applecms.ErrRateLimited {
+		t.Fatalf("active source test: %v", err)
+	}
+	if _, err := reopened.CatalogPage("", 1); err != applecms.ErrRateLimited {
+		t.Fatalf("active catalog ignored the settings probe cooldown: %v", err)
+	}
+	if _, err := reopened.saveAppleCMSURL(limited, client); err != applecms.ErrRateLimited || limitedCalls != 3 {
+		t.Fatalf("active source save: %v, requests=%d", err, limitedCalls)
+	}
+	if after := reopened.AppleCMSConfiguration(); after.SavedURL != limited || !after.Active || after.RestartRequired {
+		t.Fatalf("rate limit changed the active configuration: %+v", after)
+	}
+	reopened.close()
+
+	fromCatalog := New()
+	if err := prepareAppleCMS(fromCatalog, "", client); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(fromCatalog.close)
+	if _, err := fromCatalog.CatalogPage("", 1); err != applecms.ErrRateLimited {
+		t.Fatalf("active catalog did not report 429: %v", err)
+	}
+	if err := fromCatalog.testAppleCMSConnection(limited, client); err != applecms.ErrRateLimited || limitedCalls != 4 {
+		t.Fatalf("settings ignored the active catalog cooldown: %v, requests=%d", err, limitedCalls)
+	}
+	if _, err := fromCatalog.saveAppleCMSURL(limited, client); err != applecms.ErrRateLimited || limitedCalls != 4 {
+		t.Fatalf("save ignored the active catalog cooldown: %v, requests=%d", err, limitedCalls)
+	}
+}
+
+func TestAppleCMSSettingsRetainCooldownsUntilExpiry(t *testing.T) {
+	t.Setenv("JINDIDRAMA_DATA_DIR", t.TempDir())
+	client := newAppleCMSClient()
+	calls := 0
+	client.Transport = catalogRoundTripper(func(*http.Request) (*http.Response, error) {
+		calls++
+		return &http.Response{
+			StatusCode: http.StatusTooManyRequests,
+			Header:     http.Header{"Retry-After": {"60"}},
+			Body:       http.NoBody,
+		}, nil
+	})
+	a := New()
+	if err := prepareAppleCMS(a, "", client); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(a.close)
+
+	const endpoint = "https://limited.example.test/catalog/"
+	for i := range 34 {
+		if err := a.testAppleCMSConnection(endpoint+strconv.Itoa(i), client); err != applecms.ErrRateLimited {
+			t.Fatalf("test endpoint %d: %v", i, err)
+		}
+	}
+	for i := range 34 {
+		if _, err := a.saveAppleCMSURL(endpoint+strconv.Itoa(i), client); err != applecms.ErrRateLimited {
+			t.Fatalf("save endpoint %d: %v", i, err)
+		}
+	}
+	if calls != 34 {
+		t.Fatalf("a live cooldown was discarded: got %d calls for 34 endpoints", calls)
 	}
 }
 

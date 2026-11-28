@@ -494,9 +494,14 @@ func retryWait(value string, now time.Time) time.Duration {
 }
 
 func (p *Provider) coolingDown() bool {
+	return p.CooldownUntil().After(time.Now())
+}
+
+// CooldownUntil is the end of the current catalog Retry-After window.
+func (p *Provider) CooldownUntil() time.Time {
 	p.retryMu.Lock()
 	defer p.retryMu.Unlock()
-	return time.Now().Before(p.retryAt)
+	return p.retryAt
 }
 
 func (p *Provider) extendCooldown(until time.Time) {

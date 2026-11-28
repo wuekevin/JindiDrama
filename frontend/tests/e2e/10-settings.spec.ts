@@ -96,6 +96,55 @@ test('desktop Apple CMS settings test, preserve failed edits, and defer activati
   await expect(cleared).toHaveCount(0)
 })
 
+test('Apple CMS settings report rate limits and a missing connection check', async ({ page }, testInfo) => {
+  const saved = 'https://catalog.example.test/api.php/provide/vod/'
+  const candidate = 'https://limited.example.test/api.php/provide/vod/'
+  const rateLimited = '苹果 CMS 请求过于频繁，请稍后重试'
+  await page.addInitScript(({ saved, candidate, rateLimited }) => {
+    const configuration = { active: true, savedURL: saved, managed: false, canConfigure: true, restartRequired: false }
+    const app = {
+      StorageReady: async () => false,
+      AppVersion: async () => 'v0.1.0',
+      AppleCMSConfiguration: async () => configuration,
+      TestAppleCMSConnection: async (url: string) => {
+        if (url === candidate) throw rateLimited
+      },
+      SaveAppleCMSURL: async () => { throw new Error(rateLimited) },
+      ClearAppleCMSURL: async () => configuration,
+    }
+    Object.assign(window, { go: { app: { App: app } } })
+  }, { saved, candidate, rateLimited })
+  await page.goto('/#/settings')
+  await page.getByTestId('snav-playback').click()
+  const section = page.getByRole('region', { name: '苹果 CMS 片源' })
+  const address = section.getByRole('textbox', { name: '片源地址' })
+  const testConnection = section.getByRole('button', { name: '测试连接' })
+  const alert = section.getByRole('alert')
+  await expect(address).toHaveValue(saved)
+  await address.fill(candidate)
+  await testConnection.click()
+  await expect(alert).toBeVisible()
+  await section.screenshot({ path: testInfo.outputPath('cms-settings-rate-limit.png') })
+  await expect(alert).toHaveText(rateLimited + '。')
+  await expect(address).toHaveAttribute('aria-invalid', 'false')
+  await section.getByRole('button', { name: '保存片源' }).click()
+  await expect(alert).toHaveText(rateLimited + '。')
+  await expect(section.getByText(saved, { exact: true })).toBeVisible()
+  await expect(address).toHaveValue(candidate)
+  await expect(section).not.toContainText('片源已保存，完全退出')
+
+  await address.fill(saved)
+  await testConnection.click()
+  await expect(section).toContainText('连接成功，已读取片源目录。')
+  await page.evaluate(() => {
+    const desktop = window as unknown as { go: { app: { App: { TestAppleCMSConnection?: unknown } } } }
+    delete desktop.go.app.App.TestAppleCMSConnection
+  })
+  await testConnection.click()
+  await expect(alert).toHaveText('无法测试片源连接。')
+  await expect(section).not.toContainText('连接成功，已读取片源目录。')
+})
+
 for (const mode of ['preview', 'legacy bridge', 'managed'] as const) {
   test(`Apple CMS settings show only supported controls in ${mode}`, async ({ page }, testInfo) => {
     const network: string[] = []

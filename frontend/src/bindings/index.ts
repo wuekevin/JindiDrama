@@ -160,7 +160,11 @@ export async function readAppleCMSConfiguration() {
   await appleCMSWrite
   return api()?.AppleCMSConfiguration?.()
 }
-export const testAppleCMSConnection = (url: string) => api()?.TestAppleCMSConnection?.(url)
+export async function testAppleCMSConnection(url: string) {
+  const app = api()
+  if (typeof app?.TestAppleCMSConnection !== 'function') throw new Error('无法测试片源连接')
+  return app.TestAppleCMSConnection(url)
+}
 export const saveAppleCMSURL = (url: string) => queueAppleCMSWrite(() => api()?.SaveAppleCMSURL?.(url))
 export const clearAppleCMSURL = () => queueAppleCMSWrite(() => api()?.ClearAppleCMSURL?.())
 

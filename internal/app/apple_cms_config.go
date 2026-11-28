@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -146,6 +145,8 @@ func (a *App) savedAppleCMSURL() (string, error) {
 
 func (a *App) AppleCMSConfiguration() AppleCMSConfiguration {
 	a.awaitStartup()
+	a.appleCMSConfigMu.Lock()
+	defer a.appleCMSConfigMu.Unlock()
 	return a.appleCMSConfiguration()
 }
 
@@ -173,7 +174,7 @@ func (a *App) appleCMSConfiguration() AppleCMSConfiguration {
 	}
 	config.SavedURL = saved
 	config.RestartRequired = saved != a.appleCMSStartupURL
-	if !active && saved != "" && a.appleCMSStartupErr != nil && !a.appleCMSSettingsChanged.Load() {
+	if !active && saved != "" && a.appleCMSStartupErr != nil && !a.appleCMSSettingsChanged {
 		config.ReadError = a.appleCMSStartupErr.Error()
 	}
 	return config
@@ -181,23 +182,60 @@ func (a *App) appleCMSConfiguration() AppleCMSConfiguration {
 
 func (a *App) TestAppleCMSConnection(raw string) error {
 	a.awaitStartup()
+	return a.testAppleCMSConnection(raw, newAppleCMSClient())
+}
+
+func (a *App) testAppleCMSConnection(raw string, client *http.Client) error {
+	a.appleCMSConfigMu.Lock()
+	defer a.appleCMSConfigMu.Unlock()
 	if err := a.appleCMSConfigAvailable(); err != nil {
 		return err
 	}
-	_, err := checkAppleCMSConnection(a.context(), raw, newAppleCMSClient())
+	_, err := a.checkAppleCMSConnection(raw, client)
 	return err
 }
 
-func checkAppleCMSConnection(ctx context.Context, raw string, client *http.Client) (string, error) {
+// checkAppleCMSConnection uses appleCMSConfigMu to share probe state with Save.
+func (a *App) checkAppleCMSConnection(raw string, client *http.Client) (string, error) {
 	defer client.CloseIdleConnections()
 	u, err := parseAppleCMSUserURL(raw)
 	if err != nil {
 		return "", err
 	}
-	if _, err := newAppleCMSProvider(*u, client).CatalogPage(ctx, "", 1); err != nil {
+	address := u.String()
+	now := time.Now()
+	for key, deadline := range a.appleCMSProbeCooldown {
+		if !deadline.After(now) {
+			delete(a.appleCMSProbeCooldown, key)
+		}
+	}
+	if _, limited := a.appleCMSProbeCooldown[address]; limited {
+		return "", applecms.ErrRateLimited
+	}
+	cms, active := a.p.(*applecms.Provider)
+	useActive := active && address == a.appleCMSStartupURL
+	if !useActive {
+		cms = newAppleCMSProvider(*u, client)
+	}
+	if _, err := cms.CatalogPage(a.context(), "", 1); errors.Is(err, applecms.ErrRateLimited) {
+		if !useActive {
+			a.rememberAppleCMSCooldown(address, cms.CooldownUntil())
+		}
+		return "", applecms.ErrRateLimited
+	} else if err != nil {
 		return "", errAppleCMSConnection
 	}
-	return u.String(), nil
+	return address, nil
+}
+
+func (a *App) rememberAppleCMSCooldown(address string, deadline time.Time) {
+	if !deadline.After(time.Now()) {
+		return
+	}
+	if a.appleCMSProbeCooldown == nil {
+		a.appleCMSProbeCooldown = make(map[string]time.Time)
+	}
+	a.appleCMSProbeCooldown[address] = deadline
 }
 
 func (a *App) SaveAppleCMSURL(raw string) (AppleCMSConfiguration, error) {
@@ -211,7 +249,7 @@ func (a *App) saveAppleCMSURL(raw string, client *http.Client) (AppleCMSConfigur
 	if err := a.appleCMSConfigAvailable(); err != nil {
 		return AppleCMSConfiguration{}, err
 	}
-	address, err := checkAppleCMSConnection(a.context(), raw, client)
+	address, err := a.checkAppleCMSConnection(raw, client)
 	if err != nil {
 		return AppleCMSConfiguration{}, err
 	}
@@ -243,7 +281,7 @@ func (a *App) writeAppleCMSURL(address string) (AppleCMSConfiguration, error) {
 	if err := a.store.SetSetting(appleCMSURLKey, string(value)); err != nil {
 		return AppleCMSConfiguration{}, errAppleCMSWrite
 	}
-	a.appleCMSSettingsChanged.Store(true)
+	a.appleCMSSettingsChanged = true
 	return a.appleCMSConfiguration(), nil
 }
 

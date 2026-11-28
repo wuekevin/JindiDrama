@@ -1228,3 +1228,9 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 
 - 分类列表、首次结果及分页会显示「苹果 CMS 请求过于频繁，请稍后重试」。第 2 页遇限流时保留已加载的第 1 页，重试仍请求第 2 页和同一分类。无法读取分类列表时保留原选择，显示「所选分类暂未加载」。全部分类遇普通分页错误时保留上一页和通用提示，播放页复用同一限流识别。
 - 前端类型检查与构建、Vitest 125 项、Chromium 目录 20 项和播放限流 1 项、WebKit 分类与播放 3 项通过。Apple Silicon 隔离原生构建中的 Go 限流实际阻止冷却期重试触达本地合成源，随后列表和第 2 页均恢复。退出后的 SQLite 完整性为 ok。本次修改晚于 .63，最新跨平台成品和真实授权公网联调待验收。测试证据位于主工作区 `build/bin/qa-cms-genre-rate-message/`。[BMad](../_bmad-output/plan-e12-cms-genre-rate-message.md)
+
+## E12 苹果 CMS 设置测试与保存共享限流状态（2026-11-28）
+
+- 测试连接和保存共用规范化片源地址的 Retry-After 冷却。其他地址可单独验证，当前已启用的片源沿用目录请求的冷却。限流时显示「苹果 CMS 请求过于频繁，请稍后重试」，保留输入和已保存地址。桌面测试绑定缺失时显示失败。
+- 受控 Go 测试复现原版同地址发出两次请求。Go 全量与 vet、App/Provider 竞态、Windows amd64 测试交叉编译、前端类型检查与构建、Vitest 125 项、Chromium 设置 46 项、WebKit 设置 5 项通过。
+- Apple Silicon 实际桌面桥使用合成 CMS 传输，测试返回 429 后立刻保存没有再次访问该源。冷却后保存成功，SQLite 回读为规范化后的新地址，正常退出和完整性通过。本次源码晚于 .63，最新跨平台成品和实网授权片源待验收。测试证据位于主工作区 `build/bin/qa-cms-settings-cooldown/`。[BMad](../_bmad-output/plan-e12-cms-settings-cooldown.md)

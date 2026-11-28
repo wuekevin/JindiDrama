@@ -5,6 +5,7 @@ import {
   clearAppleCMSURL, readAppleCMSConfiguration, saveAppleCMSURL, testAppleCMSConnection,
   type AppleCMSConfiguration,
 } from '@/bindings'
+import { CMS_RATE_LIMIT_MESSAGE, isCMSRateLimited } from '@/mocks/provider'
 
 const config = ref<AppleCMSConfiguration>()
 const address = ref('')
@@ -62,6 +63,7 @@ async function change(operation: 'test' | 'save' | 'clear') {
     const message = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : ''
     addressError.value = message === invalidAddress
     if (addressError.value || message === connectionError) error.value = message + '。'
+    else if (isCMSRateLimited(cause)) error.value = CMS_RATE_LIMIT_MESSAGE + '。'
     else if (operation === 'test') error.value = '无法测试片源连接。'
     else if (operation === 'save') error.value = '无法保存苹果 CMS 片源设置。'
     else error.value = '无法清除苹果 CMS 片源设置。'
