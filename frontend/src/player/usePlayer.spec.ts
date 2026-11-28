@@ -3,6 +3,7 @@ import { mount } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { defineComponent, h, ref } from 'vue'
 import { useSettingsStore } from '@/stores/player'
+import { useLibraryStore } from '@/stores/library'
 import { normalizeDemoQuality } from './demoMedia'
 import { backoffMs, demoSources, resolveMediaMode, usePlayer, MAX_AUTO_RETRY } from './usePlayer'
 afterEach(() => { delete (window as any).__JD_MEDIA })
@@ -108,3 +109,72 @@ it.each([
     else localStorage.setItem(key, previous)
   }
 })
+
+it.each(['accepted', 'rejected asynchronously', 'rejected synchronously'] as const)(
+  'retains the latest manual skip in the bookmark when it is %s', async (result) => {
+    vi.useFakeTimers()
+    const pinia = createPinia()
+    const record = vi.spyOn(useLibraryStore(pinia), 'record').mockImplementation(() => {})
+    const media = document.createElement('video')
+    vi.spyOn(media, 'load').mockImplementation(() => {})
+    vi.spyOn(media, 'pause').mockImplementation(() => {})
+    let current = 0
+    let seeking = false
+    const requested: number[] = []
+    Object.defineProperties(media, {
+      currentTime: {
+        get: () => current,
+        set: (target: number) => {
+          requested.push(target)
+          seeking = result !== 'rejected synchronously' || target < 23
+        },
+      },
+      seeking: { get: () => seeking },
+      duration: { value: 24.0135 },
+      seekable: { value: { length: 1 } },
+    })
+    let player!: ReturnType<typeof usePlayer>
+    const wrapper = mount(defineComponent({
+      setup() {
+        player = usePlayer(ref('d2'), ref(80), { mode: 'demo', autoplay: false })
+        player.video.value = media
+        return () => h('div')
+      },
+    }), { global: { plugins: [pinia] } })
+    try {
+      player.load(12)
+      await vi.advanceTimersByTimeAsync(260)
+      player.onMeta()
+      const settle = (position: number) => {
+        current = position
+        seeking = false
+        player.onTime()
+        player.onSeeked()
+      }
+      settle(12)
+      player.seekBy(10)
+      player.seekBy(10)
+      expect(requested).toEqual([12, 22])
+      const end = media.duration - 0.04
+      expect(player.time.value).toBe(end)
+      settle(22)
+      if (result !== 'rejected synchronously') {
+        expect(requested).toEqual([12, 22, end])
+        settle(22)
+        expect(requested).toEqual([12, 22, end, end])
+        settle(result === 'accepted' ? end : 22)
+      }
+      expect(requested).toEqual([12, 22, end, end])
+      expect(media.currentTime).toBe(result === 'accepted' ? end : 22)
+      expect(end).toBeGreaterThan(media.duration - 0.05)
+      expect(end).toBeLessThan(23.999)
+      expect(player.state.value).toBe('paused')
+      window.dispatchEvent(new Event('pagehide'))
+      expect(record).toHaveBeenCalledWith('d2', 80, 99, end, media.duration)
+    } finally {
+      wrapper.unmount()
+      record.mockRestore()
+      vi.useRealTimers()
+    }
+  },
+)

@@ -17,6 +17,8 @@ export function resolveMediaMode(setting: string): MediaMode {
 }
 
 type StartPoint = { sec?: number; frac?: number }
+// Bundled WebM audio can extend the reported duration past the last video frame.
+const DEMO_END_SEEK_MARGIN = 0.04
 
 export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { startOverride?: () => string | undefined; startPoint?: (dramaId: string, episode: number) => StartPoint; autoplay: boolean | (() => boolean); mode: MediaMode; failEpisode?: (ep: number) => string | null; onFinish?: () => void }) {
   const settings = useSettingsStore(); const lib = useLibraryStore()
@@ -31,6 +33,8 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
   let savedPositionMs = 0
   let savedCompletion = false
   let manualSeek = false
+  let mediaSeek: { target: number; attempts: number } | undefined
+  let failedSeekBookmark: number | undefined
   const send = (e: PEvent) => { state.value = transition(state.value, e) }
   const isDemo = opts.mode === 'demo'
   const desktop = hasBridge()
@@ -49,6 +53,8 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     savedCompletion = false
     restoringPosition = false
     manualSeek = false
+    mediaSeek = undefined
+    failedSeekBookmark = undefined
     mediaLoadStarted = false
     if (isDemo) video.value?.pause()
     if (desktop && isDemo) desktopSources.value = []
@@ -95,7 +101,7 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     // WebKit can report metadata before the first seekable range is available.
     if (t > 0 && !v.seekable.length && v.readyState < HTMLMediaElement.HAVE_FUTURE_DATA) return
     if (t > 0 && duration.value > 0 && v.seekable.length) {
-      v.currentTime = Math.min(t, Math.max(0, duration.value - 0.05))
+      v.currentTime = Math.min(t, Math.max(0, duration.value - DEMO_END_SEEK_MARGIN))
       restoringPosition = v.seeking
     }
     time.value = v.currentTime
@@ -112,10 +118,28 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
   function onTime() {
     const media = video.value
     if (!media || !canSave()) return
-    time.value = media.currentTime
+    if (!mediaSeek) time.value = media.currentTime
     if (media.duration && duration.value !== media.duration) duration.value = media.duration
   }
+  function submitMediaSeek(media: HTMLVideoElement) {
+    if (!mediaSeek || media.seeking) return
+    mediaSeek.attempts++
+    media.currentTime = mediaSeek.target
+    if (!media.seeking) onSeeked()
+  }
   function onSeeked() {
+    const media = video.value
+    if (!media || media.seeking || !canSave()) return
+    if (mediaSeek) {
+      // WebKit can finish an earlier seek or return to its previous position.
+      const missedTarget = Math.abs(media.currentTime - mediaSeek.target) > 0.05
+      if (mediaSeek.attempts === 0 || (mediaSeek.attempts === 1 && missedTarget)) {
+        submitMediaSeek(media)
+        return
+      }
+      if (missedTarget && state.value === 'paused') failedSeekBookmark = mediaSeek.target
+      mediaSeek = undefined
+    }
     onTime()
     if (restoringPosition) {
       restoringPosition = false
@@ -123,7 +147,7 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     }
   }
   function onEnded() {
-    if (state.value !== 'playing' && state.value !== 'paused') return
+    if (mediaSeek || (state.value !== 'playing' && state.value !== 'paused')) return
     time.value = duration.value
     sinceSave = 0
     send('finish')
@@ -137,7 +161,9 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
       const wait = backoffMs(retries.value); retries.value++
       retryTimer = window.setTimeout(() => {
         if (my !== loadToken || !video.value) return
-        if (duration.value > 0) pendingSeek = { sec: time.value }
+        if (duration.value > 0) pendingSeek = { sec: failedSeekBookmark ?? time.value }
+        mediaSeek = undefined
+        failedSeekBookmark = undefined
         restoringPosition = false
         send('retry')
         video.value.load()
@@ -154,6 +180,7 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     buffering.value = false
     if (v.ended || (state.value !== 'playing' && state.value !== 'paused')) return
     wantPlay = !v.paused
+    if (wantPlay) failedSeekBookmark = undefined
     send(v.paused ? 'pause' : 'play')
   }
 
@@ -165,6 +192,7 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
   }
   function play() {
     wantPlay = true
+    failedSeekBookmark = undefined
     if (state.value === 'ended') {
       time.value = 0
       savedPositionMs = 0
@@ -179,12 +207,17 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
   const toggle = () => (state.value === 'playing' ? pause() : play())
   function seek(s: number) {
     if (!canSave() || !duration.value) return
-    const target = Math.max(0, Math.min(duration.value - 0.01, s))
+    const endMargin = isDemo ? DEMO_END_SEEK_MARGIN : 0.01
+    const target = Math.max(0, Math.min(duration.value - endMargin, s))
+    failedSeekBookmark = undefined
     if (target === time.value) return
     restoringPosition = false
     manualSeek = true
     time.value = target
-    if (video.value && isDemo) video.value.currentTime = time.value
+    if (video.value && isDemo) {
+      mediaSeek = { target, attempts: 0 }
+      submitMediaSeek(video.value)
+    }
     if (state.value === 'ended') { send('play'); video.value?.play().catch(() => { /* ignore */ }) }
   }
   const seekBy = (d: number) => seek(time.value + d)
@@ -198,7 +231,8 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     if (!canSave() || restoringPosition || !Number.isFinite(duration.value) || duration.value <= 0 || !snap.d || snap.d === 'undefined') return
     const completed = state.value === 'ended'
     const media = video.value
-    const position = completed ? duration.value : media && !media.seeking ? media.currentTime : time.value
+    const position = completed ? duration.value
+      : mediaSeek?.target ?? failedSeekBookmark ?? (media && !media.seeking ? media.currentTime : time.value)
     if (!Number.isFinite(position)) return
     const positionMs = Math.round(position * 1000)
     if (!manualSeek && positionMs === savedPositionMs && completed === savedCompletion) return
@@ -218,7 +252,7 @@ export function usePlayer(dramaId: Ref<string>, episode: Ref<number>, opts: { st
     if (state.value === 'ended') wantPlay = false
     retries.value = 0
     if (state.value === 'resolving' || !duration.value) load(pendingSeek.sec, pendingSeek.frac)
-    else load(video.value?.currentTime ?? time.value)
+    else load(mediaSeek?.target ?? failedSeekBookmark ?? video.value?.currentTime ?? time.value)
   })
   watch(() => settings.speed, (v) => { if (video.value) video.value.playbackRate = v })
   watch(() => settings.volume, (v) => { if (video.value) video.value.volume = v / 100 })

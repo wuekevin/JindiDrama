@@ -1251,3 +1251,10 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 同一生产构建的 69 个文件摘要在两套环境逐项一致。Chromium 410 项通过。WebKit 410 项通过，其中 1 项重试通过。前端类型检查、Vitest 125 项、Go 全量测试与 vet 通过。
 - Windows x64 生产目标交叉编译通过。Apple Silicon 独立测试归档通过启动、正常退出、SQLite 完整性及回滚。双平台打包记录仍为 .64，当前源码的 Windows、Intel Mac 和 GitHub 托管验收待完成。
 - WebKit 暂停后连续两次快进至片尾仍有时序问题。全量用例首次失败后重试通过，独立复跑 8 次中有 2 次停在 22 秒。此问题继续保留为上线验收项。 主工作区的验收日志位于 `build/bin/qa-webkit-regression/`。[BMad](../_bmad-output/plan-e03-webkit-search-and-licensed-regression.md)
+
+## E04 真实演示视频连续快进及书签（2026-11-28）
+
+- 原 WebKit 事件追踪确认两次按键均送达。视频轨未覆盖媒体报告时长的最后十几毫秒，WebKit 会退回 22 秒。只缩短片尾目标仍出现定位重叠时的回退。演示视频手动定位保留 40 毫秒的末尾余量。前一次定位结束后发送最新目标，目标未达到时最多重试一次。暂停时重试耗尽仍保留所选书签，媒体界面回到实际位置。恢复书签与手动定位使用相同片尾余量。
+- 原真实视频流程在最终 WebKit 连续通过 32 次，均核对媒体已完成定位、有当前帧数据及重新打开后的时间。单测覆盖重叠定位、一次回退、暂停及 99% 书签。Apple Silicon 原生从第 80 集暂停的 12 秒连按两次右键，正常退出后 SQLite 保存 23960/24000 毫秒和 99%，完整性为 ok。
+- 同一生产构建 Chromium 410 项一次通过，WebKit 410 项一次通过。Vitest 128 项、前端构建与类型检查、Go 全量和 vet 通过。Windows x64 交叉编译通过。生产依赖及 Apple Silicon、Windows x64 测试二进制扫描未报告已知漏洞。
+- 本轮为源码与 Apple Silicon 本机行为验收。最近双平台打包仍为 .64，当前源码的 Windows 和 Intel Mac 原生、托管打包、正式签名及授权片源联调待完成。 主工作区日志位于 `build/bin/qa-demo-seek/`。[BMad](../_bmad-output/plan-e04-demo-seek-tail.md)

@@ -70,10 +70,16 @@ test('quick switches and unavailable episodes preserve the real playback bookmar
   await expect(state).toHaveAttribute('data-state', 'paused')
   await state.press('ArrowRight')
   await state.press('ArrowRight')
-  await expect.poll(() => t(page)).toBeGreaterThan(durationSec - 0.05)
+  const settledTime = () => page.getByTestId('video').evaluate((media: HTMLVideoElement) =>
+    !media.seeking && media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA ? media.currentTime : 0,
+  )
+  await expect.poll(settledTime).toBeGreaterThan(durationSec - 0.05)
   await expect(state).toHaveAttribute('data-state', 'paused')
   await page.getByTestId('player-back').click()
   await expect.poll(saved).toMatchObject({ episode: 80, percent: 99, durationSec })
+  await page.goto('/#/watch/d2/80?paused')
+  await expect(state).toHaveAttribute('data-state', 'paused')
+  await expect.poll(settledTime).toBeGreaterThan(durationSec - 0.05)
 })
 
 test('opens the second season directly and resumes its real video from a saved position', async ({ page }) => {
@@ -227,9 +233,14 @@ test.describe('P1 真实演示媒体播放', () => {
   })
   test('seek by keys / click and playbackRate follows speed menu', async ({ page }) => {
     await page.goto('/#/watch/d1/7?paused'); await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'paused', { timeout: 10000 })
-    await page.getByTestId('player').focus(); await page.keyboard.press('ArrowRight'); expect(await t(page)).toBeGreaterThan(9)
-    await page.keyboard.press('ArrowLeft'); expect(await t(page)).toBeLessThan(1)
-    const box = (await page.getByTestId('seek').boundingBox())!; await page.mouse.click(box.x + box.width * 0.5, box.y + 2); expect(Math.abs((await t(page)) - 12)).toBeLessThan(1.5)
+    await page.getByTestId('player').focus()
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => t(page)).toBeGreaterThan(9)
+    await page.keyboard.press('ArrowLeft')
+    await expect.poll(() => t(page)).toBeLessThan(1)
+    const box = (await page.getByTestId('seek').boundingBox())!
+    await page.mouse.click(box.x + box.width * 0.5, box.y + 2)
+    await expect.poll(async () => Math.abs(await t(page) - 12)).toBeLessThan(1.5)
     await page.getByTestId('speed').click(); await page.getByTestId('speed-2').click(); expect(await page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).playbackRate)).toBe(2)
   })
   test('screenshot shortcut saves a PNG of the decoded video frame', async ({ page }, testInfo) => {
@@ -259,7 +270,11 @@ test.describe('P1 真实演示媒体播放', () => {
   })
   test('resume: leaving saves exact position, re-entering restores it', async ({ page }) => {
     await page.goto('/#/watch/d2/5?paused'); await expect(page.getByTestId('player')).toHaveAttribute('data-state', 'paused', { timeout: 10000 })
-    await page.getByTestId('player').focus(); await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight'); const saved = await t(page); expect(saved).toBeGreaterThan(19)
+    await page.getByTestId('player').focus()
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.press('ArrowRight')
+    await expect.poll(() => t(page)).toBeGreaterThan(19)
+    const saved = await t(page)
     await page.getByTestId('player-back').click(); await expect(page).toHaveURL(/#\/drama\/d2/)
     await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('jindi.library.v1')!).history.find((x: any) => x.dramaId === 'd2').episode)).toBe(5)
     const h = await page.evaluate(() => JSON.parse(localStorage.getItem('jindi.library.v1')!).history.find((x: any) => x.dramaId === 'd2')); expect(Math.abs(h.positionSec - saved)).toBeLessThan(0.5)
