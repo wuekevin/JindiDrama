@@ -2,10 +2,11 @@
 
 ## 当前发行候选
 
-截至 2026-11-28，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261128.63`，打包源提交为 `592493a9de15d74430c3c05c08559bde33a76cf8`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
+截至 2026-11-28，最新完成双平台打包的本地测试候选为 `v0.1.0-smoke.20261128.64`，打包源提交为 `bc397d67fbd7b30a25a62c1f9137218cd2d97ce0`。已记录的 GitHub 测试候选为 `.52`，该版本的 Windows 与 macOS 归档已在本地复验。下方记录按对应版本和提交保留验收证据。
 
 | 项目 | 当前状态 | 完成条件 |
 |---|---|---|
+| .64 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 原生启动、回滚和 .63 设置读回复验通过 | 主工作区 `build/bin/smoke-20261128.64/` |
 | .63 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | 主工作区 `build/bin/smoke-20261128.63/` |
 | .62 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261128.62/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261128.62/macos/SHA256SUMS.txt) |
 | .61 本地打包 | 两平台共 13 项 SHA-256，Apple Silicon 实际窗口、退出和活动 WAL 回滚通过 | [Windows 清单](../build/bin/smoke-20261127.61/windows/SHA256SUMS.txt) · [macOS 清单](../build/bin/smoke-20261127.61/macos/SHA256SUMS.txt) |
@@ -1234,3 +1235,11 @@ GitHub 只读查询确认 Release、签名环境和仓库级 Actions secrets 均
 - 测试连接和保存共用规范化片源地址的 Retry-After 冷却。其他地址可单独验证，当前已启用的片源沿用目录请求的冷却。限流时显示「苹果 CMS 请求过于频繁，请稍后重试」，保留输入和已保存地址。桌面测试绑定缺失时显示失败。
 - 受控 Go 测试复现原版同地址发出两次请求。Go 全量与 vet、App/Provider 竞态、Windows amd64 测试交叉编译、前端类型检查与构建、Vitest 125 项、Chromium 设置 46 项、WebKit 设置 5 项通过。
 - Apple Silicon 实际桌面桥使用合成 CMS 传输，测试返回 429 后立刻保存没有再次访问该源。冷却后保存成功，SQLite 回读为规范化后的新地址，正常退出和完整性通过。本次源码晚于 .63，最新跨平台成品和实网授权片源待验收。测试证据位于主工作区 `build/bin/qa-cms-settings-cooldown/`。[BMad](../_bmad-output/plan-e12-cms-settings-cooldown.md)
+
+## E13 .64 累计发行候选成品与跨版本资料验收（2026-11-28）
+
+- 从独立发行提交 `bc397d67fbd7b30a25a62c1f9137218cd2d97ce0` 构建 `v0.1.0-smoke.20261128.64`，包含最近的分类并发与限流提示、片源测试与保存限流修复。Windows x64 及 macOS 的 arm64、x86_64 都内嵌相同的 69 个前端文件和 5 个目录，Chromium 预览响应同样逐项匹配。NSIS 安装器共 7 项，x64 主程序和便携版逐字节相同，安装和卸载引导程序为 x86。两种 macOS 切片最低系统版本为 13.0。
+- 从最终目录复核 Windows 7 项和 macOS 6 项 SHA-256。Windows 安装器 22.58 MiB，便携版 32.46 MiB，macOS Universal ZIP 40.97 MiB。Apple Silicon 从该 ZIP 启动、退出并验证活动 WAL 回滚。随后从同一归档打开 .63 的独立资料副本，预发布选择仍在。真实设置页拒绝 HTTP 回环片源，新资料库完整性通过，原 .63 数据库及 .64 ZIP 摘要均未改变。
+- Chromium 全量 409 项、Vitest 125 项、WebKit 分类及设置专项 8 项、Go 全量与 vet、App/CMS/更新竞态、Python 公证与冒烟 19 项、Node 交付 18 项通过。Go 生产源码及三种成品架构与 npm 依赖扫描均未报告已知漏洞。
+- WebKit 完整回归使用与 .64 成品一致的前端，最终 398 项通过、10 项失败、1 项重试后通过。其中 9 项在隔离目录按 WebKit 的缩放精度、按键、标签页及剪贴板操作调整脚本后通过。第 10 项改用键盘触发片库分集重试后也通过，鼠标路径的焦点恢复仍待核实。授权片库搜索进入播放的用例重试一次通过，但独立复跑再次捕获到 `ResizeObserver` 循环警告，警告根因待定位。完整 WebKit 验收仍待关闭。主工作区的测试日志位于 `build/bin/qa-release-source-64/`。
+- Windows 测试包未签名，macOS 使用独立应用标识和临时签名。GitHub 最近托管候选仍为 .52，仓库未配置自托管 runner，签名环境、仓库级 Actions secrets 和 Release 当前均为 0。Windows 与 Intel Mac 最新原生验收、正式签名公证、签名版在线升级及授权公网联调待完成。[GitHub .52](https://github.com/wuekevin/JindiDrama/actions/runs/45955369788) · [BMad](../_bmad-output/plan-e13-local-candidate64-packages.md)
