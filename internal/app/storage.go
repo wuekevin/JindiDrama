@@ -209,7 +209,14 @@ func withPrivateDatabaseSnapshot(kind outputStageKind, use func(*os.Root, string
 		result = errors.Join(result, stage.cleanup())
 	}()
 	scratch := filepath.Dir(stage.file.Name())
-	root, err := os.OpenRoot(scratch)
+	parent, err := os.OpenRoot(filepath.Dir(scratch))
+	if err != nil {
+		return err
+	}
+	defer parent.Close()
+	// On Windows, opening the child relative to its parent shares delete
+	// access with the handle that will remove the staging directory.
+	root, err := parent.OpenRoot(filepath.Base(scratch))
 	if err != nil {
 		return err
 	}

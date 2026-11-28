@@ -36,3 +36,8 @@ context: []
 ## Review Triage Log
 
 - medium，必须用修复后的 Windows 原生包验证 DACL。现有失败日志只证明 .67 在 WebView2 启动后回滚失败，交叉编译通过。复跑结果单独写入状态页。
+
+## Windows 备份恢复复验
+
+- 首轮全量 CI 还报告关闭数据库和活动 WAL 两种备份恢复失败。Windows 暂存目录的清理句柄持有 DELETE。顶层 Go `os.OpenRoot` 的 Windows 打开调用未共享 DELETE。使用父目录上的相对 `OpenRoot`，允许清理句柄共存。保留暂存标记、目录身份核对和清理顺序。
+- .67.1 在 Windows 安装版和便携版通过回滚、活动 WAL 与原库不变。Apple Silicon 和 Intel Mac 在同批通用包通过原生冒烟。备份恢复补丁通过 macOS 定向测试和 Windows x64 测试交叉编译，Windows 原生全量 CI 复验见状态记录。
