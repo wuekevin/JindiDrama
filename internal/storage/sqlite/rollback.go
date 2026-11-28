@@ -113,28 +113,15 @@ func openRollbackWorkspace() (*os.Root, error) {
 
 func openRollbackStage(parent *os.Root) (*os.Root, error) {
 	name := ".jindi-rollback-" + rand.Text()
-	if err := parent.Mkdir(name, 0o700); err != nil {
-		return nil, err
-	}
-	stage, err := parent.OpenRoot(name)
+	stage, err := createRollbackStage(parent, name)
 	if err != nil {
 		return nil, err
 	}
-	if err := protectRollbackStage(stage); err != nil {
+	if err := checkEmptyRollbackStage(stage); err != nil {
 		cleanRollbackStage(stage, "")
 		return nil, err
 	}
 	return stage, nil
-}
-
-func protectRollbackStage(stage *os.Root) error {
-	if err := checkEmptyRollbackStage(stage); err != nil {
-		return err
-	}
-	if err := fileprivacy.ProtectDirectory(stage); err != nil {
-		return fmt.Errorf("无法保护回滚暂存目录: %w", err)
-	}
-	return checkEmptyRollbackStage(stage)
 }
 
 func copyRollbackOutput(work, stage *os.Root, name string) error {

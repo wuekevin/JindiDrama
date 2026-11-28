@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"crypto/rand"
 	"errors"
 	"io"
@@ -54,7 +53,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if kind == privateBackupOutputStage {
 		stagingAccess |= windows.READ_CONTROL
 	}
-	dir, err := createUpdateObject(dest, dirName, stagingAccess, updateFileShares, windows.FILE_DIRECTORY_FILE, directoryDescriptor)
+	dir, err := fileprivacy.CreateWindowsObject(dest, dirName, stagingAccess, updateFileShares, windows.FILE_DIRECTORY_FILE, directoryDescriptor)
 	if err != nil {
 		_ = windows.CloseHandle(dest)
 		return nil, err
@@ -73,7 +72,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 	if kind == privateBackupOutputStage {
 		access |= windows.GENERIC_READ
 	}
-	handle, err := createUpdateObject(dir, name, access, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
+	handle, err := fileprivacy.CreateWindowsObject(dir, name, access, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, fileDescriptor)
 	if err != nil {
 		return nil, outputStageSetupError(kind, err, closeStageDirectory())
 	}
@@ -133,7 +132,7 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 				if !filepath.IsLocal(name) {
 					return windows.ERROR_INVALID_NAME
 				}
-				handle, err := createUpdateObject(dest, name, windows.GENERIC_WRITE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, nil)
+				handle, err := fileprivacy.CreateWindowsObject(dest, name, windows.GENERIC_WRITE, windows.FILE_SHARE_READ, windows.FILE_NON_DIRECTORY_FILE, nil)
 				if err != nil {
 					return err
 				}
@@ -146,43 +145,11 @@ func createOutputStage(parent, prefix string, kind outputStageKind) (*stagedOutp
 var errPrivateBackupACL = errors.New("无法为数据库备份设置私有权限")
 
 func verifyPrivateBackupACL(handle windows.Handle, expected *windows.SECURITY_DESCRIPTOR) error {
-	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return err
-	}
-	control, _, err := descriptor.Control()
-	if err != nil {
-		return err
-	}
-	if control&windows.SE_DACL_PROTECTED == 0 {
+	err := fileprivacy.VerifyWindowsDACL(handle, expected)
+	if errors.Is(err, fileprivacy.ErrWindowsDACL) {
 		return errPrivateBackupACL
 	}
-	actual, _, err := descriptor.DACL()
-	if err != nil {
-		return err
-	}
-	requested, _, err := expected.DACL()
-	if err != nil {
-		return err
-	}
-	if actual == nil || requested == nil || actual.AceCount != requested.AceCount {
-		return errPrivateBackupACL
-	}
-	for i := range uint32(requested.AceCount) {
-		var found, wanted *windows.ACCESS_ALLOWED_ACE
-		if err := windows.GetAce(actual, i, &found); err != nil {
-			return err
-		}
-		if err := windows.GetAce(requested, i, &wanted); err != nil {
-			return err
-		}
-		if found.Header.AceSize != wanted.Header.AceSize ||
-			!bytes.Equal(unsafe.Slice((*byte)(unsafe.Pointer(found)), found.Header.AceSize),
-				unsafe.Slice((*byte)(unsafe.Pointer(wanted)), wanted.Header.AceSize)) {
-			return errPrivateBackupACL
-		}
-	}
-	return nil
+	return err
 }
 
 func openUpdateDirectory(path string, access uint32) (windows.Handle, error) {
@@ -191,23 +158,6 @@ func openUpdateDirectory(path string, access uint32) (windows.Handle, error) {
 		return 0, err
 	}
 	return windows.CreateFile(name, access, updateFileShares, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
-}
-
-func createUpdateObject(dir windows.Handle, name string, access, shares, options uint32, descriptor *windows.SECURITY_DESCRIPTOR) (windows.Handle, error) {
-	path, err := windows.NewNTUnicodeString(name)
-	if err != nil {
-		return 0, err
-	}
-	attrs := windows.OBJECT_ATTRIBUTES{
-		RootDirectory: dir, ObjectName: path, Attributes: windows.OBJ_CASE_INSENSITIVE,
-		SecurityDescriptor: descriptor,
-	}
-	attrs.Length = uint32(unsafe.Sizeof(attrs))
-	var handle windows.Handle
-	err = windows.NtCreateFile(&handle, access|windows.SYNCHRONIZE, &attrs, &windows.IO_STATUS_BLOCK{}, nil,
-		windows.FILE_ATTRIBUTE_NORMAL, shares, windows.FILE_CREATE,
-		options|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT, 0, 0)
-	return handle, updateWindowsError(err)
 }
 
 func updateWindowsError(err error) error {
@@ -246,7 +196,7 @@ func sameUpdateObject(left, right windows.Handle) bool {
 
 func markUpdateZone(dir, source windows.Handle, name string) error {
 	markName := name + ":Zone.Identifier"
-	mark, err := createUpdateObject(dir, markName, windows.GENERIC_WRITE|windows.FILE_READ_ATTRIBUTES, updateFileShares, windows.FILE_NON_DIRECTORY_FILE, nil)
+	mark, err := fileprivacy.CreateWindowsObject(dir, markName, windows.GENERIC_WRITE|windows.FILE_READ_ATTRIBUTES, updateFileShares, windows.FILE_NON_DIRECTORY_FILE, nil)
 	if err != nil {
 		return err
 	}

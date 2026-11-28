@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,18 +45,23 @@ func TestRollbackDoesNotInheritDestinationDACL(t *testing.T) {
 	if !hasWorldRead(probe) {
 		t.Fatal("fixture did not inherit Everyone access")
 	}
-	stage := filepath.Join(parent, "stage-probe")
-	if err := os.Mkdir(stage, 0o700); err != nil {
+	parentRoot, err := os.OpenRoot(parent)
+	if err != nil {
 		t.Fatal(err)
 	}
-	root, err := os.OpenRoot(stage)
+	defer parentRoot.Close()
+	root, err := fileprivacy.CreatePrivateDirectory(parentRoot, "stage-probe")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer root.Close()
-	if err := fileprivacy.ProtectDirectory(root); err != nil {
-		t.Fatal(err)
+	if existing, err := fileprivacy.CreatePrivateDirectory(parentRoot, "stage-probe"); !errors.Is(err, os.ErrExist) {
+		if existing != nil {
+			existing.Close()
+		}
+		t.Fatalf("creating a private stage must not reopen an existing directory: %v", err)
 	}
+	stage := filepath.Join(parent, "stage-probe")
 	protected, err := windows.GetNamedSecurityInfo(stage, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		t.Fatal(err)
